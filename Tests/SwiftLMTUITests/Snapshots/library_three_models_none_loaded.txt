@@ -1,0 +1,30 @@
+                                                                                                                        
+                                                                                                                        
+MODELS  3 · sort:name · / search · s sort                                         │ DETAILS                             
+                                                                                  │                                     
+ > ○ idle    phi-4-reasoning-plus                                         8.3 GB  │ status  idle                        
+    ○ idle    Qwen3-Coder-30B-A3B-Instruct-8bit-DWQ                       32.4 GB │ size    8.3 GB                      
+    ○ idle    Qwen3.5-4B-MLX-4bit                                          2.4 GB │                                     
+                                                                                  │ name                                
+                                                                                  │ phi-4-reasoning-plus                
+                                                                                  │                                     
+                                                                                  │ slug                                
+                                                                                  │ microsoft/phi-4                     
+                                                                                  │                                     
+                                                                                  │ l load    u unload                  
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                                                        
+                                                                                                                        

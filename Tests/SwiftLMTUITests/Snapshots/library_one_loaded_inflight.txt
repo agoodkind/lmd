@@ -1,0 +1,30 @@
+                                                                                                                        
+                                                                                                                        
+MODELS  2 · sort:name · / search · s sort                                         │ DETAILS                             
+                                                                                  │                                     
+ > ● busy    Qwen3-Coder-30B                                             32.4 GB  │ status  busy (3 in-flight)          
+    ○ idle    Qwen3.5-4B                                                   2.4 GB │ size    32.4 GB                     
+                                                                                  │                                     
+                                                                                  │ name                                
+                                                                                  │ Qwen3-Coder-30B                     
+                                                                                  │                                     
+                                                                                  │ slug                                
+                                                                                  │ mlx-community/Qwen3-Coder-30B       
+                                                                                  │                                     
+                                                                                  │ l load    u unload                  
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                  │                                     
+                                                                                                                        
+                                                                                                                        

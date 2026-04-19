@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    LaunchAgent for lmd-serve.
+    Copy to ~/Library/LaunchAgents/ and load with:
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.goodkind.lmd.serve.plist
+    Unload with:
+      launchctl bootout gui/$(id -u)/io.goodkind.lmd.serve
+    Restart to pick up a new binary:
+      launchctl kickstart -k gui/$(id -u)/io.goodkind.lmd.serve
+
+    lmd-serve is the single daemon that owns:
+      - OpenAI-compatible broker on LMD_HOST:LMD_PORT
+      - Sensor sampling (JSONL under LMD_DATA_DIR/memory.jsonl)
+      - Fan control (via smcfan), scaling by in-flight request count
+    This replaces the former swiftlmd + swiftmon pair.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.goodkind.lmd.serve</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{LMD_SERVE_PATH}}</string>
+    </array>
+
+    <!--
+        Mach service for first-party Swift clients (lmd CLI, lmd-tui).
+        launchd demand-launches the daemon when a client opens an
+        XPCSession to this name. The daemon stays up under KeepAlive.
+        Bumping this string is a breaking change; SwiftLMControl pins
+        the same constant in BrokerProtocol.swift.
+    -->
+    <key>MachServices</key>
+    <dict>
+        <key>io.goodkind.lmd.control</key>
+        <true/>
+    </dict>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>LMD_HOST</key>
+        <string>127.0.0.1</string>
+        <key>LMD_PORT</key>
+        <string>5400</string>
+        <key>LMD_BUDGET_GB</key>
+        <string>80</string>
+        <key>LMD_IDLE_MINUTES</key>
+        <string>15</string>
+        <key>LMD_EMBEDDING_IDLE_MINUTES</key>
+        <string>60</string>
+        <key>LMD_SAMPLE_INTERVAL</key>
+        <string>15</string>
+        <key>LMD_DATA_DIR</key>
+        <string>/Users/agoodkind/Library/Application Support/io.goodkind.lmd</string>
+        <key>LMD_SMCFAN_BINARY</key>
+        <string>/Users/agoodkind/Sites/macos-smc-fan/Products/smcfan</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!--
+        Diagnostics live in unified logging under subsystem io.goodkind.lmd.
+        Tail live:   log stream --subsystem io.goodkind.lmd --info
+        Dump 1h:     log show   --subsystem io.goodkind.lmd --last 1h
+        Route stdout/stderr to /dev/null so nothing escapes the os.Logger
+        pipeline. See plan/logging-migration.md Rule 9.
+    -->
+    <key>StandardOutPath</key>
+    <string>/dev/null</string>
+    <key>StandardErrorPath</key>
+    <string>/dev/null</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

@@ -1,0 +1,30 @@
+                                                                                                                        
+                                                                                                                        
+THERMAL & LOAD                                                                                                          
+  cpu temp      32.5°C                                                                                                  
+  gpu temp      30.0°C                                                                                                  
+  cpu use       2.0%                                                                                                    
+  gpu use       0.0%                                                                                                    
+                                                                                                                        
+MEMORY                                                                                                                  
+  ram used      24.0 GB                                                                                                 
+  pressure      80% free                                                                                                
+                                                                                                                        
+BATTERY                                                                                                                 
+  charge        92%           battery                                                                                   
+  flow          -5.2 W discharging                                                                                      
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

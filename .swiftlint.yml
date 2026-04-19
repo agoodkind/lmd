@@ -1,0 +1,31 @@
+# SwiftLint config, mirrors macos-smc-fan conventions.
+
+only_rules:
+  - explicit_acl
+  - unused_import
+  - discouraged_direct_init
+  - force_cast
+  - force_try
+  - force_unwrapping
+  - trailing_newline
+  - trailing_whitespace
+  - vertical_whitespace
+  - colon
+  - comma
+  - empty_count
+  - empty_string
+  - fatal_error_message
+  - legacy_constant
+  - legacy_constructor
+  - redundant_nil_coalescing
+  - redundant_void_return
+
+force_cast: error
+force_try: error
+force_unwrapping:
+  severity: warning
+
+excluded:
+  - .build
+  - Packages
+  - Tests/IntegrationTests/Fixtures

@@ -1,0 +1,12 @@
+.build/
+TUIQA/
+
+.swiftpm/
+xcuserdata/
+DerivedData/
+
+.DS_Store
+*.xcresult
+
+config/signing.env
+Products/

@@ -1,0 +1,61 @@
+# TUI QA coverage manifest.
+#
+# Every line below is a required test label that tuiqa must exercise.
+# The driver (Sources/lmd-qa/main.swift) records each label invoked via
+# assertContains / assertNotContains / assertSessionGone. After the run,
+# tuiqa cross-checks the recorded labels against this file. Any missing
+# required label fails the build.
+#
+# Format: one label per line. Comments start with #. Blank lines ignored.
+# Labels use `binary:area:scenario` convention.
+#
+# When you add a new TUI feature, you MUST add the corresponding label
+# here AND the assertion in lmd-qa/main.swift. This is how we enforce
+# coverage for all new development.
+
+# --- lmd-tui ---
+
+# Launch & chrome
+lmd-tui:launch:topbar
+lmd-tui:launch:tab-list
+lmd-tui:launch:crash-free
+
+# Tab switching (keyboard + mouse)
+lmd-tui:tab:switch-by-number
+lmd-tui:tab:switch-by-cycle
+lmd-tui:tab:full-cycle-back-to-first
+
+# Library tab
+lmd-tui:library:active
+lmd-tui:library:keyboard-nav
+lmd-tui:library:mouse-click
+lmd-tui:library:mouse-scroll
+lmd-tui:library:hover-scroll
+lmd-tui:library:search-filter
+lmd-tui:library:search-clear
+lmd-tui:library:sort-cycle
+
+# Bench tab
+lmd-tui:bench:active
+lmd-tui:bench:mouse-scroll
+
+# Events tab
+lmd-tui:events:active
+lmd-tui:events:mouse-scroll
+
+# Monitor tab
+lmd-tui:monitor:active
+lmd-tui:monitor:thermal-section
+lmd-tui:monitor:mouse-scroll
+
+# Resilience
+lmd-tui:resilience:unbound-key
+lmd-tui:resilience:rapid-keystrokes
+
+# Exit
+lmd-tui:quit:clean-exit
+
+# Retired binaries (swifttop, swiftlmd, swiftmon, swiftbench) are no
+# longer built. Their responsibilities moved to lmd-tui (monitor),
+# lmd-serve (broker + sampler + fans), and lmd-bench. New coverage
+# goes under the lmd-tui: prefix above.

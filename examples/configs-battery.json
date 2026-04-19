@@ -1,0 +1,66 @@
+{
+  "prompts_dir": "/Users/agoodkind/Sites/lm-review-stress-test/configs-battery/prompts",
+  "results_dir": "/Users/agoodkind/Sites/lm-review-stress-test/configs-battery/results",
+  "repo_path": "/Users/agoodkind/Sites/configs",
+  "run_label": "configs-battery",
+  "skip_existing": true,
+  "test_timeout_seconds": 900,
+  "parallelism_per_model": 1,
+  "models": [
+    {
+      "id": "mlx-community/Qwen3.5-4B-MLX-4bit",
+      "context_size": 131072,
+      "max_tokens_override": 8192
+    },
+    {
+      "id": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit",
+      "context_size": 262144,
+      "max_tokens_override": 8192
+    },
+    {
+      "id": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit",
+      "context_size": 262144,
+      "max_tokens_override": 8192
+    },
+    {
+      "id": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit-DWQ-lr9e8",
+      "context_size": 262144,
+      "max_tokens_override": 8192
+    },
+    {
+      "id": "mlx-community/Qwen3.6-35B-A3B-4bit",
+      "context_size": 262144,
+      "max_tokens_override": 8192
+    },
+    {
+      "id": "lmstudio-community/Phi-4-reasoning-plus-MLX-4bit",
+      "max_tokens_override": 4096
+    },
+    {
+      "id": "lmstudio-community/Qwen3-Coder-Next-MLX-6bit",
+      "context_size": 131072,
+      "max_tokens_override": 8192
+    },
+    {
+      "id": "nightmedia/Qwen3.5-122B-A10B-Text-mxfp4-mlx",
+      "context_size": 131072,
+      "max_tokens_override": 8192
+    }
+  ],
+  "variants": [
+    {
+      "name": "review",
+      "prompt_glob": "review-*.txt",
+      "max_input_bytes": 300000,
+      "max_tokens": 8192,
+      "thinking": false
+    },
+    {
+      "name": "chat",
+      "prompt_glob": "chat-*.txt",
+      "max_input_bytes": 300000,
+      "max_tokens": 8192,
+      "thinking": false
+    }
+  ]
+}

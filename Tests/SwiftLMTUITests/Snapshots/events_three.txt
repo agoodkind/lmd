@@ -1,0 +1,30 @@
+                                                                                                                        
+                                                                                                                        
+EVENTS  3 buffered · j/k scrolls · c clears                                                                             
+                                                                                                                        
+22:13:20  model.loaded            qwen3-30b                         port=5501                                           
+22:13:21  request.completed       qwen3-30b                         200 OK                                              
+22:13:22  model.evicted           qwen3-4b                          lru                                                 
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        

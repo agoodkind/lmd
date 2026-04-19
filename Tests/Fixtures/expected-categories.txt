@@ -1,0 +1,52 @@
+# Categories emitted by first-party code under subsystem io.goodkind.lmd.
+# One per Swift source file that emits log events. Categories are PascalCase
+# and one-to-one with the Swift type or module they belong to.
+#
+# The runtime smoke script (scripts/log-smoke.sh) asserts every category
+# below appears at least once during a full exercise of the system.
+#
+# Pure helpers (ANSI escape helpers, layout math, key/mouse byte parsers)
+# do not have loggers because they do not fail and have no mutations.
+#
+# Add new categories here in the same commit that introduces them.
+
+# Executables
+BenchRunner
+Broker
+Dispatcher
+DispatcherCLI
+MonitorSampler
+TUIHost
+
+# SwiftLMBackend
+SwiftLMServer
+
+# SwiftLMRuntime
+BenchConfig
+BenchOrchestrator
+BrokerBenchBackend
+FanCoordinator
+JSONEnforcement
+MemoryBudget
+ModelCatalog
+ModelRouter
+
+# SwiftLMMonitor
+BatterySensor
+MacmonClient
+MemoryPressureSensor
+ShellExec
+SwapSensor
+VMStatSensor
+
+# SwiftLMTUI
+Dashboard
+LibraryTab
+MonitorTab
+Screen
+TabRouter
+
+# swift-log transitive callers (Hummingbird, swift-nio, etc.) arrive
+# under whatever category they set themselves. They are out of our
+# control and not enumerated here. The runtime smoke only asserts
+# first-party category coverage.

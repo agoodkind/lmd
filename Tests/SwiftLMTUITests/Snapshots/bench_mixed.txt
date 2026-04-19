@@ -1,0 +1,30 @@
+                                                                                                                        
+                                                                                                                        
+BENCH  4/6 (3 passed · 1 failed · 1 running)                                                                            
+status  running                                                                                                         
+                                                                                                                        
+model      review        chat                                                                                           
+qwen3-30b  ✓             ▶                                                                                              
+qwen3-4b   ✓             ✓                                                                                              
+phi-4      ✗             ·                                                                                              
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
