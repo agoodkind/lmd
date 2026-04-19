@@ -1,203 +1,169 @@
-# APPLE-NATIVE LOGGING: NON-NEGOTIABLE
+# AGENTS.md
 
-Strict migration prompt for the swiftbench/lm-review-stress-test codebase. Paste into a fresh agent session, grant it write access to this repo, and it will execute to completion.
+Operating manual for any agent working in this repo. Optimized to stay correct as the code evolves: source-of-truth files own the lists, this file owns the rules.
 
 ---
 
-You are forbidden from completing this task without unified `os.Logger` instrumentation across every executable target. Read every rule. Violating ANY rule means the task is FAILED and must be redone from scratch.
+## 1. What this repo is
 
-## RULE 1: INITIALIZATION (mandatory, exactly once per target)
+`lmd` is a macOS-native LM Studio companion: an XPC broker (`lmd-serve`) registered as a per-user `LaunchAgent`, a CLI dispatcher (`lmd`), a TUI, a benchmark harness, and a TUI QA driver. All targets share a `Sources/AppLogger` module and a strict os.Logger discipline. Distribution is bare codesigned + notarized CLIs (no `.app`, no `.pkg` yet).
 
-Every executable target (`swiftbench`, `swiftlmd`, `swiftlmui`, `swifttop`, `swiftmon`, `lmd`) MUST call `AppLogger.bootstrap(subsystem:)` as its first executable statement in `main.swift`, BEFORE any other logic:
+The project is Apple-platform only (`Package.swift` `platforms: [.macOS(...)]`) and uses Apple frameworks first: XPC for IPC, `os.Logger` for logging, `OSSignposter` for performance, `launchd` for service lifecycle, `notarytool` for distribution.
 
-```swift
-import AppLogger
+## 2. Sources of truth (do NOT duplicate these)
 
-AppLogger.bootstrap(subsystem: "io.goodkind.lmd")
-// ...rest of main
-```
+When something needs to change, edit the source of truth, not this file:
 
-`AppLogger` lives in a shared Swift Package target at `Sources/AppLogger/AppLogger.swift`, declared in `Package.swift` and imported by ALL executables plus every library target. Single source of truth. Do NOT duplicate `Logger(subsystem:...)` initialization per target.
+| Concern | Authoritative file |
+|---|---|
+| Targets, target dependencies, Swift language modes | `Package.swift` |
+| Build / test / lint / install / sign / notarize commands | `Makefile` |
+| Local-machine signing config (gitignored) | `config/signing.env` (template: `config/signing.env.example`) |
+| LaunchAgent plist | `deploy/io.goodkind.lmd.serve.plist.example` |
+| CI build/test pipeline | `.github/workflows/ci.yml` |
+| CI release pipeline (sign + notarize + tag + release) | `.github/workflows/release.yml` |
+| Local sign / notarize scripts | `scripts/sign-binaries.sh`, `scripts/notarize.sh`, `scripts/notary-setup.sh` |
+| CI sign / notarize scripts | `scripts/ci-import-cert.sh`, `scripts/ci-sign.sh`, `scripts/ci-notarize.sh` |
+| Active design notes | `plan/*.md` |
+| User-facing overview | `README.md` |
 
-`bootstrap` is idempotent (safe to call twice) and MUST NOT throw or log errors to stderr. Apple's unified logging has no init step that can fail. If the compiler lets you write `throws` on `bootstrap`, you did it wrong.
+If you find yourself enumerating targets, categories, or filenames in prose, stop and link to the source of truth instead.
 
-## RULE 2: SUBSYSTEM AND CATEGORY DISCIPLINE
+## 3. Architecture invariants
 
-- **Subsystem**: `io.goodkind.lmd`. Exactly one, shared across all 6 targets. Do NOT use per-target subsystems. That fragments predicate filtering and defeats `log stream --subsystem io.goodkind.lmd`.
-- **Category**: the module / file's logical component. Exactly one `Logger` instance per source file, named at file top:
+- **One broker, many clients.** `lmd-serve` is a singleton `LaunchAgent` (`MachServices` entry `io.goodkind.lmd.control`); all other executables are short-lived clients that talk to it via `XPCSession` (see `Sources/SwiftLMControl/BrokerClient.swift`).
+- **Clients close their session.** Every client must `client.close()` (which calls `session.cancel(reason:)`) before the process exits. Skipping this trips an `_xpc_api_misuse` SIGTRAP at deinit.
+- **`XPCListener(service:)` only works under launchd.** `Sources/lmd-serve/XPCControl.swift` guards on `XPC_SERVICE_NAME` and throws a typed skip error when run outside launchd (tests, foreground `make run-serve`). Do not bypass that guard.
+- **No file logging anywhere.** Every plist's `StandardOutPath` and `StandardErrorPath` is `/dev/null`. Operators read with `log stream --subsystem io.goodkind.lmd`.
+- **Library targets are pure.** Long-lived state, sockets, file IO, and process spawning belong in `Sources/lmd-serve` (or its dedicated subsystems), never in a `library` target.
+
+## 4. Build and toolchain
+
+- Swift tools version is set in `Package.swift`. Match it locally (Xcode bundling that Swift release) and in CI runner choice.
+- CI runs on the GitHub macOS runner whose Xcode matches our `swift-tools-version`. If you bump tools-version, also bump `runs-on` in both workflows in the same commit. Mismatches surface as `sending` / strict-concurrency errors that pass locally and fail on CI.
+- `make build` = `swift build -c release`. `make debug` = unoptimized. `make test` runs the full suite.
+- `make check`-style aggregate target does not exist; the CI workflow defines the canonical battery (build + test + log-audit + smoke).
+
+## 5. Logging policy (NON-NEGOTIABLE)
+
+This is the single most violated rule, so it lives here in full.
+
+### 5.1 Initialization
+
+Every executable's `main.swift` calls `AppLogger.bootstrap(subsystem: "io.goodkind.lmd")` as its first executable statement, before anything else. `bootstrap` is idempotent and never throws.
+
+After `AppLogger.bootstrap`, every executable that depends on a swift-log-using package also calls `LoggingSystem.bootstrap` to install the `AppLogger` swift-log backend, so transitive `swift-log` events route to `os.Logger`.
+
+### 5.2 Subsystem and category
+
+- Subsystem is exactly `io.goodkind.lmd`. One subsystem for the whole repo. Do not invent per-target subsystems.
+- Every source file declares exactly one logger:
   ```swift
   private let log = AppLogger.logger(category: "ModelRouter")
   ```
-- **Category names**: PascalCase, one-to-one with the Swift type or module. Examples from this codebase: `ModelRouter`, `SwiftLMServer`, `FanCoordinator`, `BenchRunner`, `MonitorSampler`, `TUIPanelMonitor`. Do NOT use generic categories like `app`, `misc`, `default`.
-- **Helper API in `AppLogger`**:
-  ```swift
-  public static func logger(category: String) -> Logger
-  ```
-  Returns `Logger(subsystem: "io.goodkind.lmd", category: category)`. Do NOT construct `Logger(subsystem:...)` directly anywhere else in the codebase.
+- Category is PascalCase, one-to-one with the file's logical type/module. No generic categories (`app`, `misc`, `default`).
+- `Logger(subsystem:...)` is constructed only inside `Sources/AppLogger/`. Anywhere else is a violation caught by `make log-audit`.
 
-## RULE 3: PRIVACY ANNOTATIONS (mandatory, zero exceptions)
+### 5.3 Privacy annotations
 
-EVERY interpolated value in a log message MUST carry an explicit privacy annotation:
+Every interpolated value carries an explicit privacy annotation. Default-private is forbidden (renders `<private>` in release).
 
-```swift
-log.info("model.loaded name=\(modelName, privacy: .public) size_gb=\(sizeGB, privacy: .public)")
-log.info("proxy.request peer=\(peer, privacy: .private(mask: .hash))")
-```
+- `.public` for: model names, port numbers, file paths, durations, counts, enum values, error kinds, request IDs, event names.
+- `.private` for: prompt text, model outputs, anything user-proprietary.
+- `.private(mask: .hash)` for: stable correlation IDs derived from PII.
 
-- Default `.private` (Apple's default for unannotated values) is FORBIDDEN. It produces `<private>` in release builds and silently destroys debuggability.
-- Use `.public` for: model names, port numbers, file paths, event names, durations, counts, enum values, error kinds, request IDs.
-- Use `.private` for: user-entered prompt text, bench cell outputs, model responses, anything that could be a user's proprietary input.
-- Use `.private(mask: .hash)` for: stable correlation of PII across events without exposing the value.
+### 5.4 Levels
 
-## RULE 4: LEVEL DISCIPLINE
-
-Map events to `OSLogType` with these exact rules:
-
-| Apple level | When to use |
+| API | Use for |
 |---|---|
-| `.debug` | High-frequency inner-loop mutations: router in-flight ±1, EMA updates, sampled sensor values, per-token streaming updates. Discarded by default in release. |
-| `.info` | Normal operational events: state transitions worth remembering but not surfaced. |
-| `.default` (via `log.notice`) | Operator wants to see this during normal operation: request proxied, bench cell completed, model loaded. |
-| `.error` | Recoverable failure: specific operation failed, process continues. |
-| `.fault` | Invariant violated: reserved for "this should be impossible" paths. |
+| `log.debug` | High-frequency inner-loop events; discarded by default in release. |
+| `log.info` | Operational events worth remembering, not surfaced. |
+| `log.notice` | Operator-visible events: request proxied, model loaded, bench cell completed. |
+| `log.error` | Recoverable failures; process continues. |
+| `log.fault` | Invariant violated; "should be impossible" path. |
 
-Apple has no `.warn`. Do NOT invent one.
+Apple has no `.warn`. Do not gate calls behind `#if DEBUG`; use `sudo log config --subsystem io.goodkind.lmd --mode level:debug` at runtime instead.
 
-Do NOT gate log calls behind `#if DEBUG`. `os.Logger` already discards `.debug` in release at the handler level. Enable at runtime with `sudo log config --subsystem io.goodkind.lmd --mode level:debug persist:default`.
+### 5.5 Call site discipline
 
-## RULE 5: CALL SITES (strict scope: every state mutation)
+- Every `print`, `NSLog`, `debugPrint`, `dump`, `FileHandle.standardError.write` is replaced with the appropriate `log.<level>(...)` call. Sole exception: argv-CLI command output that the user explicitly asked for can write to `FileHandle.standardOutput`.
+- Every state mutation gets a log event. Inner loops at `.debug`, transitions at `.info` / `.notice`.
+- Event names are `<noun>.<verb>` dot notation: `model.loaded`, `router.request_accepted`, `xpc.session_closed`.
+- Use structured interpolation, never pre-concatenated strings or `String(format:)`.
 
-- Every `print(...)`, `NSLog(...)`, `debugPrint(...)`, `dump(...)`, and `FileHandle.standardError.write(...)` MUST be replaced with the appropriate `log.<level>(...)` call, EXCEPT:
-  - User-facing CLI output from `swiftbench` / `lmd` argv command results stays on stdout via `FileHandle.standardOutput.write(Data(...))`. Diagnostic output does NOT.
-- Every function that mutates state MUST emit at least one log event describing the mutation. This is strict. Inner-loop mutations get `.debug`, notable transitions get `.info` / `.notice`. The event exists the moment someone needs it at debug time.
-- Event names use `<noun>.<verb>` dot notation: `model.loaded`, `router.request_accepted`, `router.inflight_incremented`, `fan.state_changed`, `sample.captured`, `cell.completed`.
-- Use structured interpolation, never pre-formatted strings:
-  ```swift
-  log.info("model.loaded name=\(modelName, privacy: .public) size_gb=\(sizeGB, privacy: .public)")
-  ```
-  FORBIDDEN:
-  ```swift
-  log.info("\(String(describing: model))")              // opaque dump
-  log.info("model loaded: " + modelName)                // pre-concatenated
-  log.info(String(format: "model %@ loaded", modelName)) // NSLog-era formatting
-  ```
+### 5.6 Signposts
 
-## RULE 6: SIGNPOSTS (mandatory for long operations)
+Any code path that can exceed ~50ms wall time brackets itself with `OSSignposter` so Instruments and `xctrace record` can read it. Use a dedicated signposter for the `Performance` category. Do not measure-and-log with `CFAbsoluteTimeGetCurrent()` for things a signpost can express.
 
-Every code path that can exceed 50ms wall time MUST bracket itself with `OSSignposter`:
+### 5.7 Verification
 
-```swift
-private let signposter = OSSignposter(subsystem: "io.goodkind.lmd", category: "Performance")
+`make log-audit` greps Sources/ for forbidden patterns (`print(`, direct `Logger(subsystem:`, `import Logging` outside the bridge file). It must exit clean before any commit that touches Swift files.
 
-func loadModel(_ name: String) throws {
-    let state = signposter.beginInterval("model.load", id: .exclusive, "name=\(name)")
-    defer { signposter.endInterval("model.load", state) }
-    // ...
-}
-```
+## 6. Concurrency
 
-Mandatory signpost coverage for this codebase: model spawn, HTTP proxy request, bench cell execution, fan state transition, memory sample capture.
+`Package.swift` enables strict concurrency on every first-party target. Anything captured into a `Task.detached` or `@Sendable` closure must be `Sendable` or marked `nonisolated(unsafe)` with a justification comment. Older Swift point releases enforce this more strictly than newer ones, so a clean local build does not guarantee a clean CI build; rely on `.github/workflows/ci.yml` as ground truth.
 
-Instruments and `xcrun xctrace record` read signposts natively; Console.app filters by category `Performance`. Do NOT use `CFAbsoluteTimeGetCurrent()` to time-and-log anything that should be a signpost.
+## 7. Tests
 
-## RULE 7: THIRD-PARTY LOGGING (swift-log bridge)
+- All tests live under `Tests/`, named `<TargetName>Tests` to match the convention `Package.swift` declares.
+- Snapshot tests (TUI) regenerate goldens with `make snapshot-update`.
+- Integration tests that need a live broker check `LMD_XPC_USE_LAUNCHD_DAEMON=1` and skip otherwise. Do not change tests to spawn `lmd-serve` themselves; that path traps inside `XPCListener`.
+- The HTTP smoke test is a shell script, not an XCTest, and is invoked via `make smoke`.
 
-Hummingbird and other SPM deps use `swift-log` internally. Bridge swift-log to `os.Logger` so their output still lands in unified logging:
+## 8. Distribution
 
-```swift
-import Logging
-import OSLog
+Two parallel pipelines, one identity, one team:
 
-LoggingSystem.bootstrap { label in
-    AppLoggerSwiftLogBackend(category: label)
-}
-```
+- **Local**: `make dist` runs `make build` -> `scripts/sign-binaries.sh` -> `scripts/notarize.sh`. Reads identity, team, bundle prefix, and notary keychain profile from `config/signing.env`. The keychain profile is created once with `make notary-setup`.
+- **CI**: `.github/workflows/release.yml` runs on every push to `main`. It imports a single-identity `.p12` from secrets into a temp keychain, signs with `scripts/ci-sign.sh`, and notarizes with `scripts/ci-notarize.sh` using App Store Connect API key credentials (.p8 + key-id + issuer-id), then tags `YYYYMMDDHHmm-<hex-run>-<sha>` and creates a GitHub Release with the notarized zip attached.
 
-Where `AppLoggerSwiftLogBackend` is a `LogHandler` in `Sources/AppLogger/` that forwards every swift-log event to the matching `os.Logger`. swift-log labels become os.Logger categories verbatim.
+Bare CLI binaries cannot be `stapler staple`d. First-launch Gatekeeper checks hit the network. Wrap into a `.pkg` if you need offline-friendly distribution; that's an open future task.
 
-Do NOT fork Hummingbird. Do NOT add a file backend to swift-log. Do NOT leave swift-log emitting to stdout.
+### 8.1 GitHub Actions secrets
 
-## RULE 8: VERIFICATION
+The release pipeline requires these secrets on the repo. The names are referenced by the `env:` blocks in `.github/workflows/release.yml`:
 
-Add a Makefile target `log-audit` that greps every Swift source file and exits non-zero on any forbidden pattern:
+| Secret | Source |
+|---|---|
+| `APPLE_DEVELOPER_ID_P12_BASE64` | base64 of single-identity Developer ID Application .p12 |
+| `APPLE_DEVELOPER_ID_P12_PASSWORD` | import password for that .p12 |
+| `APPLE_CODE_SIGN_IDENTITY` | SHA1 of the identity to use (disambiguates duplicates) |
+| `APPLE_TEAM_ID` | 10-char team identifier |
+| `APPLE_API_KEY_P8_BASE64` | base64 of `AuthKey_<keyid>.p8` from App Store Connect |
+| `APPLE_API_KEY_ID` | 10-char key id |
+| `APPLE_API_ISSUER_ID` | issuer UUID |
 
-```makefile
-log-audit:
-	@set -e; \
-	echo "scanning for forbidden output calls..."; \
-	! grep -rn -E '(^|[^a-zA-Z_])(print|NSLog|debugPrint|dump)\(' Sources/ \
-	    --include='*.swift' \
-	    --exclude-dir=AppLogger \
-	  && echo "  output calls: OK"; \
-	echo "scanning for direct Logger construction outside AppLogger..."; \
-	! grep -rn 'Logger(subsystem:' Sources/ \
-	    --include='*.swift' \
-	    --exclude-dir=AppLogger \
-	  && echo "  Logger construction: OK"; \
-	echo "log-audit PASSED"
-```
+The .p12 must contain exactly one identity (full keychain exports run over the GitHub 48KB secret limit). Use `openssl pkcs12` with `-legacy` to extract a single identity.
 
-Run it. It MUST pass.
+## 9. Service lifecycle
 
-Additional runtime check. Capture `log stream` for 30s during a smoke flow touching every target, then assert:
+- `make install` copies binaries into `~/.local/bin`, renders the LaunchAgent plist into `~/Library/LaunchAgents`, and bootstraps it under the GUI session.
+- `make restart-serve` is the right command after a rebuild during development. It does `launchctl kickstart -k`, which picks up the new binary without a full bootout/bootstrap cycle.
+- `make uninstall` reverses install in the correct order (bootout, then remove plist, then remove binaries).
 
-- Subsystem `io.goodkind.lmd` produced at least one event from each of the 6 executables.
-- Every category in `Tests/Fixtures/expected-categories.txt` appears at least once.
-- No event has `<private>` in a field this rule set requires be `.public`.
+## 10. Conventions for new code
 
-## RULE 9: LAUNCHD PLIST HYGIENE
+- New executable target = new `.executableTarget` in `Package.swift` AND a corresponding entry in the `BINARIES` variable in `Makefile` AND the `DEFAULT_BINARIES` arrays in `scripts/sign-binaries.sh` and `scripts/notarize.sh` AND `scripts/ci-sign.sh` and `scripts/ci-notarize.sh`. These four lists must agree.
+- New library target = new `.target` in `Package.swift` and (if it needs them) a `.testTarget`. No other ceremony.
+- New file = `private let log = AppLogger.logger(category: "...")` at the top, before any other declarations.
+- New plist under `deploy/` = `StandardOutPath` and `StandardErrorPath` both set to `/dev/null`.
+- Cross-language scripts live as their own files with the appropriate extension (`.sh`, `.py`), invoked from Swift / Make / other shell. Don't inline scripts via heredoc.
 
-`deploy/com.goodkind.swiftlmd.plist.example` currently routes `StandardOutPath` / `StandardErrorPath` to files. Replace BOTH with `/dev/null`:
+## 11. Anti-patterns to reject on sight
 
-```xml
-<key>StandardOutPath</key>
-<string>/dev/null</string>
-<key>StandardErrorPath</key>
-<string>/dev/null</string>
-```
+- `Logger(subsystem: "io.goodkind.lmd", category: ...)` outside `Sources/AppLogger/`.
+- `print` / `NSLog` / `debugPrint` anywhere in `Sources/` outside `Sources/AppLogger/`.
+- A new subsystem string anywhere.
+- A `.warn` log call (does not exist in Apple's API).
+- File-based logging (`FileHandle` writing diagnostic output, `.log` file paths, plist `StandardOutPath` to a real path).
+- `swift build` invocations that do not go through `make build` / `make debug` / the workflows. The Make targets are the contract.
+- A cert SHA1 typed inline in a script. The Make target reads from `config/signing.env`; CI reads from secrets. Never both.
+- An XPC client that does not call `close()` (or `defer { client.close() }`) before its enclosing scope exits.
 
-Delete the corresponding `configs-battery/logs/swiftlmd.stdout.log` / `stderr.log` files and remove the `logs/` directory from any mkdir paths in the code. Operators read via `log stream --subsystem io.goodkind.lmd --info` exclusively.
+## 12. When in doubt
 
-Apply the same change to EVERY LaunchAgent / LaunchDaemon / XPCService plist in `deploy/`.
-
-## RULE 10: NO SHORTCUTS
-
-- Do NOT log to files. `os.Logger` owns persistence via the unified logging system. File mirroring is forbidden.
-- Do NOT redirect stdout/stderr of any target to a log file.
-- Do NOT use `Foundation.Logger`, `CocoaLumberjack`, `XCGLogger`, or any third-party logging package. Pure `import OSLog` + `os.Logger` only (plus the swift-log bridge for transitive deps).
-- Do NOT construct `Logger` instances outside `AppLogger`.
-- Do NOT gate logging behind `#if DEBUG`. Use `log config` at runtime.
-- Do NOT invent custom privacy levels.
-- Do NOT use `print` "just for this one test". Tests use `log.debug(...)` like production.
-- The existing custom `class Logger` in `swiftmon/main.swift` and `swiftbench/main.swift` MUST be deleted. Rename any shadowing occurrences before migration.
-
-## RULE 11: DATA ARTIFACTS ARE NOT LOGS
-
-The following files are DATA ARTIFACTS (user-owned state), not logs, and are NOT subject to this policy:
-
-- `configs-battery/memory.jsonl` is a deliberate sampled trace consumed by `analyze-configs.py`. Keep as-is.
-- `configs-battery/results/<model>/<test>.json` holds bench result records. Keep as-is.
-- `REPORT.md` is a generated bench summary. Keep as-is.
-
-Do NOT route these through `os.Logger`. Do NOT rename. Do NOT delete. A separate "Apple Data Artifacts" policy governs them.
-
-## DELIVERABLE CHECKLIST
-
-- [ ] `Sources/AppLogger/AppLogger.swift` exists with `bootstrap(subsystem:)` and `logger(category:)`
-- [ ] `Sources/AppLogger/SwiftLogBridge.swift` bridges swift-log to os.Logger
-- [ ] All 6 target `main.swift` files call `AppLogger.bootstrap(subsystem: "io.goodkind.lmd")` first
-- [ ] `LoggingSystem.bootstrap` is called after `AppLogger.bootstrap` in every target
-- [ ] Every source file declares exactly one `private let log = AppLogger.logger(category: ...)`
-- [ ] `Logger(subsystem:` does NOT appear outside `AppLogger.swift`
-- [ ] Every interpolated value has an explicit `privacy:` annotation
-- [ ] `print`, `NSLog`, `debugPrint`, `dump`, `FileHandle.standardError.write` removed everywhere except user-CLI stdout paths
-- [ ] Existing custom `class Logger` in swiftmon and swiftbench is deleted
-- [ ] Every state-mutating function emits at least one `log.<level>(...)` event with `<noun>.<verb>` name
-- [ ] Model spawn, proxy request, bench cell, fan transition, memory sample all wrapped in `OSSignposter`
-- [ ] All plists under `deploy/` route Standard{Out,Error}Path to `/dev/null`
-- [ ] `make log-audit` passes with zero violations
-- [ ] `log stream --subsystem io.goodkind.lmd --info` shows events from all 6 targets during a smoke pass
-- [ ] `Tests/Fixtures/expected-categories.txt` exists and lists every category the smoke pass produces
-- [ ] `memory.jsonl`, bench `results/*.json`, `REPORT.md` remain untouched
-
-Failing any checkbox = task incomplete. Redo.
+1. Read `Package.swift` for the target graph.
+2. Read `Makefile` for the canonical commands.
+3. Read `.github/workflows/*.yml` for the canonical CI commands.
+4. Read `plan/*.md` for the latest design intent on whatever subsystem you're touching.
+5. Re-read this file and find the rule you were about to violate.
