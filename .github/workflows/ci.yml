@@ -20,7 +20,7 @@ jobs:
       # Keep SwiftPM quiet and deterministic.
       SWIFTPM_ENABLE_COMMAND_PLUGINS: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Show toolchain
         run: |
@@ -28,7 +28,7 @@ jobs:
           xcodebuild -version || true
 
       - name: Cache SwiftPM build + deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .build
