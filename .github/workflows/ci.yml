@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build-and-test:
     name: build + test (macOS)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     env:
       # Keep SwiftPM quiet and deterministic.
