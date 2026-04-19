@@ -4,7 +4,7 @@ name: CI
 # on the same branch so a push-heavy PR stops racing with itself.
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
 
 concurrency:
