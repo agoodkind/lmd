@@ -46,7 +46,8 @@ jobs:
       - name: Log audit
         run: make log-audit
 
-      # smoke-lmd-serve.sh spawns lmd-serve and hits a few endpoints.
-      # Runs on top of the release build above.
-      - name: lmd-serve smoke
-        run: make smoke
+      # `make smoke` is a developer convenience that spawns lmd-serve
+      # outside launchd and pokes its HTTP endpoints. It is intentionally
+      # not run in CI: the broker is a LaunchAgent in production and the
+      # XPC listener is guarded against non-launchd contexts, so a CI
+      # smoke without launchd registration is low-signal.
