@@ -80,6 +80,19 @@ public enum AppLogger {
     os.Logger(subsystem: subsystem, category: category)
   }
 
+  /// Category string aligned with Go `gklog` style `component` + `subcomponent` attributes.
+  ///
+  /// Example: `category(component: "Broker", subcomponent: "client")` → `"Broker.client"`.
+  /// Use when you want structured parity with JSON logs that carry both fields.
+  public static func category(component: String, subcomponent: String) -> String {
+    "\(component).\(subcomponent)"
+  }
+
+  /// `os.Logger` whose category is ``category(component:subcomponent:)``.
+  public static func logger(component: String, subcomponent: String) -> os.Logger {
+    logger(category: category(component: component, subcomponent: subcomponent))
+  }
+
   /// Obtain an `OSSignposter` for performance intervals. All signposts
   /// land under the shared subsystem with a single `Performance`
   /// category so Instruments / `xctrace` filtering stays simple.
