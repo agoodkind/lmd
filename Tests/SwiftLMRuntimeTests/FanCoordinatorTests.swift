@@ -2,9 +2,6 @@
 //  FanCoordinatorTests.swift
 //  SwiftLMRuntimeTests
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
-//
 
 import XCTest
 @testable import SwiftLMRuntime
@@ -21,7 +18,6 @@ final class FanCurveTests: XCTestCase {
   }
 
   func testMidCurveInterpolates() {
-    // Between 50C (2500) and 65C (3500), at 57.5C expect ~3000.
     let rpm = rpmForTemp(57.5, curve: FanCoordinatorConfig.defaultCurve)
     XCTAssertEqual(rpm, 3000, accuracy: 50)
   }
@@ -65,53 +61,145 @@ final class ActivityFloorTests: XCTestCase {
   }
 }
 
-final class FanCoordinatorStateTests: XCTestCase {
-  /// Drop-in shell stub that records every call for verification.
-  final class RecordingShell {
-    var calls: [(String, [String])] = []
-    func run(_ path: String, _ args: [String]) -> Int32 {
-      calls.append((path, args))
-      return 0
-    }
+// MARK: - Mock SMC driver
+
+final class MockFanSMC: FanSMCControlling, @unchecked Sendable {
+  var launchCalls: [(String, [String])] = []
+  var lastAsyncRpm: [Int: Int] = [:]
+  let maxByFan: [Int: Int]
+  var failMaxRead: Bool
+
+  init(maxByFan: [Int: Int] = [0: 8000, 1: 8000], failMaxRead: Bool = false) {
+    self.maxByFan = maxByFan
+    self.failMaxRead = failMaxRead
   }
 
-  private func makeCoordinator() -> (FanCoordinator, RecordingShell) {
-    let rec = RecordingShell()
+  func runLaunchProcess(_ path: String, _ args: [String]) -> Int32 {
+    launchCalls.append((path, args))
+    return 0
+  }
+
+  func smcOpenIfNeededSync() throws {}
+
+  func readFanMaxRpmSync(fanIndex: Int) throws -> Int {
+    if failMaxRead {
+      throw NSError(domain: "test", code: 1)
+    }
+    return maxByFan[fanIndex] ?? 8000
+  }
+
+  func setRpmSync(fanIndex: Int, rpm: Int) throws {}
+
+  func setAutoSync(fanIndex: Int) throws {}
+
+  func closeSMCConnectionSync() throws {}
+
+  func setRpm(fanIndex: Int, rpm: Int) async throws {
+    lastAsyncRpm[fanIndex] = rpm
+  }
+
+  func setAuto(fanIndex: Int) async throws {}
+}
+
+final class FanCoordinatorStateTests: XCTestCase {
+  private func makeCoordinator(
+    fanIndices: [Int] = [0],
+    minSecondsBetweenChanges: TimeInterval = 0
+  ) -> (FanCoordinator, MockFanSMC) {
+    let rec = MockFanSMC()
     let cfg = FanCoordinatorConfig(
-      smcfanBinary: "/usr/local/bin/smcfan",
-      minSecondsBetweenChanges: 0  // unlimit so tests can poke state in sequence
+      fanIndices: fanIndices,
+      minSecondsBetweenChanges: minSecondsBetweenChanges,
+      activeRampDuration: 10,
+      coolingRampDownSeconds: 60,
+      activeFullBlastTempC: 100,
+      rampMinSecondsBetweenChanges: 0
     )
-    let coord = FanCoordinator(config: cfg) { path, args in rec.run(path, args) }
+    let coord = FanCoordinator(config: cfg, smc: rec)
     return (coord, rec)
   }
 
-  func testIdleStaysIdleWithoutLLM() {
+  func testIdleStaysIdleWithoutLLM() async throws {
     let (coord, _) = makeCoordinator()
-    coord.apply(.init(cpuTempC: 40, gpuTempC: 42, llmLoaded: false))
+    try await coord.apply(.init(cpuTempC: 40, gpuTempC: 42, llmLoaded: false))
     XCTAssertEqual(coord.state, .idle)
   }
 
-  func testIdleTransitionsToActiveWhenLLMLoads() {
+  func testIdleTransitionsToActiveWhenLLMLoaded() async throws {
     let (coord, _) = makeCoordinator()
-    // Need to saturate the smoothed gpu% above 20 first; with alpha 0.20
-    // a single sample at 100% lands at 20 so it triggers.
-    coord.apply(.init(cpuTempC: 60, gpuTempC: 60,
-                       cpuPercent: 50, gpuPercent: 100,
-                       pressureFreePct: 50, llmLoaded: true))
+    try await coord.apply(.init(cpuTempC: 60, gpuTempC: 60, llmLoaded: true))
     XCTAssertEqual(coord.state, .active)
   }
 
-  func testActiveToCoolingWhenGPUQuiets() {
+  func testActiveToCoolingWhenLLMUnloaded() async throws {
     let (coord, _) = makeCoordinator()
-    for _ in 0..<3 {
-      coord.apply(.init(cpuTempC: 80, gpuTempC: 85,
-                         cpuPercent: 30, gpuPercent: 90,
-                         pressureFreePct: 50, llmLoaded: true))
-    }
+    try await coord.apply(.init(cpuTempC: 80, gpuTempC: 85,
+                               cpuPercent: 30, gpuPercent: 90,
+                               pressureFreePct: 50, llmLoaded: true))
     XCTAssertEqual(coord.state, .active)
-    coord.apply(.init(cpuTempC: 80, gpuTempC: 85,
-                       cpuPercent: 5, gpuPercent: 0,
-                       pressureFreePct: 50, llmLoaded: false))
+    try await coord.apply(.init(cpuTempC: 80, gpuTempC: 85,
+                                cpuPercent: 5, gpuPercent: 0,
+                                pressureFreePct: 50, llmLoaded: false))
     XCTAssertEqual(coord.state, .cooling)
+  }
+
+  func testActiveRampInterpolatesTowardSMCMax() async throws {
+    let mock = MockFanSMC(maxByFan: [0: 8000])
+    let cfg = FanCoordinatorConfig(
+      fanIndices: [0],
+      minSecondsBetweenChanges: 0,
+      activeRampDuration: 10,
+      activeFullBlastTempC: 100,
+      rampMinSecondsBetweenChanges: 0
+    )
+    let coord = FanCoordinator(config: cfg, smc: mock)
+    coord.takeOver()
+    let t0 = Date()
+    try await coord.apply(
+      FanInputs(cpuTempC: 50, gpuTempC: 50, llmLoaded: true),
+      now: t0
+    )
+    let tMid = t0.addingTimeInterval(5)
+    try await coord.apply(
+      FanInputs(cpuTempC: 50, gpuTempC: 50, llmLoaded: true),
+      now: tMid
+    )
+    XCTAssertEqual(mock.lastAsyncRpm[0], 6000)
+  }
+
+  func testActiveFullBlastAtSmoothedTemp() async throws {
+    let mock = MockFanSMC(maxByFan: [0: 8000])
+    let cfg = FanCoordinatorConfig(
+      fanIndices: [0],
+      minSecondsBetweenChanges: 0,
+      loadEmaAlpha: 1.0,
+      tempEmaAlpha: 1.0,
+      activeRampDuration: 0.001,
+      activeFullBlastTempC: 50,
+      rampMinSecondsBetweenChanges: 0
+    )
+    let coord = FanCoordinator(config: cfg, smc: mock)
+    try await coord.apply(
+      FanInputs(cpuTempC: 95, gpuTempC: 95, llmLoaded: true),
+      now: Date()
+    )
+    XCTAssertEqual(mock.lastAsyncRpm[0], 10_000)
+  }
+
+  func testFallbackMaxWhenTakeOverCannotReadMax() async throws {
+    let mock = MockFanSMC(failMaxRead: true)
+    let cfg = FanCoordinatorConfig(fanIndices: [0], fallbackMaxRpm: 7777)
+    let coord = FanCoordinator(config: cfg, smc: mock)
+    coord.takeOver()
+    let base = Date()
+    try await coord.apply(
+      FanInputs(cpuTempC: 50, gpuTempC: 50, llmLoaded: true),
+      now: base
+    )
+    try await coord.apply(
+      FanInputs(cpuTempC: 50, gpuTempC: 50, llmLoaded: true),
+      now: base.addingTimeInterval(20)
+    )
+    XCTAssertEqual(mock.lastAsyncRpm[0], 7777)
   }
 }

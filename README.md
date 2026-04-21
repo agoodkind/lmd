@@ -7,7 +7,7 @@ A single-binary LM Studio replacement for Apple Silicon.
 - **broker** on `127.0.0.1:5400` exposes an OpenAI-compatible HTTP API over any MLX model on disk
 - **JIT model routing** spawns a dedicated [SwiftLM](https://github.com/SharpAI/SwiftLM) child per model, allocates ports from a pool, shuts them down under memory pressure
 - **sensor sampling** to `memory.jsonl` (was `swiftmon`) for historical thermal/battery/power data
-- **fan control** via [`smcfan`](https://github.com/agoodkind/macos-smc-fan) scaled by in-flight request count so fans ramp up during inference and idle out quickly after
+- **fan control** via the [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) privileged helper (XPC), scaled by in-flight request count so fans ramp gradually during inference and cool down slowly after
 - **multi-tab TUI** (monitor, library, bench, events) rendered in raw terminal mode
 - **benchmark orchestrator** for long-running model comparison jobs
 
@@ -54,7 +54,6 @@ Defaults live in `deploy/io.goodkind.lmd.serve.plist.example`. All `lmd-serve` e
 | `LMD_EMBEDDING_IDLE_MINUTES` | `60` | Idle timeout for in-process MLX embedding backends (often longer than chat). |
 | `LMD_SAMPLE_INTERVAL` | `15` | Seconds between sensor samples. |
 | `LMD_DATA_DIR` | `~/Library/Application Support/io.goodkind.lmd` | Where `memory.jsonl` lands. |
-| `LMD_SMCFAN_BINARY` | `/Users/.../macos-smc-fan/Products/smcfan` | Path to the `smcfan` CLI. |
 | `LMD_SWIFTLM_BINARY` | `~/Sites/SwiftLM/.build/arm64-apple-macosx/release/SwiftLM` | SwiftLM inference engine to spawn. |
 
 The client-side dispatcher also reads `LMD_HOST` and `LMD_PORT` for `lmd status`, `lmd load`, `lmd unload`, etc.
@@ -89,6 +88,8 @@ log show --subsystem io.goodkind.lmd --last 30m --style ndjson
 Data artifacts (`memory.jsonl`, bench `results/*.json`) are separate from logs. See `plan/logging-migration.md`.
 
 ## Develop
+
+SwiftPM pulls [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) from `https://github.com/agoodkind/macos-smc-fan.git` on branch `main`. A normal clone of this repo is enough for `swift build`.
 
 ```
 make build              # release build of everything
@@ -134,5 +135,5 @@ lmd/
 ## Related projects
 
 - [SwiftLM](https://github.com/SharpAI/SwiftLM) upstream MLX inference engine; `lmd-serve` spawns one child per loaded model.
-- [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) smcfan CLI used by `FanCoordinator`.
+- [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) Swift package linked by `FanCoordinator` for XPC to the privileged helper (install the helper daemon from that repo).
 - [fancurveagent](https://github.com/agoodkind/macos-fan-curve) the LaunchAgent that owns fans when `lmd-serve` is not running. `lmd-serve` boots it out on takeover and re-bootstraps it on release.

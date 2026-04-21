@@ -44,12 +44,6 @@ let swiftLMBinary: String = {
 let serverPort: Int = 5413
 let serverHost = "127.0.0.1"
 let perTestTimeout: TimeInterval = 1800  // 30 min default, enough for 122B in RAM
-let smcfanBinary: String = {
-  if let env = ProcessInfo.processInfo.environment["LMD_SMCFAN_BINARY"], !env.isEmpty {
-    return env
-  }
-  return "/Users/agoodkind/Sites/macos-smc-fan/Products/smcfan"
-}()
 let fancurveAgentPath = "/Applications/FanCurve.app/Contents/MacOS/io.goodkind.fancurveagent"
 let configsRepo = "/Users/agoodkind/Sites/configs"
 let repoMaxBytes = 300_000
@@ -118,9 +112,16 @@ final class FanController {
     private let coordinator: FanCoordinator
 
     private init() {
-        let cfg = FanCoordinatorConfig(smcfanBinary: smcfanBinary)
+        let smc: FanSMCControlling
+        do {
+            smc = try LiveFanSMCController()
+        } catch {
+            fatalError("LiveFanSMCController failed: \(error)")
+        }
+        let cfg = FanCoordinatorConfig()
         self.coordinator = FanCoordinator(
             config: cfg,
+            smc: smc,
             log: { message in log.info("\(message, privacy: .public)") }
         )
     }
@@ -133,13 +134,15 @@ final class FanController {
         cpuPct: Double = 0, gpuPct: Double = 0,
         pressureFree: Int = 100, llmLoaded: Bool = false
     ) {
-        coordinator.apply(
-            FanInputs(
-                cpuTempC: cpuTempC, gpuTempC: gpuTempC,
-                cpuPercent: cpuPct, gpuPercent: gpuPct,
-                pressureFreePct: pressureFree, llmLoaded: llmLoaded
+        Task {
+            try? await coordinator.apply(
+                FanInputs(
+                    cpuTempC: cpuTempC, gpuTempC: gpuTempC,
+                    cpuPercent: cpuPct, gpuPercent: gpuPct,
+                    pressureFreePct: pressureFree, llmLoaded: llmLoaded
+                )
             )
-        )
+        }
     }
 }
 

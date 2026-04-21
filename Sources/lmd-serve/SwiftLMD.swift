@@ -315,47 +315,55 @@ struct SwiftLMD {
     // broker so temperature limits track the chip's real load instead
     // of Apple's conservative default curve. The LLM-active signal
     // reads the router's in-flight request count on every tick.
-    let fan = FanCoordinator(
-      config: FanCoordinatorConfig(
-        smcfanBinary: ProcessInfo.processInfo.environment["LMD_SMCFAN_BINARY"]
-          ?? "/Users/agoodkind/Sites/macos-smc-fan/Products/smcfan"
-      ),
-      log: { message in slog("fan: \(message)") }
-    )
-    fan.takeOver()
-    atexit {
-      // atexit cannot call instance methods directly. The coordinator
-      // instance is a class, so stash a static handle and call through.
-      FanHandoff.shared?.release()
-    }
-    FanHandoff.shared = fan
-
-    // Background loop: sample macmon every 2s, feed temps + in-flight
-    // count into FanCoordinator.apply. The coordinator itself rate
-    // limits smcfan writes so the 2s tick does not cause wear.
-    Task {
-      let macmon = MacmonClient()
-      while !Task.isCancelled {
-        let snap = macmon.fetch()
-        let routerSnap = await router.snapshot()
-        let inFlight = routerSnap.loaded.reduce(0) { $0 + $1.inFlightRequests }
-        fan.apply(
-          FanInputs(
-            cpuTempC: snap.cpuTempC,
-            gpuTempC: snap.gpuTempC,
-            cpuPercent: snap.cpuPercent,
-            gpuPercent: snap.gpuPercent,
-            pressureFreePct: 100,
-            llmLoaded: inFlight > 0
-          )
-        )
-        // 500ms ticks so a just-arrived request flips llmLoaded=true
-        // within half a second instead of missing a 2s window. The
-        // coordinator still rate-limits actual smcfan writes via its
-        // own internal cooldown, so the faster loop does not cause
-        // fan wear.
-        try? await Task.sleep(nanoseconds: 500_000_000)
+    if let smc = try? LiveFanSMCController() {
+      let fanConfig = FanCoordinatorConfig()
+      let fan = FanCoordinator(
+        config: fanConfig,
+        smc: smc,
+        log: { message in slog("fan: \(message)") }
+      )
+      log.notice("fan_coordinator_ready fan_indices=\(fanConfig.fanIndices, privacy: .public)")
+      FanHandoff.shared = fan
+      atexit {
+        FanHandoff.shared?.release()
       }
+      log.notice("fan_coordinator_loop_start")
+
+      // Background loop: sample macmon every 500ms, feed temps + in-flight
+      // count into FanCoordinator.apply. The coordinator rate-limits SMC
+      // writes outside ramp windows.
+      Task {
+        fan.takeOver()
+        let macmon = MacmonClient()
+        while !Task.isCancelled {
+          let snap = macmon.fetch()
+          let routerSnap = await router.snapshot()
+          let inFlight = routerSnap.loaded.reduce(0) { $0 + $1.inFlightRequests }
+          let llmLoaded = inFlight > 0
+          log.debug(
+            "fan_loop tick state=\(fan.state.rawValue, privacy: .public) in_flight=\(inFlight, privacy: .public) cpu_temp=\(snap.cpuTempC, privacy: .public) gpu_temp=\(snap.gpuTempC, privacy: .public) cpu_pct=\(snap.cpuPercent, privacy: .public) gpu_pct=\(snap.gpuPercent, privacy: .public) llm_loaded=\(llmLoaded, privacy: .public)"
+          )
+          do {
+            try await fan.apply(
+              FanInputs(
+                cpuTempC: snap.cpuTempC,
+                gpuTempC: snap.gpuTempC,
+                cpuPercent: snap.cpuPercent,
+                gpuPercent: snap.gpuPercent,
+                pressureFreePct: 100,
+                llmLoaded: llmLoaded
+              )
+            )
+          } catch {
+            log.error("fan_loop.apply_failed error=\(String(describing: error), privacy: .public)")
+          }
+          log.debug("fan_loop tick_complete state=\(fan.state.rawValue, privacy: .public)")
+          try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+      }
+    } else {
+      log.notice("fan_coordinator_disabled reason=livefan_controller_unavailable")
+      slog("fan: LiveFanSMCController unavailable (install smcfan helper), fan policy disabled")
     }
 
     // HTTP router

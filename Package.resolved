@@ -1,5 +1,5 @@
 {
-  "originHash" : "a0854aed5abe2f10324dbb677ab250402ca07f2034880b8cc618fe90b4e2547c",
+  "originHash" : "de7b7e776027783d21a86cb79aec69a9f6fc91522119ea46c2ba40293dbfe052",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -26,6 +26,15 @@
       "state" : {
         "revision" : "a2ed0a0294de56e18ba55344eafc801a7a385a90",
         "version" : "2.22.0"
+      }
+    },
+    {
+      "identity" : "macos-smc-fan",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/agoodkind/macos-smc-fan.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "d82819b47810ce84cc3065c63f7b6c39305b05f6"
       }
     },
     {

@@ -11,7 +11,7 @@
     lmd-serve is the single daemon that owns:
       - OpenAI-compatible broker on LMD_HOST:LMD_PORT
       - Sensor sampling (JSONL under LMD_DATA_DIR/memory.jsonl)
-      - Fan control (via smcfan), scaling by in-flight request count
+      - Fan control (via macos-smc-fan helper XPC), scaling by in-flight request count
     This replaces the former swiftlmd + swiftmon pair.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -54,8 +54,6 @@
         <string>15</string>
         <key>LMD_DATA_DIR</key>
         <string>/Users/agoodkind/Library/Application Support/io.goodkind.lmd</string>
-        <key>LMD_SMCFAN_BINARY</key>
-        <string>/Users/agoodkind/Sites/macos-smc-fan/Products/smcfan</string>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>

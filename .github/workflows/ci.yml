@@ -45,7 +45,6 @@ jobs:
 
       - name: Log audit
         run: make log-audit
-
       # `make smoke` is a developer convenience that spawns lmd-serve
       # outside launchd and pokes its HTTP endpoints. It is intentionally
       # not run in CI: the broker is a LaunchAgent in production and the
