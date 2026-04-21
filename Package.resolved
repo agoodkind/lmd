@@ -1,5 +1,5 @@
 {
-  "originHash" : "de7b7e776027783d21a86cb79aec69a9f6fc91522119ea46c2ba40293dbfe052",
+  "originHash" : "faa46752249811c1d6f05a0f9106d84b9e8f48971537360740aec4eb051039c8",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -34,7 +34,7 @@
       "location" : "https://github.com/agoodkind/macos-smc-fan.git",
       "state" : {
         "branch" : "main",
-        "revision" : "d82819b47810ce84cc3065c63f7b6c39305b05f6"
+        "revision" : "5800d0fc7a8aad90cb5ca01e5a22a5ec240c5f75"
       }
     },
     {

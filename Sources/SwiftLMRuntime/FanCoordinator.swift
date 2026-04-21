@@ -36,16 +36,26 @@ public struct FanCoordinatorConfig: Sendable {
   public let startupBaselineRpm: Int
   /// Low RPM written on release right before flipping fans to auto.
   public let releaseBaselineRpm: Int
-  /// Seconds to ramp from current RPM to SMC max when LLM becomes active.
+  /// Seconds to ramp from current RPM to the active steady target when LLM becomes active.
   public let activeRampDuration: TimeInterval
-  /// Seconds to ramp down when leaving active toward the steady cooling target.
+  /// Seconds fans hold the active-target RPM after LLM unload before the cooling ramp starts.
+  public let holdSeconds: TimeInterval
+  /// Seconds to ramp down from the held RPM toward the steady cooling target after the hold window.
   public let coolingRampDownSeconds: TimeInterval
   /// Smoothed max(CPU, GPU) temp at or above this requests 10_000 RPM while active.
   public let activeFullBlastTempC: Double
   /// Minimum interval between writes while an active or cooling ramp is in progress.
   public let rampMinSecondsBetweenChanges: TimeInterval
-  /// When SMC max RPM cannot be read, use this value for ramp ceilings.
+  /// When SMC max RPM cannot be read, use this value as the recorded max.
   public let fallbackMaxRpm: Int
+  /// smcd priority used while the coordinator is in `.active`. Matches
+  /// `SMCDPriority.llmActive`. Preempts fancurveagent's curve output.
+  public let activePriority: Int
+  /// smcd priority used while the coordinator is in `.cooling` (both hold
+  /// and ramp down). Matches `SMCDPriority.llmCooling`. Stays above
+  /// fancurveagent normal priority but lets user boost (priority 50)
+  /// preempt during cooling.
+  public let coolingPriority: Int
 
   public init(
     fanIndices: [Int] = [0, 1],
@@ -60,11 +70,14 @@ public struct FanCoordinatorConfig: Sendable {
     emergencyTempC: Double = 90,
     startupBaselineRpm: Int = 4000,
     releaseBaselineRpm: Int = 1500,
-    activeRampDuration: TimeInterval = 7.5,
-    coolingRampDownSeconds: TimeInterval = 60,
-    activeFullBlastTempC: Double = 93,
+    activeRampDuration: TimeInterval = 15,
+    holdSeconds: TimeInterval = 90,
+    coolingRampDownSeconds: TimeInterval = 180,
+    activeFullBlastTempC: Double = 75,
     rampMinSecondsBetweenChanges: TimeInterval = 0.5,
-    fallbackMaxRpm: Int = 9000
+    fallbackMaxRpm: Int = 9000,
+    activePriority: Int = 50,
+    coolingPriority: Int = 20
   ) {
     self.fanIndices = fanIndices
     self.curve = curve
@@ -79,10 +92,13 @@ public struct FanCoordinatorConfig: Sendable {
     self.startupBaselineRpm = startupBaselineRpm
     self.releaseBaselineRpm = releaseBaselineRpm
     self.activeRampDuration = activeRampDuration
+    self.holdSeconds = holdSeconds
     self.coolingRampDownSeconds = coolingRampDownSeconds
     self.activeFullBlastTempC = activeFullBlastTempC
     self.rampMinSecondsBetweenChanges = rampMinSecondsBetweenChanges
     self.fallbackMaxRpm = fallbackMaxRpm
+    self.activePriority = activePriority
+    self.coolingPriority = coolingPriority
   }
 
   public static let defaultCurve: [FanCurvePoint] = [
@@ -206,6 +222,10 @@ public final class FanCoordinator: @unchecked Sendable {
   private var coolingStartedAt: Date?
   private var handedToAuto: Bool = false
 
+  /// Fans that survived takeover and are eligible for writes. Starts as
+  /// `config.fanIndices` and shrinks as individual fans fail or time out.
+  private var activeFanIndices: [Int] = []
+
   private var smoothCpuPct: Double = 0
   private var smoothGpuPct: Double = 0
   private var smoothCpuTempC: Double = 0
@@ -217,7 +237,6 @@ public final class FanCoordinator: @unchecked Sendable {
   private var smcMaxRpmByFan: [Int: Int] = [:]
   private var activeRampStartedAt: Date?
   private var activeStartRpm: [Int: Int] = [:]
-  private var coolingRampStartedAt: Date?
   private var coolingStartRpm: [Int: Int] = [:]
 
   private let smc: FanSMCControlling
@@ -231,6 +250,7 @@ public final class FanCoordinator: @unchecked Sendable {
     self.config = config
     self.smc = smc
     self.logSink = log
+    self.activeFanIndices = config.fanIndices
   }
 
   /// Synchronous `Process` runner for `launchctl` / `pkill` only.
@@ -254,70 +274,74 @@ public final class FanCoordinator: @unchecked Sendable {
 
   // MARK: - Lifecycle
 
-  /// Take over fans. Stops `fancurveagent`, pins a safe baseline RPM.
+  /// Take over fans. Writes a safe baseline RPM through smcd. Arbitration
+  /// with fancurveagent is handled by smcd; no launchctl bootout required.
   public func takeOver() {
     log.notice(
       "fan.coordinator_taking_over baseline_rpm=\(self.config.startupBaselineRpm, privacy: .public) fan_indices=\(self.config.fanIndices, privacy: .public)"
     )
-    let uid = getuid()
-    let bootoutResult = smc.runLaunchProcess(
-      "/bin/launchctl",
-      ["bootout", "gui/\(uid)/io.goodkind.fancurveagent"]
-    )
-    log.debug("fan.coordinator_fancurveagent_bootout status=\(bootoutResult, privacy: .public)")
-    let pkillResult = smc.runLaunchProcess(
-      "/usr/bin/pkill",
-      ["-9", "-f", "fancurveagent"]
-    )
-    log.debug("fan.coordinator_fancurveagent_pkill status=\(pkillResult, privacy: .public)")
-    Thread.sleep(forTimeInterval: 0.5)
+
+    activeFanIndices = self.config.fanIndices
+    smcMaxRpmByFan.removeAll()
 
     do {
       try smc.smcOpenIfNeededSync()
-      smcMaxRpmByFan.removeAll()
-      for f in self.config.fanIndices {
-        log.notice("fan.baseline_iteration fan=\(f, privacy: .public)")
-        do {
-          let maxRpm = try smc.readFanMaxRpmSync(fanIndex: f)
-          log.debug("fan.max_rpm_read fan=\(f, privacy: .public) max_rpm=\(maxRpm, privacy: .public)")
-          smcMaxRpmByFan[f] = maxRpm
-        } catch {
-          log.error(
-            "fan.max_rpm_read_failed fan=\(f, privacy: .public) error=\(String(describing: error), privacy: .public)"
-          )
-          smcMaxRpmByFan[f] = self.config.fallbackMaxRpm
-        }
-        do {
-          try smc.setRpmSync(fanIndex: f, rpm: self.config.startupBaselineRpm)
-          log.notice(
-            "fan.baseline_set fan=\(f, privacy: .public) target=\(self.config.startupBaselineRpm, privacy: .public)"
-          )
-          lastAppliedRpm[f] = self.config.startupBaselineRpm
-          lastChangeTime[f] = Date()
-        } catch {
-          log.error(
-            "fan.baseline_set_failed fan=\(f, privacy: .public) target=\(self.config.startupBaselineRpm, privacy: .public) error=\(String(describing: error), privacy: .public)"
-          )
-          throw error
-        }
-      }
-      handedToAuto = true
     } catch {
       log.error(
-        "fan.takeover_smc_failed error=\(String(describing: error), privacy: .public)"
+        "fan.takeover_smc_open_failed error=\(String(describing: error), privacy: .public)"
       )
+      activeFanIndices.removeAll()
+      logSink("fan coordinator: SMC open failed, fan policy disabled")
+      return
     }
+
+    for f in self.config.fanIndices {
+      log.notice("fan.baseline_iteration fan=\(f, privacy: .public)")
+      do {
+        let maxRpm = try smc.readFanMaxRpmSync(fanIndex: f)
+        log.debug("fan.max_rpm_read fan=\(f, privacy: .public) max_rpm=\(maxRpm, privacy: .public)")
+        smcMaxRpmByFan[f] = maxRpm
+      } catch {
+        log.error(
+          "fan.max_rpm_read_failed fan=\(f, privacy: .public) error=\(String(describing: error), privacy: .public)"
+        )
+        smcMaxRpmByFan[f] = self.config.fallbackMaxRpm
+      }
+      do {
+        try smc.setRpmSync(fanIndex: f, rpm: self.config.startupBaselineRpm)
+        log.notice(
+          "fan.baseline_set fan=\(f, privacy: .public) target=\(self.config.startupBaselineRpm, privacy: .public)"
+        )
+        lastAppliedRpm[f] = self.config.startupBaselineRpm
+        lastChangeTime[f] = Date()
+      } catch {
+        // The helper often applies the SMC write but fails to reply. Log and
+        // continue: the tick loop will reassert the target every 500ms against
+        // the reconnecting client, and the state machine still owns the fan.
+        log.error(
+          "fan.baseline_set_failed fan=\(f, privacy: .public) target=\(self.config.startupBaselineRpm, privacy: .public) error=\(String(describing: error), privacy: .public)"
+        )
+        lastAppliedRpm[f] = self.config.startupBaselineRpm
+        lastChangeTime[f] = Date()
+      }
+    }
+
+    handedToAuto = true
+    log.notice(
+      "fan.takeover_complete healthy_fans=\(self.activeFanIndices, privacy: .public)"
+    )
 
     logSink("fan coordinator took over (baseline \(self.config.startupBaselineRpm) rpm)")
   }
 
   /// Hand fans back to auto and reload the launchd agent if present.
   public func release() {
+    let releaseIndices = self.activeFanIndices.isEmpty ? self.config.fanIndices : self.activeFanIndices
     log.notice(
-      "fan.coordinator_releasing fan_indices=\(self.config.fanIndices, privacy: .public)"
+      "fan.coordinator_releasing fan_indices=\(releaseIndices, privacy: .public)"
     )
     do {
-      for f in self.config.fanIndices {
+      for f in releaseIndices {
         do {
           try smc.setRpmSync(fanIndex: f, rpm: self.config.releaseBaselineRpm)
           log.debug(
@@ -339,14 +363,10 @@ public final class FanCoordinator: @unchecked Sendable {
     }
     lastAppliedRpm.removeAll()
     lastChangeTime.removeAll()
-    let uid = getuid()
-    let plist = NSString(string: "~/Library/LaunchAgents/io.goodkind.fancurveagent.plist")
-      .expandingTildeInPath
-    if FileManager.default.fileExists(atPath: plist) {
-      log.debug("fan.release_launchctl_bootstrap uid=\(uid, privacy: .public) plist=\(plist, privacy: .public)")
-      let bootstrapResult = smc.runLaunchProcess("/bin/launchctl", ["bootstrap", "gui/\(uid)", plist])
-      log.debug("fan.release_launchctl_bootstrap_result result=\(bootstrapResult, privacy: .public)")
-    }
+    // smcd and fancurveagent coexist through arbitration; no launchd
+    // bootstrap needed here. If fancurveagent is installed and running
+    // it keeps running, and takes over fan ownership via TTL once lmd
+    // stops writing.
     logSink("fan coordinator released, fans back to auto")
   }
 
@@ -355,9 +375,9 @@ public final class FanCoordinator: @unchecked Sendable {
   /// Feed one sample of inputs into the coordinator.
   public func apply(_ inputs: FanInputs, now: Date = Date()) async throws {
     let previousState = self.state
-    if self.config.fanIndices.isEmpty {
-      log.error(
-        "fan.apply_no_fans configured fan_indices=\(self.config.fanIndices, privacy: .public)"
+    if self.activeFanIndices.isEmpty {
+      log.debug(
+        "fan.apply_no_healthy_fans configured=\(self.config.fanIndices, privacy: .public)"
       )
       return
     }
@@ -382,30 +402,24 @@ public final class FanCoordinator: @unchecked Sendable {
     switch self.state {
     case .idle:
       if llmActive {
-        log.info("fan.state_changed from=idle to=active")
         enterActive(now: now)
       }
     case .active:
       if !llmActive {
-        state = .cooling
-        coolingStartedAt = now
-        self.enterCoolingRamp(now: now)
-        log.info("fan.state_changed from=active to=cooling")
-        logSink("fan state: active -> cooling")
+        enterCooling(now: now)
       }
     case .cooling:
       if llmActive {
-        state = .active
-        coolingStartedAt = nil
         reenterActiveFromCooling(now: now)
         log.info("fan.state_changed from=cooling to=active")
         logSink("fan state: cooling -> active")
       } else {
-          let maxTemp = max(self.smoothCpuTempC, self.smoothGpuTempC)
+        let maxTemp = max(self.smoothCpuTempC, self.smoothGpuTempC)
         let elapsed = coolingStartedAt.map { now.timeIntervalSince($0) } ?? 0
-          let tempOk = maxTemp <= self.config.coolOffTempC
-          let timeUp = elapsed >= self.config.coolOffMaxSeconds
-        if tempOk || timeUp {
+        let rampComplete = elapsed >= (self.config.holdSeconds + self.config.coolingRampDownSeconds)
+        let tempOk = maxTemp <= self.config.coolOffTempC
+        let timeUp = elapsed >= self.config.coolOffMaxSeconds
+        if rampComplete && (tempOk || timeUp) {
           state = .idle
           coolingStartedAt = nil
           handedToAuto = false
@@ -416,7 +430,7 @@ public final class FanCoordinator: @unchecked Sendable {
           logSink("fan state: cooling -> idle (\(why))")
         } else {
           log.debug(
-            "fan.cooling_hold max_temp=\(maxTemp, privacy: .public) elapsed=\(elapsed, privacy: .public) temp_threshold=\(self.config.coolOffTempC, privacy: .public) timeout_seconds=\(self.config.coolOffMaxSeconds, privacy: .public)"
+            "fan.cooling_hold max_temp=\(maxTemp, privacy: .public) elapsed=\(elapsed, privacy: .public) ramp_complete=\(rampComplete, privacy: .public) temp_threshold=\(self.config.coolOffTempC, privacy: .public) timeout_seconds=\(self.config.coolOffMaxSeconds, privacy: .public)"
           )
         }
       }
@@ -426,14 +440,13 @@ public final class FanCoordinator: @unchecked Sendable {
 
     if self.state == .idle {
       if !self.handedToAuto {
-        for f in self.config.fanIndices {
+        for f in self.activeFanIndices {
           log.debug("fan.auto_set fan=\(f, privacy: .public)")
           do {
             try await smc.setAuto(fanIndex: f)
             log.info("fan.auto_set_success fan=\(f, privacy: .public)")
           } catch {
             log.error("fan.auto_set_failed fan=\(f, privacy: .public) error=\(String(describing: error), privacy: .public)")
-            throw error
           }
         }
         self.handedToAuto = true
@@ -454,40 +467,43 @@ public final class FanCoordinator: @unchecked Sendable {
     let inActiveRampWindow = self.state == .active && !hotEnoughForFullBlast
       && self.activeRampStartedAt.map({ now.timeIntervalSince($0) < self.config.activeRampDuration }) == true
 
+    let coolingElapsed = self.coolingStartedAt.map({ now.timeIntervalSince($0) }) ?? .infinity
+    let inHoldWindow = self.state == .cooling && coolingElapsed < self.config.holdSeconds
     let inCoolingRampWindow = self.state == .cooling
-      && self.coolingRampStartedAt.map({ now.timeIntervalSince($0) < self.config.coolingRampDownSeconds }) == true
+      && coolingElapsed >= self.config.holdSeconds
+      && coolingElapsed < (self.config.holdSeconds + self.config.coolingRampDownSeconds)
 
-    let inRampPhase = inActiveRampWindow || inCoolingRampWindow
+    let inRampPhase = inActiveRampWindow || inHoldWindow || inCoolingRampWindow
     log.debug(
-      "fan.ramp_eval state=\(self.state.rawValue, privacy: .public) active_ramp=\(inActiveRampWindow, privacy: .public) cooling_ramp=\(inCoolingRampWindow, privacy: .public) in_ramp_phase=\(inRampPhase, privacy: .public)"
+      "fan.ramp_eval state=\(self.state.rawValue, privacy: .public) active_ramp=\(inActiveRampWindow, privacy: .public) hold=\(inHoldWindow, privacy: .public) cooling_ramp=\(inCoolingRampWindow, privacy: .public) in_ramp_phase=\(inRampPhase, privacy: .public)"
     )
 
+    let activeSteady = activeSteadyTarget(inputs: inputs)
     let steadyCooling = steadyCoolingTarget(inputs: inputs)
-    log.debug("fan.steady_target steady=\(steadyCooling, privacy: .public)")
+    log.debug("fan.steady_target active=\(activeSteady, privacy: .public) cooling=\(steadyCooling, privacy: .public)")
 
-    for f in self.config.fanIndices {
+    for f in self.activeFanIndices {
       let targetRpm: Int
       if self.state == .active {
-        if emergency {
-          targetRpm = 10_000
-        } else if hotEnoughForFullBlast {
+        if emergency || hotEnoughForFullBlast {
           targetRpm = 10_000
         } else if let rampStart = activeRampStartedAt,
                   now.timeIntervalSince(rampStart) < self.config.activeRampDuration {
           let elapsed = now.timeIntervalSince(rampStart)
           let rampT = min(1, elapsed / self.config.activeRampDuration)
-          let smcMax = smcMaxRpmByFan[f] ?? self.config.fallbackMaxRpm
           let start = self.activeStartRpm[f] ?? self.config.startupBaselineRpm
-          targetRpm = lerpInt(start, smcMax, rampT)
+          targetRpm = lerpInt(start, activeSteady, rampT)
         } else {
-          targetRpm = smcMaxRpmByFan[f] ?? self.config.fallbackMaxRpm
+          targetRpm = activeSteady
         }
       } else {
-      if let cr = self.coolingRampStartedAt,
-           now.timeIntervalSince(cr) < self.config.coolingRampDownSeconds {
-          let rampT = min(1, now.timeIntervalSince(cr) / self.config.coolingRampDownSeconds)
-          let startRpm = coolingStartRpm[f] ?? steadyCooling
-          targetRpm = lerpInt(startRpm, steadyCooling, rampT)
+        let holdRpm = coolingStartRpm[f] ?? steadyCooling
+        if coolingElapsed < self.config.holdSeconds {
+          targetRpm = holdRpm
+        } else if coolingElapsed < (self.config.holdSeconds + self.config.coolingRampDownSeconds) {
+          let rampElapsed = coolingElapsed - self.config.holdSeconds
+          let rampT = min(1, rampElapsed / self.config.coolingRampDownSeconds)
+          targetRpm = lerpInt(holdRpm, steadyCooling, rampT)
         } else {
           targetRpm = steadyCooling
         }
@@ -506,7 +522,6 @@ public final class FanCoordinator: @unchecked Sendable {
           log.info("fan.rpm_set fan=\(f, privacy: .public) rpm=\(targetRpm, privacy: .public)")
         } catch {
           log.error("fan.set_rpm_failed fan=\(f, privacy: .public) target_rpm=\(targetRpm, privacy: .public) error=\(String(describing: error), privacy: .public)")
-          throw error
         }
         continue
       }
@@ -554,9 +569,23 @@ public final class FanCoordinator: @unchecked Sendable {
         lastChangeTime[f] = now
       } catch {
         log.error("fan.set_rpm_failed fan=\(f, privacy: .public) target_rpm=\(targetRpm, privacy: .public) error=\(String(describing: error), privacy: .public)")
-        throw error
       }
     }
+  }
+
+  private func activeSteadyTarget(inputs: FanInputs) -> Int {
+    let maxSmoothTemp = max(smoothCpuTempC, smoothGpuTempC)
+    let tempRpm = rpmForTemp(maxSmoothTemp, curve: self.config.curve)
+    let floorRpm = activityFloorRpm(
+      cpuPercent: smoothCpuPct,
+      gpuPercent: smoothGpuPct,
+      pressureFreePct: inputs.pressureFreePct,
+      llmActive: true
+    )
+    log.debug(
+      "fan.active_target_calc max_smooth_temp=\(maxSmoothTemp, privacy: .public) temp_rpm=\(tempRpm, privacy: .public) floor_rpm=\(floorRpm, privacy: .public)"
+    )
+    return max(tempRpm, floorRpm)
   }
 
   private func steadyCoolingTarget(inputs: FanInputs) -> Int {
@@ -578,9 +607,10 @@ public final class FanCoordinator: @unchecked Sendable {
     state = .active
     handedToAuto = false
     activeRampStartedAt = now
-    coolingRampStartedAt = nil
+    coolingStartedAt = nil
+    self.smc.setCurrentPriority(self.config.activePriority)
     log.debug("fan.state_entered_active now=\(now.timeIntervalSinceReferenceDate, privacy: .public)")
-    for f in self.config.fanIndices {
+    for f in self.activeFanIndices {
       self.activeStartRpm[f] = self.lastAppliedRpm[f] ?? self.config.startupBaselineRpm
       log.debug(
         "fan.active_seed fan=\(f, privacy: .public) start_rpm=\(self.activeStartRpm[f] ?? self.config.startupBaselineRpm, privacy: .public)"
@@ -591,24 +621,31 @@ public final class FanCoordinator: @unchecked Sendable {
     logSink("fan state: idle -> active")
   }
 
-  private func enterCoolingRamp(now: Date) {
-    coolingRampStartedAt = now
+  /// Enter the cooling state. Snapshots per-fan RPM so the hold window holds
+  /// that value and the subsequent ramp starts from it.
+  private func enterCooling(now: Date) {
+    state = .cooling
+    coolingStartedAt = now
     activeRampStartedAt = nil
+    self.smc.setCurrentPriority(self.config.coolingPriority)
     log.debug("fan.state_entered_cooling now=\(now.timeIntervalSinceReferenceDate, privacy: .public)")
-    for f in self.config.fanIndices {
+    for f in self.activeFanIndices {
       self.coolingStartRpm[f] = self.lastAppliedRpm[f] ?? self.config.startupBaselineRpm
       log.debug(
-        "fan.cooling_seed fan=\(f, privacy: .public) start_rpm=\(self.coolingStartRpm[f] ?? self.config.startupBaselineRpm, privacy: .public)"
+        "fan.cooling_seed fan=\(f, privacy: .public) hold_rpm=\(self.coolingStartRpm[f] ?? self.config.startupBaselineRpm, privacy: .public)"
       )
     }
+    log.info("fan.state_changed from=active to=cooling")
+    logSink("fan state: active -> cooling")
   }
 
   private func reenterActiveFromCooling(now: Date) {
+    state = .active
     activeRampStartedAt = now
-    coolingRampStartedAt = nil
     coolingStartedAt = nil
+    self.smc.setCurrentPriority(self.config.activePriority)
     log.debug("fan.state_reenter_active now=\(now.timeIntervalSinceReferenceDate, privacy: .public)")
-    for f in self.config.fanIndices {
+    for f in self.activeFanIndices {
       self.activeStartRpm[f] = self.lastAppliedRpm[f] ?? self.config.startupBaselineRpm
       log.debug(
         "fan.reenter_seed fan=\(f, privacy: .public) start_rpm=\(self.activeStartRpm[f] ?? self.config.startupBaselineRpm, privacy: .public)"

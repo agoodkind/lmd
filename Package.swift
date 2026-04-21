@@ -69,7 +69,7 @@ let package = Package(
         "AppLogger",
         "SwiftLMCore",
         "SwiftLMBackend",
-        .product(name: "SMCFanXPCClient", package: "macos-smc-fan"),
+        .product(name: "SMCDClient", package: "macos-smc-fan"),
       ],
       path: "Sources/SwiftLMRuntime",
       swiftSettings: strictConcurrency

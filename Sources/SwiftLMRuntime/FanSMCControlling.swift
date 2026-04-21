@@ -5,8 +5,8 @@
 
 import Foundation
 
-/// Privileged SMC fan I/O used by ``FanCoordinator``. Production uses ``LiveFanSMCController``
-/// (XPC to `smcfan` helper). Tests inject a mock.
+/// Privileged SMC fan I/O used by ``FanCoordinator``. Production uses
+/// ``LiveFanSMCController`` (XPC to `smcd` arbiter). Tests inject a mock.
 public protocol FanSMCControlling: Sendable {
   func runLaunchProcess(_ path: String, _ args: [String]) -> Int32
 
@@ -24,4 +24,9 @@ public protocol FanSMCControlling: Sendable {
   func setRpm(fanIndex: Int, rpm: Int) async throws
 
   func setAuto(fanIndex: Int) async throws
+
+  /// Updates the priority used for every subsequent write. Called by
+  /// `FanCoordinator` on state transitions so lower priority clients
+  /// (fancurveagent) can regain fans once lmd enters cooling.
+  func setCurrentPriority(_ priority: Int)
 }
