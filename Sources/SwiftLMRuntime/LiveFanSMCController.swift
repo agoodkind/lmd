@@ -8,26 +8,27 @@
 
 import AppLogger
 import Foundation
-import SMCDClient
+import SMCFanProtocol
+import SMCFanXPCClient
 
-/// Routes fan control through the user space smcd arbiter.
-///
-/// Holds a single `SMCDClient` for the lifetime of the daemon. smcd in
-/// turn owns the privileged XPC connection to smcfanhelper. Every write
-/// carries a priority; the default priority is set at init. A preempted
-/// write (`SMCDConflictError`) is logged at debug and swallowed so the
-/// state machine's next tick retries without propagating the error.
+/// Routes fan control through the privileged `smcfanhelper` via
+/// `SMCFanXPCClient`. The helper arbitrates priority internally, so this
+/// controller just threads the current priority through each write.
+/// Preemption is expected (fancurveagent or the CLI may hold a fan at a
+/// higher priority) and surfaces as `SMCXPCConflictError`; we log at
+/// debug and let the coordinator's next tick retry.
 public final class LiveFanSMCController: FanSMCControlling, @unchecked Sendable {
   private let log = AppLogger.logger(category: "LiveFanSMCController")
-  private let client: SMCDClient
+  private let client: SMCFanXPCClient
   private let priorityLock = NSLock()
   private var currentPriority: Int
 
-  /// `throws` is retained for source compatibility with `try?` at call sites
-  /// even though no current code path throws. The old SMCFanXPCClient init
-  /// could throw on XPC proxy setup; SMCDClient does not.
-  public init(clientName: String = "lmd-serve", defaultPriority: Int = 50) throws {
-    self.client = SMCDClient(
+  /// `throws` is retained for source compatibility with `try?` at call sites.
+  public init(
+    clientName: String = "lmd-serve",
+    defaultPriority: Int = SMCFanPriority.llmActive
+  ) throws {
+    self.client = try SMCFanXPCClient(
       clientName: clientName,
       defaultPriority: defaultPriority
     )
@@ -60,10 +61,11 @@ public final class LiveFanSMCController: FanSMCControlling, @unchecked Sendable 
     FanCoordinator.runLaunchProcess(path, args)
   }
 
-  // MARK: - Synchronous API
+  // MARK: - Synchronous API (takeover / release / atexit)
 
-  /// smcd manages its own helper session; no per client open is needed.
-  public func smcOpenIfNeededSync() throws {}
+  public func smcOpenIfNeededSync() throws {
+    try client.openSync()
+  }
 
   public func readFanMaxRpmSync(fanIndex: Int) throws -> Int {
     log.debug("smc.read_fan_max fan=\(fanIndex, privacy: .public)")
@@ -82,7 +84,7 @@ public final class LiveFanSMCController: FanSMCControlling, @unchecked Sendable 
     )
     do {
       try client.setFanRPMSync(UInt(fanIndex), rpm: Float(rpm), priority: pri)
-    } catch let err as SMCDConflictError {
+    } catch let err as SMCXPCConflictError {
       log.debug(
         "smc.set_rpm_preempted fan=\(fanIndex, privacy: .public) reason=\(err.message, privacy: .public)"
       )
@@ -96,17 +98,18 @@ public final class LiveFanSMCController: FanSMCControlling, @unchecked Sendable 
     )
     do {
       try client.setFanAutoSync(UInt(fanIndex), priority: pri)
-    } catch let err as SMCDConflictError {
+    } catch let err as SMCXPCConflictError {
       log.debug(
         "smc.set_auto_preempted fan=\(fanIndex, privacy: .public) reason=\(err.message, privacy: .public)"
       )
     }
   }
 
-  /// smcd owns the helper session; no explicit close on our side.
-  public func closeSMCConnectionSync() throws {}
+  public func closeSMCConnectionSync() throws {
+    try client.closeSync()
+  }
 
-  // MARK: - Async API
+  // MARK: - Async API (tick loop)
 
   public func setRpm(fanIndex: Int, rpm: Int) async throws {
     let pri = self.priority()
@@ -115,7 +118,7 @@ public final class LiveFanSMCController: FanSMCControlling, @unchecked Sendable 
     )
     do {
       try await client.setFanRPM(UInt(fanIndex), rpm: Float(rpm), priority: pri)
-    } catch let err as SMCDConflictError {
+    } catch let err as SMCXPCConflictError {
       log.debug(
         "smc.set_rpm_preempted fan=\(fanIndex, privacy: .public) reason=\(err.message, privacy: .public)"
       )
@@ -129,7 +132,7 @@ public final class LiveFanSMCController: FanSMCControlling, @unchecked Sendable 
     )
     do {
       try await client.setFanAuto(UInt(fanIndex), priority: pri)
-    } catch let err as SMCDConflictError {
+    } catch let err as SMCXPCConflictError {
       log.debug(
         "smc.set_auto_preempted fan=\(fanIndex, privacy: .public) reason=\(err.message, privacy: .public)"
       )
