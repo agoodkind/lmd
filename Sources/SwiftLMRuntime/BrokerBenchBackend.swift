@@ -32,7 +32,7 @@ public final class BrokerBenchBackend: BenchBackend, @unchecked Sendable {
   private var loadedModels: Set<String> = []
 
   public init(
-    brokerHost: String = "127.0.0.1",
+    brokerHost: String = "localhost",
     brokerPort: Int = 5400,
     session: URLSession = .shared
   ) {

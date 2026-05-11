@@ -15,6 +15,7 @@
 //
 
 import Foundation
+import SwiftLMCore
 import SwiftLMRuntime
 
 /// Mach service name registered by the LaunchAgent and the only way
@@ -78,19 +79,22 @@ public struct LoadedSnapshot: Codable, Sendable {
     public let lastUsed: Date
     public let inFlightRequests: Int
     public let kind: String
+    public let capabilities: ModelCapabilities
 
     public init(
       modelID: String,
       sizeGB: Double,
       lastUsed: Date,
       inFlightRequests: Int,
-      kind: String
+      kind: String,
+      capabilities: ModelCapabilities = .textOnly
     ) {
       self.modelID = modelID
       self.sizeGB = sizeGB
       self.lastUsed = lastUsed
       self.inFlightRequests = inFlightRequests
       self.kind = kind
+      self.capabilities = capabilities
     }
   }
 }

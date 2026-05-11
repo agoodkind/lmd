@@ -2,7 +2,7 @@
 # One per Swift source file that emits log events. Categories are PascalCase
 # and one-to-one with the Swift type or module they belong to.
 #
-# The runtime smoke script (scripts/log-smoke.sh) asserts every category
+# The runtime smoke command (swift Tools/lmd-dev.swift log-smoke) asserts every category
 # below appears at least once during a full exercise of the system.
 #
 # Pure helpers (ANSI escape helpers, layout math, key/mouse byte parsers)

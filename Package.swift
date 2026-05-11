@@ -25,9 +25,11 @@ let package = Package(
     .library(name: "SwiftLMMonitor", targets: ["SwiftLMMonitor"]),
     .library(name: "SwiftLMTUI", targets: ["SwiftLMTUI"]),
     .library(name: "SwiftLMControl", targets: ["SwiftLMControl"]),
+    .library(name: "LMDServeSupport", targets: ["LMDServeSupport"]),
   ],
   dependencies: [
     .package(url: "https://github.com/hummingbird-project/hummingbird", from: "2.22.0"),
+    .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.23.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.12.0"),
     .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
     .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", exact: "2.31.3"),
@@ -49,7 +51,12 @@ let package = Package(
     ),
     .target(
       name: "SwiftLMBackend",
-      dependencies: ["AppLogger", "SwiftLMCore"],
+      dependencies: [
+        "AppLogger",
+        "SwiftLMCore",
+        .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+        .product(name: "MLXVLM", package: "mlx-swift-lm"),
+      ],
       path: "Sources/SwiftLMBackend",
       swiftSettings: strictConcurrency
     ),
@@ -92,6 +99,17 @@ let package = Package(
       path: "Sources/SwiftLMControl",
       swiftSettings: strictConcurrency
     ),
+    .target(
+      name: "LMDServeSupport",
+      dependencies: [
+        "AppLogger",
+        "SwiftLMCore",
+        "SwiftLMBackend",
+        .product(name: "Hummingbird", package: "hummingbird"),
+      ],
+      path: "Sources/LMDServeSupport",
+      swiftSettings: strictConcurrency
+    ),
 
     .executableTarget(
       name: "lmd",
@@ -113,7 +131,9 @@ let package = Package(
         "SwiftLMRuntime",
         "SwiftLMMonitor",
         "SwiftLMControl",
+        "LMDServeSupport",
         .product(name: "Hummingbird", package: "hummingbird"),
+        .product(name: "NIOTransportServices", package: "swift-nio-transport-services"),
         .product(name: "HuggingFace", package: "swift-huggingface"),
       ],
       path: "Sources/lmd-serve"
@@ -181,10 +201,15 @@ let package = Package(
       swiftSettings: strictConcurrency
     ),
     .testTarget(
+      name: "LMDServeTests",
+      dependencies: ["LMDServeSupport", "SwiftLMCore"],
+      path: "Tests/LMDServeTests",
+      swiftSettings: strictConcurrency
+    ),
+    .testTarget(
       name: "IntegrationTests",
       dependencies: ["SwiftLMControl", "SwiftLMCore", "SwiftLMRuntime"],
       path: "Tests/IntegrationTests",
-      exclude: ["smoke-lmd-serve.sh"],
       swiftSettings: strictConcurrency
     ),
   ]

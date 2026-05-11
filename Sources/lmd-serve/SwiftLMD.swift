@@ -8,13 +8,15 @@
 //  lmd-serve: persistent broker daemon.
 //
 //  Owns SwiftLM lifecycle, the model catalog, the router/eviction
-//  policy, sensor sampling (formerly swiftmon), and fan control.
+//  policy and sensor sampling (formerly swiftmon). Fan control is disabled
+//  during the current moratorium.
 //  Exposes an OpenAI-compatible HTTP API on port 5400 by default.
 //
 
 import AppLogger
 import Foundation
 import Hummingbird
+import LMDServeSupport
 import SwiftLMBackend
 import SwiftLMCore
 import SwiftLMEmbed
@@ -29,7 +31,7 @@ private let log = AppLogger.logger(category: "Broker")
 
 // MARK: - Defaults
 
-let defaultBrokerHost = "127.0.0.1"
+let defaultBrokerHost = "localhost"
 let defaultBrokerPort = 5400
 // SwiftLM is a sibling project. Override via LMD_SWIFTLM_BINARY.
 let defaultSwiftLMBinary: String = {
@@ -42,6 +44,47 @@ let defaultLogPath: String = {
   let home = NSHomeDirectory()
   return "\(home)/Library/Application Support/io.goodkind.lmd/logs/lmd-serve.log"
 }()
+
+enum BrokerListenAddressError: Error, CustomStringConvertible {
+  case disallowedHost(String)
+  case invalidPort(String)
+
+  var description: String {
+    switch self {
+    case .disallowedHost(let host):
+      return "LMD_HOST must be localhost or [::1], got \(host)"
+    case .invalidPort(let port):
+      return "LMD_PORT must be an integer from 1 through 65535, got \(port)"
+    }
+  }
+}
+
+struct BrokerListenAddress {
+  let host: String
+  let port: Int
+  let bindHost: String
+
+  var displayAddress: String {
+    "\(host):\(port)"
+  }
+
+  init(environment: [String: String]) throws {
+    host = environment["LMD_HOST"] ?? defaultBrokerHost
+
+    let rawPort = environment["LMD_PORT"] ?? "\(defaultBrokerPort)"
+    guard let parsedPort = Int(rawPort), (1...65_535).contains(parsedPort) else {
+      throw BrokerListenAddressError.invalidPort(rawPort)
+    }
+    port = parsedPort
+
+    switch host {
+    case "localhost", "[::1]":
+      bindHost = "::1"
+    default:
+      throw BrokerListenAddressError.disallowedHost(host)
+    }
+  }
+}
 
 // MARK: - Shared timestamp formatter
 //
@@ -151,12 +194,19 @@ final class LiveBackend: SwiftLMBackendProtocol, @unchecked Sendable {
 final class BrokerState: @unchecked Sendable {
   let catalog: ModelCatalog
   let router: ModelRouter
+  let videoChatBackend: VideoChatBackend
   let modelsByID: [String: ModelDescriptor]
   let downloadCoordinator: HubDownloadCoordinator
 
-  init(catalog: ModelCatalog, router: ModelRouter, models: [ModelDescriptor]) {
+  init(
+    catalog: ModelCatalog,
+    router: ModelRouter,
+    models: [ModelDescriptor],
+    videoChatBackend: VideoChatBackend = NotConfiguredVideoChatBackend()
+  ) {
     self.catalog = catalog
     self.router = router
+    self.videoChatBackend = videoChatBackend
     self.downloadCoordinator = HubDownloadCoordinator()
     var map: [String: ModelDescriptor] = [:]
     for m in models {
@@ -185,6 +235,7 @@ struct OpenAIModelsResponse: Codable {
     let created: Int
     let owned_by: String  // swiftlint:disable:this identifier_name
     let kind: String
+    let capabilities: ModelCapabilities
   }
 }
 
@@ -252,7 +303,12 @@ struct SwiftLMD {
       }
     )
 
-    let state = BrokerState(catalog: catalog, router: router, models: models)
+    let state = BrokerState(
+      catalog: catalog,
+      router: router,
+      models: models,
+      videoChatBackend: InProcessVLMVideoChatBackend()
+    )
 
     // XPC control surface for first-party Swift clients (lmd CLI,
     // lmd-tui). Shares `state` with the HTTP routes so both transports
@@ -311,91 +367,24 @@ struct SwiftLMD {
     ))
     sampler.start()
 
-    // Fan coordinator: takes over fan control for the life of the
-    // broker so temperature limits track the chip's real load instead
-    // of Apple's conservative default curve. The LLM-active signal
-    // reads the router's in-flight request count on every tick.
-    if let smc = try? LiveFanSMCController() {
-      let fanConfig = FanCoordinatorConfig()
-      let fan = FanCoordinator(
-        config: fanConfig,
-        smc: smc,
-        log: { message in slog("fan: \(message)") }
-      )
-      log.notice("fan_coordinator_ready fan_indices=\(fanConfig.fanIndices, privacy: .public)")
-      FanHandoff.shared = fan
-      atexit {
-        FanHandoff.shared?.release()
-      }
-      log.notice("fan_coordinator_loop_start")
-
-      // Background loop: sample macmon every 500ms, feed temps + in-flight
-      // count into FanCoordinator.apply. The coordinator rate-limits SMC
-      // writes outside ramp windows.
-      Task {
-        fan.takeOver()
-        let macmon = MacmonClient()
-        while !Task.isCancelled {
-          let snap = macmon.fetch()
-          let routerSnap = await router.snapshot()
-          let inFlight = routerSnap.loaded.reduce(0) { $0 + $1.inFlightRequests }
-          let llmLoaded = inFlight > 0
-          log.debug(
-            "fan_loop tick state=\(fan.state.rawValue, privacy: .public) in_flight=\(inFlight, privacy: .public) cpu_temp=\(snap.cpuTempC, privacy: .public) gpu_temp=\(snap.gpuTempC, privacy: .public) cpu_pct=\(snap.cpuPercent, privacy: .public) gpu_pct=\(snap.gpuPercent, privacy: .public) llm_loaded=\(llmLoaded, privacy: .public)"
-          )
-          do {
-            try await fan.apply(
-              FanInputs(
-                cpuTempC: snap.cpuTempC,
-                gpuTempC: snap.gpuTempC,
-                cpuPercent: snap.cpuPercent,
-                gpuPercent: snap.gpuPercent,
-                pressureFreePct: 100,
-                llmLoaded: llmLoaded
-              )
-            )
-          } catch {
-            log.error("fan_loop.apply_failed error=\(String(describing: error), privacy: .public)")
-          }
-          log.debug("fan_loop tick_complete state=\(fan.state.rawValue, privacy: .public)")
-          try? await Task.sleep(nanoseconds: 500_000_000)
-        }
-      }
-    } else {
-      log.notice("fan_coordinator_disabled reason=livefan_controller_unavailable")
-      slog("fan: LiveFanSMCController unavailable (install smcfan helper), fan policy disabled")
-    }
+    log.notice("fan_control.disabled reason=moratorium")
 
     // HTTP router
     let httpRouter = Router()
     registerRoutes(on: httpRouter, state: state)
 
-    let host = ProcessInfo.processInfo.environment["LMD_HOST"] ?? defaultBrokerHost
-    let port = Int(ProcessInfo.processInfo.environment["LMD_PORT"] ?? "") ?? defaultBrokerPort
-    slog("HTTP server starting on \(host):\(port)")
+    let listenAddress = try BrokerListenAddress(environment: ProcessInfo.processInfo.environment)
+    slog("HTTP server starting on \(listenAddress.displayAddress)")
 
     let app = Application(
       router: httpRouter,
       configuration: .init(
-        address: .hostname(host, port: port),
+        address: .hostname(listenAddress.bindHost, port: listenAddress.port),
         serverName: "swiftlmd/\(SwiftLMCore.version)"
       )
     )
     try await app.runService()
   }
-}
-
-// MARK: - Fan handoff
-//
-// `atexit` handlers are C callbacks so they cannot capture Swift
-// instance methods directly. Stashing the coordinator in a static
-// holder lets the process tear-down path release fans to Apple's
-// native controller no matter how the broker exits. The shared
-// reference is set once by `SwiftLMD.main` after the coordinator
-// takes over.
-
-enum FanHandoff {
-  nonisolated(unsafe) static var shared: FanCoordinator?
 }
 
 // MARK: - Routes
@@ -421,7 +410,8 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
           object: "model",
           created: Int(Date().timeIntervalSince1970),
           owned_by: m.slug?.split(separator: "/").first.map(String.init) ?? "local",
-          kind: m.kind.rawValue
+          kind: m.kind.rawValue,
+          capabilities: m.capabilities
         )
       }
     let response = OpenAIModelsResponse(object: "list", data: entries)
@@ -444,16 +434,20 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
         let last_used: String          // swiftlint:disable:this identifier_name
         let in_flight_requests: Int    // swiftlint:disable:this identifier_name
         let kind: String
+        let capabilities: ModelCapabilities
       }
     }
     let entries = snap.loaded.map { c in
-      let kind = state.modelsByID[c.modelID]?.kind.rawValue ?? "chat"
+      let descriptor = state.modelsByID[c.modelID]
+      let kind = descriptor?.kind.rawValue ?? "chat"
+      let capabilities = descriptor?.capabilities ?? .textOnly
       return Loaded.Entry(
         model_id: c.modelID,
         size_gb: Double(c.sizeBytes) / 1_073_741_824,
         last_used: isoFormatter.string(from: c.lastUsed),
         in_flight_requests: c.inFlightRequests,
-        kind: kind
+        kind: kind,
+        capabilities: capabilities
       )
     }
     let body = Loaded(
@@ -714,6 +708,16 @@ func proxyChat(path: String, req: Request, state: BrokerState) async throws -> R
     )
   }
   let wantsStream = (json["stream"] as? Bool) ?? false
+  let videoInspection: OpenAIVideoInspection
+  do {
+    videoInspection = try inspectOpenAIVideoInputs(in: json)
+  } catch let error as OpenAIVideoParseError {
+    return errorResponse(
+      status: .badRequest,
+      message: error.description,
+      type: "invalid_request_error"
+    )
+  }
 
   // JSON enforcement middleware. Local SwiftLM does not implement
   // grammar-constrained decoding, so `response_format` is otherwise
@@ -739,6 +743,56 @@ func proxyChat(path: String, req: Request, state: BrokerState) async throws -> R
       message: "model is an embedding model; use POST /v1/embeddings",
       type: "invalid_request_error"
     )
+  }
+  if videoInspection.containsVideo {
+    guard descriptor.capabilities.video else {
+      return errorResponse(
+        status: .badRequest,
+        message: "model does not support video input",
+        type: "invalid_request_error"
+      )
+    }
+    guard !wantsStream else {
+      return errorResponse(
+        status: .badRequest,
+        message: "streaming is not supported for video chat",
+        type: "invalid_request_error"
+      )
+    }
+  }
+
+  switch chatRoutingDecision(
+    path: path,
+    bodyData: bodyData,
+    model: descriptor,
+    wantsStream: wantsStream,
+    videoInspection: videoInspection
+  ) {
+  case .swiftLMProxy:
+    break
+  case .videoBackend(let videoRequest):
+    do {
+      return try await state.videoChatBackend.complete(videoRequest)
+    } catch VideoChatBackendError.notConfigured {
+      return errorResponse(
+        status: .serviceUnavailable,
+        message: "video chat backend is not configured",
+        type: "not_configured",
+        code: "not_configured"
+      )
+    } catch let error as VideoChatRequestBuildError {
+      return errorResponse(
+        status: .badRequest,
+        message: error.description,
+        type: "invalid_request_error"
+      )
+    } catch {
+      return errorResponse(
+        status: .serviceUnavailable,
+        message: "video chat backend failed: \(error)",
+        type: "video_backend_failed"
+      )
+    }
   }
 
   let backend: SwiftLMBackendProtocol
@@ -779,7 +833,7 @@ func proxyChat(path: String, req: Request, state: BrokerState) async throws -> R
     }
   }
 
-  let upstreamURL = URL(string: "http://127.0.0.1:\(backend.port)\(path)")!
+  let upstreamURL = URL(string: "http://localhost:\(backend.port)\(path)")!
   var request = URLRequest(url: upstreamURL, timeoutInterval: 600)
   request.httpMethod = "POST"
   request.httpBody = bodyData

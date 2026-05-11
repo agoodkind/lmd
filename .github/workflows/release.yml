@@ -35,34 +35,34 @@ jobs:
           fetch-depth: 0
 
       - name: Show toolchain
-        run: |
-          swift --version
-          xcodebuild -version || true
+        run: swift Tools/lmd-dev.swift toolchain
 
       - name: Cache SwiftPM build + deps
         uses: actions/cache@v5
         with:
           path: |
-            .build
+            Tuist/.build
+            Derived
+            Products/Build
             ~/Library/Caches/org.swift.swiftpm
-          key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          key: tuist-${{ runner.os }}-${{ hashFiles('Tuist/Package.resolved') }}
           restore-keys: |
-            swiftpm-${{ runner.os }}-
+            tuist-${{ runner.os }}-
 
       - name: Build (release)
-        run: swift build -c release
+        run: swift Tools/lmd-dev.swift build Release
 
       - name: Import Developer ID certificate
         env:
           APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
           APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
-        run: ./scripts/ci-import-cert.sh
+        run: swift Tools/lmd-dev.swift ci-import-cert
 
       - name: Codesign binaries
         env:
           APPLE_CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: ./scripts/ci-sign.sh
+        run: swift Tools/lmd-dev.swift ci-sign
 
       - name: Notarize
         id: notarize
@@ -70,40 +70,24 @@ jobs:
           APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
-        run: ./scripts/ci-notarize.sh
+        run: swift Tools/lmd-dev.swift ci-notarize
 
       - name: Compute release tag
         id: tag
-        run: |
-          TS=$(date -u +%Y%m%d%H%M)
-          HEX=$(printf '%x' "$GITHUB_RUN_NUMBER")
-          SHA=$(git rev-parse --short HEAD)
-          TAG="${TS}-${HEX}-${SHA}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Release tag: $TAG"
+        run: swift Tools/lmd-dev.swift release-tag
 
       - name: Push tag
         env:
           TAG: ${{ steps.tag.outputs.tag }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$TAG"
-          git push origin "$TAG"
+        run: swift Tools/lmd-dev.swift push-tag
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.tag.outputs.tag }}
           ARTIFACT: ${{ steps.notarize.outputs.artifact }}
-        run: |
-          gh release create "$TAG" "$ARTIFACT" \
-            --title "$TAG" \
-            --notes "Signed + notarized build from $GITHUB_SHA. Bare CLI binaries cannot be stapled; first-launch Gatekeeper checks hit the network."
+        run: swift Tools/lmd-dev.swift github-release
 
       - name: Clean up temp keychain
         if: always()
-        run: |
-          if [[ -n "${CI_KEYCHAIN_PATH:-}" && -f "$CI_KEYCHAIN_PATH" ]]; then
-            security delete-keychain "$CI_KEYCHAIN_PATH" || true
-          fi
+        run: swift Tools/lmd-dev.swift cleanup-keychain

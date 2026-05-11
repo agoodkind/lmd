@@ -404,7 +404,7 @@ func runBenchFromConfig(configPath: String) async {
     exit(2)
   }
 
-  let backend = BrokerBenchBackend(brokerHost: "127.0.0.1", brokerPort: 5400)
+  let backend = BrokerBenchBackend(brokerHost: "localhost", brokerPort: 5400)
 
   let orch = BenchOrchestrator(
     config: config,

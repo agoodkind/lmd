@@ -12,7 +12,7 @@ import XCTest
 final class SwiftLMServerConfigTests: XCTestCase {
   func testConfigDefaults() {
     let c = SwiftLMServerConfig(binaryPath: "/usr/bin/true")
-    XCTAssertEqual(c.host, "127.0.0.1")
+    XCTAssertEqual(c.host, "localhost")
     XCTAssertEqual(c.port, 5413)
     XCTAssertNil(c.logFilePath)
     XCTAssertEqual(c.readyTimeout, 300)
@@ -21,13 +21,13 @@ final class SwiftLMServerConfigTests: XCTestCase {
   func testConfigPreservesCustomValues() {
     let c = SwiftLMServerConfig(
       binaryPath: "/tmp/swiftlm",
-      host: "0.0.0.0",
+      host: "[::1]",
       port: 5500,
       logFilePath: "/tmp/swiftlm.log",
       readyTimeout: 120
     )
     XCTAssertEqual(c.binaryPath, "/tmp/swiftlm")
-    XCTAssertEqual(c.host, "0.0.0.0")
+    XCTAssertEqual(c.host, "[::1]")
     XCTAssertEqual(c.port, 5500)
     XCTAssertEqual(c.logFilePath, "/tmp/swiftlm.log")
     XCTAssertEqual(c.readyTimeout, 120)

@@ -8,9 +8,9 @@
 
 import AppLogger
 import Foundation
+import SwiftLMCore
 
 private let log = AppLogger.logger(category: "ModelCatalog")
-import SwiftLMCore
 
 // MARK: - ModelCatalog
 
@@ -157,13 +157,16 @@ public struct ModelCatalog {
 
     let kind = Self.inferModelKind(
       modelDir: path, displayName: displayName, slug: slug, fileManager: fileManager)
+    let capabilities = Self.inferModelCapabilities(
+      modelDir: path, kind: kind, fileManager: fileManager)
     return ModelDescriptor(
       id: path,
       displayName: displayName,
       path: path,
       sizeBytes: folderSize(path),
       slug: slug,
-      kind: kind
+      kind: kind,
+      capabilities: capabilities
     )
   }
 
@@ -199,6 +202,37 @@ public struct ModelCatalog {
     return heuristicNameKind(displayName: displayName, slug: slug)
   }
 
+  /// Infer modalities from structured model metadata.
+  ///
+  /// Embedding classification wins before modality inference. An embedding
+  /// model that happens to carry multimodal-looking fields still routes and
+  /// advertises as text-only.
+  public static func inferModelCapabilities(
+    modelDir: String,
+    kind: ModelKind,
+    fileManager: FileManager
+  ) -> ModelCapabilities {
+    guard kind != .embedding else {
+      return .textOnly
+    }
+    guard
+      let config = jsonObject(
+        at: "\(modelDir)/config.json",
+        fileManager: fileManager
+      )
+    else {
+      return .textOnly
+    }
+    let metadata = modelMetadata(modelDir: modelDir, config: config, fileManager: fileManager)
+    if qwen25VLSupportsVideo(config: config, metadata: metadata) {
+      return ModelCapabilities(text: true, vision: true, video: true)
+    }
+    if qwen25VLSupportsVision(config: config) {
+      return ModelCapabilities(text: true, vision: true, video: false)
+    }
+    return .textOnly
+  }
+
   private static func architectureLooksEmbedding(_ arch: String) -> Bool {
     let pattern =
       "^(Bert|XLMRoberta|MPNet|NomicBert|JinaBert|GTE|SnowflakeArcticEmbed|RobertaForMaskedLM)"
@@ -218,6 +252,84 @@ public struct ModelCatalog {
       return .embedding
     }
     return .chat
+  }
+
+  private static func modelMetadata(
+    modelDir: String,
+    config: [String: Any],
+    fileManager: FileManager
+  ) -> [[String: Any]] {
+    var metadata = [config]
+    let filenames = [
+      "preprocessor_config.json",
+      "processor_config.json",
+      "tokenizer_config.json",
+    ]
+    for filename in filenames {
+      let path = "\(modelDir)/\(filename)"
+      if let object = jsonObject(at: path, fileManager: fileManager) {
+        metadata.append(object)
+      }
+    }
+    return metadata
+  }
+
+  private static func qwen25VLSupportsVision(config: [String: Any]) -> Bool {
+    guard stringValue(config["model_type"])?.lowercased() == "qwen2_5_vl" else {
+      return false
+    }
+    guard config["vision_config"] is [String: Any] else {
+      return false
+    }
+    return hasValue(config["image_token_id"])
+  }
+
+  private static func qwen25VLSupportsVideo(
+    config: [String: Any],
+    metadata: [[String: Any]]
+  ) -> Bool {
+    guard qwen25VLSupportsVision(config: config) else {
+      return false
+    }
+    guard hasValue(config["video_token_id"]) else {
+      return false
+    }
+    guard
+      metadata.contains(where: { json in
+        stringValue(json["processor_class"]) == "Qwen2_5_VLProcessor"
+      })
+    else {
+      return false
+    }
+    return metadata.contains(where: { json in
+      hasValue(json["image_processor_type"])
+    })
+  }
+
+  private static func jsonObject(at path: String, fileManager: FileManager) -> [String: Any]? {
+    guard
+      fileManager.fileExists(atPath: path),
+      let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
+      return nil
+    }
+    return json
+  }
+
+  private static func stringValue(_ value: Any?) -> String? {
+    value as? String
+  }
+
+  private static func hasValue(_ value: Any?) -> Bool {
+    switch value {
+    case nil:
+      return false
+    case is NSNull:
+      return false
+    default:
+      return true
+    }
   }
 
   /// Sum the size of every file in a directory tree.

@@ -37,7 +37,7 @@ final class EmbeddingsRouteTests: XCTestCase {
 
     let slug = embModel.slug ?? embModel.displayName
     let port = 5400 + Int.random(in: 50...250)
-    let host = "127.0.0.1"
+    let host = "localhost"
 
     let proc = Process()
     proc.executableURL = brokerBin

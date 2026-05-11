@@ -22,7 +22,7 @@ private let signposter = AppLogger.signposter()
 public struct SwiftLMServerConfig: Sendable {
   /// Absolute path to the SwiftLM binary.
   public let binaryPath: String
-  /// 127.0.0.1 by default. Only change when binding to another interface.
+  /// localhost by default. Only change when binding to another interface.
   public let host: String
   /// TCP port the server listens on.
   public let port: Int
@@ -33,7 +33,7 @@ public struct SwiftLMServerConfig: Sendable {
 
   public init(
     binaryPath: String,
-    host: String = "127.0.0.1",
+    host: String = "localhost",
     port: Int = 5413,
     logFilePath: String? = nil,
     readyTimeout: TimeInterval = 300
@@ -179,17 +179,17 @@ public final class SwiftLMServer {
         return false
       }
       let sem = DispatchSemaphore(value: 0)
-      var ok = false
+      let ok = SwiftLMServerMutableBox(false)
       var req = URLRequest(url: url, timeoutInterval: 2)
       req.httpMethod = "GET"
       URLSession.shared.dataTask(with: req) { _, resp, _ in
         if let http = resp as? HTTPURLResponse, (200..<500).contains(http.statusCode) {
-          ok = true
+          ok.value = true
         }
         sem.signal()
       }.resume()
       _ = sem.wait(timeout: .now() + 3)
-      if ok { return true }
+      if ok.value { return true }
       Thread.sleep(forTimeInterval: 1)
     }
     return false
@@ -219,4 +219,9 @@ public final class SwiftLMServer {
   public var isRunning: Bool {
     process?.isRunning ?? false
   }
+}
+
+private final class SwiftLMServerMutableBox<T>: @unchecked Sendable {
+  var value: T
+  init(_ value: T) { self.value = value }
 }
