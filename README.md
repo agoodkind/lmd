@@ -6,7 +6,7 @@ A single-binary LM Studio replacement for Apple Silicon.
 
 - **broker** on `localhost:5400` exposes an OpenAI-compatible HTTP API over any MLX model on disk
 - **JIT model routing** spawns a dedicated [SwiftLM](https://github.com/SharpAI/SwiftLM) child per model, allocates ports from a pool, shuts them down under memory pressure
-- **sensor sampling** to `memory.jsonl` (was `swiftmon`) for historical thermal/battery/power data
+- **sensor sampling** to `memory.jsonl` for thermal, battery, and power time-series
 - **fan control** is disabled in `lmd-serve` during the current moratorium; macOS owns fans while the broker runs
 - **multi-tab TUI** (monitor, library, bench, events) rendered in raw terminal mode
 - **benchmark orchestrator** for long-running model comparison jobs
@@ -98,7 +98,7 @@ log show --predicate 'subsystem == "io.goodkind.lmd" AND category == "Broker"' -
 log show --subsystem io.goodkind.lmd --last 30m --style ndjson
 ```
 
-Data artifacts (`memory.jsonl`, bench `results/*.json`) are separate from logs. See `plan/logging-migration.md`.
+Data artifacts (`memory.jsonl`, bench `results/*.json`) live under `LMD_DATA_DIR` and are separate from logs. The Apple-native logging policy itself is enforced by `make log-audit` and codified in `AGENTS.md` §5.
 
 ## Develop
 
@@ -156,10 +156,7 @@ lmd/
     io.goodkind.lmd.serve.plist.example   LaunchAgent template
     homebrew/                              brew formula
   plan/
-    logging-migration.md                   Apple-native logging policy
     VIDEO_ROUTING_FINAL_DECISION.md        boundary for video request routing
-    LM_STUDIO_REPLACEMENT.md               feature parity tracking
-    SWIFTLMD_RUNBOOK.md                    operational runbook
 ```
 
 ## Related projects

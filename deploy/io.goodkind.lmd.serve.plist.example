@@ -67,11 +67,11 @@
         Diagnostics live in unified logging under subsystem io.goodkind.lmd.
         Tail live:   log stream --subsystem io.goodkind.lmd --info
         Dump 1h:     log show   --subsystem io.goodkind.lmd --last 1h
-        Route stdout to /dev/null so structured os.Logger output is the only
-        normal path. See plan/logging-migration.md Rule 9.
-        stderr is kept on disk so Swift runtime crash strings (Fatal error,
-        Precondition failed, native SIGSEGV banners) survive long enough to
-        diagnose. The Swift os.Logger pipeline does not capture stderr.
+        stdout routes to /dev/null so structured os.Logger output is the
+        only normal path. stderr routes to a real file so Swift runtime
+        crash banners (Fatal error, Precondition failed, native SIGSEGV)
+        survive long enough to diagnose; the os.Logger pipeline does not
+        capture stderr.
     -->
     <key>StandardOutPath</key>
     <string>/dev/null</string>
