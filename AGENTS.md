@@ -6,7 +6,7 @@ Operating manual for any agent working in this repo. Optimized to stay correct a
 
 ## 1. What this repo is
 
-`lmd` is a macOS-native LM Studio companion: an XPC broker (`lmd-serve`) registered as a per-user `LaunchAgent`, a CLI dispatcher (`lmd`), a TUI, a benchmark harness, and a TUI QA driver. All targets share a `Sources/AppLogger` module and a strict os.Logger discipline. Distribution is bare codesigned + notarized CLIs (no `.app`, no `.pkg` yet).
+`lmd` is a macOS-native LM Studio replacement: an XPC broker (`lmd-serve`) registered as a per-user `LaunchAgent`, a CLI dispatcher (`lmd`), a TUI, a benchmark harness, and a TUI QA driver. All targets share a `Sources/AppLogger` module and a strict os.Logger discipline. Distribution is bare codesigned + notarized CLIs (no `.app`, no `.pkg` yet).
 
 The project is Apple-platform only (`Package.swift` `platforms: [.macOS(...)]`) and uses Apple frameworks first: XPC for IPC, `os.Logger` for logging, `OSSignposter` for performance, `launchd` for service lifecycle, `notarytool` for distribution.
 
@@ -16,14 +16,14 @@ When something needs to change, edit the source of truth, not this file:
 
 | Concern | Authoritative file |
 |---|---|
-| Targets, target dependencies, Swift language modes | `Package.swift` |
-| Build / test / lint / install / sign / notarize commands | `Makefile` |
+| SwiftPM targets, dependencies, Swift language modes | `Package.swift` |
+| Tuist project (Xcode workspace, used only for `default.metallib`) | `Project.swift`, `Tuist.swift`, `Tuist/Package.swift` |
+| Build / test / lint / install / sign / notarize implementation | `Tools/lmd-dev.swift` |
+| Build / test / lint / install / sign / notarize entry points | `Makefile` (thin aliases over `Tools/lmd-dev.swift`) |
 | Local-machine signing config (gitignored) | `config/signing.env` (template: `config/signing.env.example`) |
 | LaunchAgent plist | `deploy/io.goodkind.lmd.serve.plist.example` |
 | CI build/test pipeline | `.github/workflows/ci.yml` |
 | CI release pipeline (sign + notarize + tag + release) | `.github/workflows/release.yml` |
-| Local sign / notarize scripts | `scripts/sign-binaries.sh`, `scripts/notarize.sh`, `scripts/notary-setup.sh` |
-| CI sign / notarize scripts | `scripts/ci-import-cert.sh`, `scripts/ci-sign.sh`, `scripts/ci-notarize.sh` |
 | Active design notes | `plan/*.md` |
 | User-facing overview | `README.md` |
 
@@ -34,14 +34,19 @@ If you find yourself enumerating targets, categories, or filenames in prose, sto
 - **One broker, many clients.** `lmd-serve` is a singleton `LaunchAgent` (`MachServices` entry `io.goodkind.lmd.control`); all other executables are short-lived clients that talk to it via `XPCSession` (see `Sources/SwiftLMControl/BrokerClient.swift`).
 - **Clients close their session.** Every client must `client.close()` (which calls `session.cancel(reason:)`) before the process exits. Skipping this trips an `_xpc_api_misuse` SIGTRAP at deinit.
 - **`XPCListener(service:)` only works under launchd.** `Sources/lmd-serve/XPCControl.swift` guards on `XPC_SERVICE_NAME` and throws a typed skip error when run outside launchd (tests, foreground `make run-serve`). Do not bypass that guard.
-- **No file logging anywhere.** Every plist's `StandardOutPath` and `StandardErrorPath` is `/dev/null`. Operators read with `log stream --subsystem io.goodkind.lmd`.
+- **No file logging anywhere.** Every plist's `StandardOutPath` is `/dev/null`. Operators read with `log stream --subsystem io.goodkind.lmd`. `StandardErrorPath` is a real file under `~/Library/Logs/` so Swift runtime crash banners (`Fatal error:`, `Precondition failed:`, native `SIGSEGV` from MLX/NIO) survive long enough to diagnose — the os.Logger pipeline does not capture stderr.
 - **Library targets are pure.** Long-lived state, sockets, file IO, and process spawning belong in `Sources/lmd-serve` (or its dedicated subsystems), never in a `library` target.
 
 ## 4. Build and toolchain
 
 - Swift tools version is set in `Package.swift`. Match it locally (Xcode bundling that Swift release) and in CI runner choice.
 - CI runs on the GitHub macOS runner whose Xcode matches our `swift-tools-version`. If you bump tools-version, also bump `runs-on` in both workflows in the same commit. Mismatches surface as `sending` / strict-concurrency errors that pass locally and fail on CI.
-- `make build` = `swift build -c release`. `make debug` = unoptimized. `make test` runs the full suite.
+- `make build` runs a **hybrid build** because neither SwiftPM nor Tuist+xcodebuild alone produces a usable binary:
+  - **SwiftPM** (`swift build -c release`) links `swift-nio` with the resilient layout the Swift runtime expects, but cannot compile `.metal` shaders.
+  - **Tuist + xcodebuild** compiles `.metal` into `default.metallib` inside `mlx-swift_Cmlx.bundle`, but produces executables that crash on the first socket allocation (`swift_allocObject` with null `ManagedAtomic<Bool>` metadata; see vapor/vapor#3369).
+  - `Tools/lmd-dev.swift` orchestrates both, then stages SwiftPM binaries and the Xcode-built bundle into `Products/Build/Release/`. `make install` reads only from that single staging directory.
+- `make debug` is the SwiftPM half only (unoptimized binaries, no metallib refresh).
+- `make test` runs the full suite via Tuist.
 - `make check`-style aggregate target does not exist; the CI workflow defines the canonical battery (build + test + log-audit + smoke).
 
 ## 5. Logging policy (NON-NEGOTIABLE)
@@ -108,14 +113,14 @@ Any code path that can exceed ~50ms wall time brackets itself with `OSSignposter
 - All tests live under `Tests/`, named `<TargetName>Tests` to match the convention `Package.swift` declares.
 - Snapshot tests (TUI) regenerate goldens with `make snapshot-update`.
 - Integration tests that need a live broker check `LMD_XPC_USE_LAUNCHD_DAEMON=1` and skip otherwise. Do not change tests to spawn `lmd-serve` themselves; that path traps inside `XPCListener`.
-- The HTTP smoke test is a shell script, not an XCTest, and is invoked via `make smoke`.
+- The HTTP smoke test is implemented in `Tools/lmd-dev.swift` (`smoke` / `video-smoke` subcommands) and invoked via `make smoke` / `make video-smoke`. There are no shell-script smoke runners.
 
 ## 8. Distribution
 
-Two parallel pipelines, one identity, one team:
+Two parallel pipelines, one identity, one team, all driven by `Tools/lmd-dev.swift`:
 
-- **Local**: `make dist` runs `make build` -> `scripts/sign-binaries.sh` -> `scripts/notarize.sh`. Reads identity, team, bundle prefix, and notary keychain profile from `config/signing.env`. The keychain profile is created once with `make notary-setup`.
-- **CI**: `.github/workflows/release.yml` runs on every push to `main`. It imports a single-identity `.p12` from secrets into a temp keychain, signs with `scripts/ci-sign.sh`, and notarizes with `scripts/ci-notarize.sh` using App Store Connect API key credentials (.p8 + key-id + issuer-id), then tags `YYYYMMDDHHmm-<hex-run>-<sha>` and creates a GitHub Release with the notarized zip attached.
+- **Local**: `make dist` runs `make build`, then `lmd-dev sign`, then `lmd-dev notarize`. Reads identity, team, bundle prefix, and notary keychain profile from `config/signing.env`. The keychain profile is created once with `make notary-setup`.
+- **CI**: `.github/workflows/release.yml` runs on every push to `main`. It imports a single-identity `.p12` from secrets into a temp keychain via `lmd-dev ci-import-cert`, signs with `lmd-dev ci-sign`, and notarizes with `lmd-dev ci-notarize` using App Store Connect API key credentials (.p8 + key-id + issuer-id), then tags `YYYYMMDDHHmm-<hex-run>-<sha>` and creates a GitHub Release with the notarized zip attached.
 
 Bare CLI binaries cannot be `stapler staple`d. First-launch Gatekeeper checks hit the network. Wrap into a `.pkg` if you need offline-friendly distribution; that's an open future task.
 
@@ -143,11 +148,11 @@ The .p12 must contain exactly one identity (full keychain exports run over the G
 
 ## 10. Conventions for new code
 
-- New executable target = new `.executableTarget` in `Package.swift` AND a corresponding entry in the `BINARIES` variable in `Makefile` AND the `DEFAULT_BINARIES` arrays in `scripts/sign-binaries.sh` and `scripts/notarize.sh` AND `scripts/ci-sign.sh` and `scripts/ci-notarize.sh`. These four lists must agree.
-- New library target = new `.target` in `Package.swift` and (if it needs them) a `.testTarget`. No other ceremony.
+- New executable target = new `.executableTarget` in `Package.swift` AND a corresponding `commandLineTarget` in `Project.swift` AND a new entry in the `productBinaries` array in `Tools/lmd-dev.swift`. These three lists must agree.
+- New library target = new `.target` in `Package.swift` AND a corresponding `frameworkTarget` in `Project.swift` AND (if it needs them) a `.testTarget` in both. No other ceremony.
 - New file = `private let log = AppLogger.logger(category: "...")` at the top, before any other declarations.
-- New plist under `deploy/` = `StandardOutPath` and `StandardErrorPath` both set to `/dev/null`.
-- Cross-language scripts live as their own files with the appropriate extension (`.sh`, `.py`), invoked from Swift / Make / other shell. Don't inline scripts via heredoc.
+- New plist under `deploy/` = `StandardOutPath` set to `/dev/null`; `StandardErrorPath` set to a real file under `~/Library/Logs/` so Swift runtime crash banners survive.
+- Cross-language scripts live as their own files with the appropriate extension (`.sh`, `.py`), invoked from Swift / Make / other shell. Don't inline scripts via heredoc. The lmd codebase itself targets pure Swift (no `.sh` driver) per `plan/VIDEO_ROUTING_FINAL_DECISION.md`; this rule is for situations where calling out to a non-Swift language is unavoidable.
 
 ## 11. Anti-patterns to reject on sight
 
@@ -155,8 +160,8 @@ The .p12 must contain exactly one identity (full keychain exports run over the G
 - `print` / `NSLog` / `debugPrint` anywhere in `Sources/` outside `Sources/AppLogger/`.
 - A new subsystem string anywhere.
 - A `.warn` log call (does not exist in Apple's API).
-- File-based logging (`FileHandle` writing diagnostic output, `.log` file paths, plist `StandardOutPath` to a real path).
-- `swift build` invocations that do not go through `make build` / `make debug` / the workflows. The Make targets are the contract.
+- File-based logging via `FileHandle` writing diagnostic output, or `.log` file paths written from Swift, or plist `StandardOutPath` to a real path. The `StandardErrorPath` exception exists *only* to catch Swift-runtime crash banners that bypass `os.Logger`; do not write to stderr from application code.
+- `swift build` invocations that do not go through `make build` / `make debug` / the workflows. The Make targets and `Tools/lmd-dev.swift` are the contract.
 - A cert SHA1 typed inline in a script. The Make target reads from `config/signing.env`; CI reads from secrets. Never both.
 - An XPC client that does not call `close()` (or `defer { client.close() }`) before its enclosing scope exits.
 

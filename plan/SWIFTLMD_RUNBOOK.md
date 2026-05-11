@@ -1,5 +1,13 @@
 # swiftlmd runbook
 
+> **Status: superseded.** This file documents the predecessor broker
+> (`swiftlmd`, built from the old `swiftbench` workspace at
+> `~/Sites/lm-review-stress-test/swiftbench`). Current operations for
+> the renamed `lmd-serve` broker live in the top-level `README.md`
+> (install, environment, observability) and `AGENTS.md` §9 (service
+> lifecycle), §8 (distribution). Paths, plist labels, and build
+> commands below are historical.
+
 Operational notes for the broker daemon.
 
 ## What is it

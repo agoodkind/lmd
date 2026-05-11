@@ -21,12 +21,12 @@ make install
 ```
 
 This:
-1. Builds release binaries for all targets.
-2. Copies them to `~/.local/bin/` (override with `PREFIX=/opt/...`).
+1. Builds release binaries via SwiftPM (`swift build -c release`) and the MLX Metal shader library (`default.metallib`) via Tuist + xcodebuild. Both halves are required; see `Tools/lmd-dev.swift` for the rationale.
+2. Copies the binaries and `mlx-swift_Cmlx.bundle` to `~/.local/bin/` (override with `PREFIX=/opt/...`).
 3. Writes `~/Library/LaunchAgents/io.goodkind.lmd.serve.plist` from the template with your install path substituted in.
 4. `launchctl bootstrap`s the agent into the current GUI session.
 
-The broker starts running immediately and at every subsequent login.
+The broker starts running immediately and at every subsequent login. Requires Xcode (for `xcodebuild` + `tuist`) and a SwiftPM toolchain matching `Package.swift`'s `swift-tools-version`.
 
 ## Binaries
 
@@ -102,10 +102,11 @@ Data artifacts (`memory.jsonl`, bench `results/*.json`) are separate from logs. 
 
 ## Develop
 
-SwiftPM pulls [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) from `https://github.com/agoodkind/macos-smc-fan.git` on branch `main`. A normal clone of this repo is enough for `swift build`.
+SwiftPM pulls [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) from `https://github.com/agoodkind/macos-smc-fan.git` on branch `main`. A normal clone of this repo plus `tuist` on `PATH` (`brew install tuist`) is enough for `make build`.
 
 ```
-make build              # release build of everything
+make build              # hybrid SwiftPM (binaries) + xcodebuild (metallib)
+make debug              # SwiftPM debug build only (no metallib refresh)
 make test               # unit + snapshot + integration tests
 make tui-qa             # interactive TUI QA: tmux + pty + iTerm drivers
 make log-audit          # enforce the Apple-native logging policy
@@ -115,18 +116,28 @@ make restart-serve      # pick up a new broker binary under launchd
 make uninstall          # remove binaries + LaunchAgent
 ```
 
+Every Make target is a thin alias over `Tools/lmd-dev.swift`. To skip Make and call it directly: `swift Tools/lmd-dev.swift help`.
+
 ## Layout
 
 ```
 lmd/
+  Package.swift          SwiftPM package (executables + library targets)
+  Project.swift          Tuist Xcode project (used only to compile default.metallib)
+  Tuist.swift            Tuist configuration shim
+  Tuist/                 Tuist's own SwiftPM resolution for project generation
+  Tools/
+    lmd-dev.swift        Swift-script driver behind every Make target
   Sources/
     AppLogger/           shared os.Logger + swift-log bridge
     SwiftLMCore/         model descriptors, shared types
-    SwiftLMBackend/      SwiftLM child-process lifecycle
+    SwiftLMBackend/      SwiftLM child-process lifecycle + MLX VLM video backend
     SwiftLMEmbed/        MLX embedding backends (MLXEmbedders)
     SwiftLMRuntime/      router, bench config + orchestrator, fan policy library, event bus
     SwiftLMMonitor/      macmon client, sensor sampler, battery reader
+    SwiftLMControl/      XPC broker client + protocol
     SwiftLMTUI/          tab protocol, panels, ANSI + input parsers
+    LMDServeSupport/     HTTP routing helpers shared between lmd-serve and tests
     lmd/                 dispatcher (lmd <subcommand>)
     lmd-serve/           broker + sampler daemon
     lmd-tui/             interactive dashboard
@@ -134,15 +145,21 @@ lmd/
     lmd-qa/              three-driver TUI QA harness
   Tests/
     SwiftLMTUITests/     tab render snapshots
-    SwiftLMRuntimeTests/ bench, router, fan logic
-    IntegrationTests/    binary launch + SIGINT
+    SwiftLMRuntimeTests/ bench, router, fan logic, model catalog capabilities
+    SwiftLMBackendTests/ SwiftLM server config, MLX VLM video backend
+    SwiftLMCoreTests/    model capabilities
+    SwiftLMControlTests/ broker protocol
+    LMDServeTests/       video chat routing
+    IntegrationTests/    binary launch + SIGINT, embeddings route
     Fixtures/            shared inputs (log categories, tuiqa coverage)
   deploy/
     io.goodkind.lmd.serve.plist.example   LaunchAgent template
     homebrew/                              brew formula
   plan/
     logging-migration.md                   Apple-native logging policy
-    GENERALIZATION.md                      architecture roadmap
+    VIDEO_ROUTING_FINAL_DECISION.md        boundary for video request routing
+    LM_STUDIO_REPLACEMENT.md               feature parity tracking
+    SWIFTLMD_RUNBOOK.md                    operational runbook
 ```
 
 ## Related projects
