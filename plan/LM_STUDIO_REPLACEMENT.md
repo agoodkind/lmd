@@ -224,9 +224,9 @@ Behavior:
 - If loading a new model would exceed the memory budget: evict the oldest idle model that is not currently mid-request.
 - Idle timeout: 15 minutes. After that, unload.
 - Concurrent requests to the same model: queue up to N in-flight slots (configurable, default 1).
-- Fan and battery policies live in `FanCoordinator` and are shared with `swiftbench` so there is only one owner of fan state per session.
+- Fan control is disabled in `lmd-serve` during the current moratorium. `FanCoordinator` remains a library surface, but the broker does not take over fans or write fan policy.
 
-**Done when:** humanify runs against `http://127.0.0.1:5400/v1` and the first request triggers a model load; subsequent requests come back within ~100ms of compute time.
+**Done when:** humanify runs against `http://localhost:5400/v1` and the first request triggers a model load; subsequent requests come back within ~100ms of compute time.
 
 ### Phase 3: swifttop control surface
 
@@ -323,7 +323,7 @@ Binaries stay lowercase. Library targets use `SwiftLM` prefix + `Core/Backend/Ru
 1. **SwiftLM spawn cost.** Loading a 30B model takes 15-60s. Clients issuing first-request must tolerate that or use `preload`.
 2. **Metal shader lookup.** SwiftLM currently requires `WorkingDirectory` to be `.build/release` for `default.metallib` to be found. Either we keep that (LaunchAgent sets cwd) or we wrap SwiftLM to locate the shader bundle from its binary path.
 3. **Single-port per model** means N loaded models = N processes. Easier to reason about than a single shared process but consumes more RAM overhead per model.
-4. **Fan contention.** If both `swiftbench` and `swiftlmd` try to drive fans, one has to yield. `FanCoordinator` as a singleton-per-session (file lock?) avoids both writing simultaneously.
+4. **Fan contention.** `lmd-serve` currently avoids this by not taking over fans during the moratorium. If broker-owned fan policy returns, it needs an explicit ownership handoff instead of concurrent writers.
 5. **MacOS permissions.** `macmon` needs root for some sensors. Already handled: user ran sudo once when installing. Document in README.
 
 ---

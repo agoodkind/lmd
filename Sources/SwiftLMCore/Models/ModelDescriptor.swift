@@ -18,6 +18,23 @@ public enum ModelKind: String, Sendable, Codable {
   case embedding
 }
 
+// MARK: - ModelCapabilities
+
+/// Modalities advertised by a model, independent from routing kind.
+public struct ModelCapabilities: Hashable, Sendable, Codable {
+  public let text: Bool
+  public let vision: Bool
+  public let video: Bool
+
+  public init(text: Bool = true, vision: Bool = false, video: Bool = false) {
+    self.text = text
+    self.vision = vision
+    self.video = video
+  }
+
+  public static let textOnly = ModelCapabilities()
+}
+
 // MARK: - ModelDescriptor
 
 /// A single MLX model discovered on disk.
@@ -38,6 +55,8 @@ public struct ModelDescriptor: Hashable, Sendable {
   public let slug: String?
   /// Whether this model is routed to chat (SwiftLM) or embeddings (MLX).
   public let kind: ModelKind
+  /// Modalities the model advertises through structured metadata.
+  public let capabilities: ModelCapabilities
 
   public init(
     id: String,
@@ -45,7 +64,8 @@ public struct ModelDescriptor: Hashable, Sendable {
     path: String,
     sizeBytes: Int64 = 0,
     slug: String? = nil,
-    kind: ModelKind = .chat
+    kind: ModelKind = .chat,
+    capabilities: ModelCapabilities = .textOnly
   ) {
     self.id = id
     self.displayName = displayName
@@ -53,5 +73,6 @@ public struct ModelDescriptor: Hashable, Sendable {
     self.sizeBytes = sizeBytes
     self.slug = slug
     self.kind = kind
+    self.capabilities = capabilities
   }
 }

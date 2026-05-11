@@ -21,7 +21,7 @@ ls .build/release/swiftlmd
 ## Run
 
 ```
-# defaults: host 127.0.0.1, port 5400, budget 80 GB, idle 15 min
+# defaults: host localhost, port 5400, budget 80 GB, idle 15 min
 ./.build/release/swiftlmd
 ```
 
@@ -29,7 +29,7 @@ ls .build/release/swiftlmd
 
 | var | default | meaning |
 |---|---|---|
-| `SWIFTLMD_HOST` | `127.0.0.1` | listen address |
+| `SWIFTLMD_HOST` | `localhost` | listen address |
 | `SWIFTLMD_PORT` | `5400` | listen port |
 | `SWIFTLMD_BUDGET_GB` | `80` | memory ceiling for loaded models |
 | `SWIFTLMD_IDLE_MINUTES` | `15` | auto-unload threshold |

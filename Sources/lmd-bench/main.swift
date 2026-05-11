@@ -42,7 +42,7 @@ let swiftLMBinary: String = {
   return "\(home)/Sites/SwiftLM/.build/release/SwiftLM"
 }()
 let serverPort: Int = 5413
-let serverHost = "127.0.0.1"
+let serverHost = "localhost"
 let perTestTimeout: TimeInterval = 1800  // 30 min default, enough for 122B in RAM
 let fancurveAgentPath = "/Applications/FanCurve.app/Contents/MacOS/io.goodkind.fancurveagent"
 let configsRepo = "/Users/agoodkind/Sites/configs"
@@ -245,7 +245,7 @@ final class MemoryMonitor {
     }
 
     private func fetchMacmon() -> [String: Any]? {
-        guard let url = URL(string: "http://127.0.0.1:\(macmonPort)/json") else { return nil }
+        guard let url = URL(string: "http://localhost:\(macmonPort)/json") else { return nil }
         let sem = DispatchSemaphore(value: 0)
         var result: [String: Any]?
         var req = URLRequest(url: url, timeoutInterval: 1.5)

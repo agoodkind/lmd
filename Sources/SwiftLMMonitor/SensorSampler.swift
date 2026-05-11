@@ -80,18 +80,18 @@ public final class SensorSampler: @unchecked Sendable {
   // MARK: - macmon lifecycle
 
   private func macmonIsResponding() -> Bool {
-    guard let url = URL(string: "http://127.0.0.1:\(config.macmonPort)/json") else { return false }
+    guard let url = URL(string: "http://localhost:\(config.macmonPort)/json") else { return false }
     let sem = DispatchSemaphore(value: 0)
-    var ok = false
+    let ok = SensorSamplerMutableBox(false)
     var req = URLRequest(url: url, timeoutInterval: 0.8)
     req.httpMethod = "GET"
     let t = URLSession.shared.dataTask(with: req) { data, _, _ in
       defer { sem.signal() }
-      if let d = data, !d.isEmpty { ok = true }
+      if let d = data, !d.isEmpty { ok.value = true }
     }
     t.resume()
     _ = sem.wait(timeout: .now() + 1.0)
-    return ok
+    return ok.value
   }
 
   private func startMacmonIfNeeded() {
@@ -118,9 +118,9 @@ public final class SensorSampler: @unchecked Sendable {
   }
 
   private func fetchMacmon() -> [String: Any]? {
-    guard let url = URL(string: "http://127.0.0.1:\(config.macmonPort)/json") else { return nil }
+    guard let url = URL(string: "http://localhost:\(config.macmonPort)/json") else { return nil }
     let sem = DispatchSemaphore(value: 0)
-    var result: [String: Any]?
+    let result = SensorSamplerMutableBox<[String: Any]?>(nil)
     var req = URLRequest(url: url, timeoutInterval: 1.5)
     req.httpMethod = "GET"
     let task = URLSession.shared.dataTask(with: req) { data, _, _ in
@@ -128,11 +128,11 @@ public final class SensorSampler: @unchecked Sendable {
       guard let d = data,
             let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any]
       else { return }
-      result = obj
+      result.value = obj
     }
     task.resume()
     _ = sem.wait(timeout: .now() + 2)
-    return result
+    return result.value
   }
 
   // MARK: - Signed battery reader (ioreg-backed)
@@ -328,4 +328,9 @@ public final class SensorSampler: @unchecked Sendable {
     p.waitUntilExit()
     return String(data: data, encoding: .utf8) ?? ""
   }
+}
+
+private final class SensorSamplerMutableBox<T>: @unchecked Sendable {
+  var value: T
+  init(_ value: T) { self.value = value }
 }

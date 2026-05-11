@@ -11,7 +11,7 @@
     lmd-serve is the single daemon that owns:
       - OpenAI-compatible broker on LMD_HOST:LMD_PORT
       - Sensor sampling (JSONL under LMD_DATA_DIR/memory.jsonl)
-      - Fan control (via macos-smc-fan helper XPC), scaling by in-flight request count
+      - Fan control is disabled during the current moratorium; macOS owns fans
     This replaces the former swiftlmd + swiftmon pair.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -41,7 +41,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>LMD_HOST</key>
-        <string>127.0.0.1</string>
+        <string>localhost</string>
         <key>LMD_PORT</key>
         <string>5400</string>
         <key>LMD_BUDGET_GB</key>

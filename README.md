@@ -4,10 +4,10 @@ A single-binary LM Studio replacement for Apple Silicon.
 
 `lmd` owns every part of the local-LLM workstation experience:
 
-- **broker** on `127.0.0.1:5400` exposes an OpenAI-compatible HTTP API over any MLX model on disk
+- **broker** on `localhost:5400` exposes an OpenAI-compatible HTTP API over any MLX model on disk
 - **JIT model routing** spawns a dedicated [SwiftLM](https://github.com/SharpAI/SwiftLM) child per model, allocates ports from a pool, shuts them down under memory pressure
 - **sensor sampling** to `memory.jsonl` (was `swiftmon`) for historical thermal/battery/power data
-- **fan control** via the [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) privileged helper (XPC), scaled by in-flight request count so fans ramp gradually during inference and cool down slowly after
+- **fan control** is disabled in `lmd-serve` during the current moratorium; macOS owns fans while the broker runs
 - **multi-tab TUI** (monitor, library, bench, events) rendered in raw terminal mode
 - **benchmark orchestrator** for long-running model comparison jobs
 
@@ -33,13 +33,26 @@ The broker starts running immediately and at every subsequent login.
 | Binary | Role | Lifecycle |
 |---|---|---|
 | `lmd` | Dispatcher. `lmd serve`, `lmd tui`, `lmd bench`, `lmd qa` execs the right sibling. | Short-lived (the user runs it). |
-| `lmd-serve` | Broker + sensor sampler + fan control. | 24/7 LaunchAgent. |
+| `lmd-serve` | Broker + sensor sampler. Fan control is disabled during the current moratorium. | 24/7 LaunchAgent. |
 | `lmd-tui` | Interactive dashboard (monitor / library / bench / events tabs). | Foreground while the user wants it open. |
 | `lmd-bench` | Benchmark orchestrator. Long runs that survive terminal close. | Foreground or detached via `nohup`. |
 | `lmd-qa` | TUI QA harness for CI (three drivers: tmux, pty, iTerm). | CI only. |
 
 The broker on 5400 speaks the OpenAI API. Point Cursor, humanify, or
-anything else at `http://127.0.0.1:5400` and it just works.
+anything else at `http://localhost:5400` and it just works.
+
+## Video
+
+`POST /v1/chat/completions` may include OpenAI-style `video_url` content parts
+for models whose catalog capabilities advertise `video: true`.
+
+`lmd` stays dumb here on purpose. It validates that `video_url.url` points to a
+local file and routes that file through to the MLX VLM backend. `lmd` does not
+decode, retime, or expand the video itself. Temporal sampling is backend-owned.
+
+With the current Swift Qwen video processors in upstream `mlx-swift-lm`, that
+backend-owned policy is `2 FPS`, so video support is honest routing support, not
+high-fidelity subtle-animation analysis.
 
 ## Environment
 
@@ -47,7 +60,7 @@ Defaults live in `deploy/io.goodkind.lmd.serve.plist.example`. All `lmd-serve` e
 
 | Var | Default | Meaning |
 |---|---|---|
-| `LMD_HOST` | `127.0.0.1` | Broker bind host. |
+| `LMD_HOST` | `localhost` | Broker bind host. |
 | `LMD_PORT` | `5400` | Broker bind port. |
 | `LMD_BUDGET_GB` | `80` | Max GB of models resident at once. Evictions happen above this. |
 | `LMD_IDLE_MINUTES` | `15` | After this many minutes idle, unload a chat (SwiftLM) model. |
@@ -79,7 +92,7 @@ Everything structured flows through `os.Logger` under subsystem `io.goodkind.lmd
 log stream --subsystem io.goodkind.lmd --info
 
 # Last hour with category filter.
-log show --predicate 'subsystem == "io.goodkind.lmd" AND category == "FanCoordinator"' --last 1h
+log show --predicate 'subsystem == "io.goodkind.lmd" AND category == "Broker"' --last 1h
 
 # NDJSON for parsing.
 log show --subsystem io.goodkind.lmd --last 30m --style ndjson
@@ -111,11 +124,11 @@ lmd/
     SwiftLMCore/         model descriptors, shared types
     SwiftLMBackend/      SwiftLM child-process lifecycle
     SwiftLMEmbed/        MLX embedding backends (MLXEmbedders)
-    SwiftLMRuntime/      router, bench config + orchestrator, fan + event bus
+    SwiftLMRuntime/      router, bench config + orchestrator, fan policy library, event bus
     SwiftLMMonitor/      macmon client, sensor sampler, battery reader
     SwiftLMTUI/          tab protocol, panels, ANSI + input parsers
     lmd/                 dispatcher (lmd <subcommand>)
-    lmd-serve/           broker + sampler + fan daemon
+    lmd-serve/           broker + sampler daemon
     lmd-tui/             interactive dashboard
     lmd-bench/           benchmark runner
     lmd-qa/              three-driver TUI QA harness
@@ -135,5 +148,5 @@ lmd/
 ## Related projects
 
 - [SwiftLM](https://github.com/SharpAI/SwiftLM) upstream MLX inference engine; `lmd-serve` spawns one child per loaded model.
-- [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) Swift package linked by `FanCoordinator` for XPC to the privileged helper (install the helper daemon from that repo).
-- [fancurveagent](https://github.com/agoodkind/macos-fan-curve) the LaunchAgent that owns fans when `lmd-serve` is not running. `lmd-serve` boots it out on takeover and re-bootstraps it on release.
+- [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) Swift package linked by the fan policy library. `lmd-serve` does not currently take over fans.
+- [fancurveagent](https://github.com/agoodkind/macos-fan-curve) the LaunchAgent that owns fans independently of `lmd-serve` during the current moratorium.

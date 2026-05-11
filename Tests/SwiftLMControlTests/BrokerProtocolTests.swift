@@ -10,6 +10,7 @@
 import XCTest
 
 @testable import SwiftLMControl
+@testable import SwiftLMCore
 
 final class BrokerProtocolTests: XCTestCase {
   func testRequestRoundTrip() throws {
@@ -38,7 +39,8 @@ final class BrokerProtocolTests: XCTestCase {
           sizeGB: 12.5,
           lastUsed: Date(timeIntervalSince1970: 1_700_000_000),
           inFlightRequests: 1,
-          kind: "chat"
+          kind: "chat",
+          capabilities: ModelCapabilities(text: true, vision: true, video: true)
         )
       ]
     )

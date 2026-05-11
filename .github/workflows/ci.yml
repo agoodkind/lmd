@@ -23,29 +23,29 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Show toolchain
-        run: |
-          swift --version
-          xcodebuild -version || true
+        run: swift Tools/lmd-dev.swift toolchain
 
       - name: Cache SwiftPM build + deps
         uses: actions/cache@v5
         with:
           path: |
-            .build
+            Tuist/.build
+            Derived
+            Products/Build
             ~/Library/Caches/org.swift.swiftpm
-          key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          key: tuist-${{ runner.os }}-${{ hashFiles('Tuist/Package.resolved') }}
           restore-keys: |
-            swiftpm-${{ runner.os }}-
+            tuist-${{ runner.os }}-
 
       - name: Build (release)
-        run: swift build -c release
+        run: swift Tools/lmd-dev.swift build Release
 
       - name: Unit + snapshot + integration tests
-        run: swift test
+        run: swift Tools/lmd-dev.swift test
 
       - name: Log audit
-        run: make log-audit
-      # `make smoke` is a developer convenience that spawns lmd-serve
+        run: swift Tools/lmd-dev.swift log-audit
+      # `swift Tools/lmd-dev.swift smoke` is a developer convenience that spawns lmd-serve
       # outside launchd and pokes its HTTP endpoints. It is intentionally
       # not run in CI: the broker is a LaunchAgent in production and the
       # XPC listener is guarded against non-launchd contexts, so a CI

@@ -139,7 +139,7 @@ private final class SessionHandler: @unchecked Sendable {
       return runBlockingResponse { try await self.embed(model: model, inputs: inputs) }
 
     case .pullStart(let slug):
-      // Streaming: ack with .ok synchronously, then fan progress frames
+      // Streaming: ack with .ok synchronously, then fan out progress frames
       // back to the client via the bound session.
       startPull(slug: slug)
       return .ok
@@ -170,7 +170,8 @@ private final class SessionHandler: @unchecked Sendable {
         sizeGB: Double(c.sizeBytes) / bytesPerGB,
         lastUsed: c.lastUsed,
         inFlightRequests: c.inFlightRequests,
-        kind: kind
+        kind: kind,
+        capabilities: state.modelsByID[c.modelID]?.capabilities ?? .textOnly
       )
     }
     let allocatedGB = Double(snap.allocatedBytes) / bytesPerGB

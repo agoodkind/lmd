@@ -4,6 +4,12 @@ TUIQA/
 .swiftpm/
 xcuserdata/
 DerivedData/
+Derived/
+LMD.xcodeproj/
+LMD.xcworkspace/
+lmd.xcodeproj/
+lmd.xcworkspace/
+Tuist/.build/
 
 .DS_Store
 *.xcresult
