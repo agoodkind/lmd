@@ -2,13 +2,6 @@ import Darwin
 import Foundation
 
 let productBinaries = ["lmd", "lmd-serve", "lmd-tui", "lmd-bench", "lmd-qa"]
-let xcodeProductNames = [
-  "lmd": "lmd",
-  "lmd-serve": "lmd_serve",
-  "lmd-tui": "lmd_tui",
-  "lmd-bench": "lmd_bench",
-  "lmd-qa": "lmd_qa",
-]
 let defaultBundleIdentifierPrefix = "io.goodkind.lmd"
 let defaultVideoModel = "mlx-community/Qwen2.5-VL-32B-Instruct-bf16"
 let supportedVideoExtensions: Set<String> = [
@@ -403,8 +396,9 @@ final class DevTool {
     try writeLine(
       """
       lmd-dev commands:
-        build [Release|Debug]   run Tuist install/generate/build for product CLIs
-        debug                   build product CLIs in Debug
+        build [Release|Debug]   SwiftPM build of every product binary, plus
+                                Tuist+xcodebuild to produce the MLX metallib
+        debug                   build every product binary in Debug
         test                    run Tuist test for LMDTests
         smoke                   build and run the Swift HTTP smoke test
         video-smoke             build and require real video acceptance via LMD_VIDEO_SAMPLE_FILE
@@ -437,35 +431,89 @@ final class DevTool {
     throw ToolError.usage("configuration must be Release or Debug")
   }
 
+  /// Build every product binary plus the MLX Metal shader library.
+  ///
+  /// The build is split across two systems because neither alone produces a
+  /// usable artifact on macOS:
+  ///
+  /// - SwiftPM (`swift build`) links `swift-nio` with the resilient layout
+  ///   the Swift runtime expects, but cannot compile `.metal` shaders.
+  /// - xcodebuild (via Tuist) compiles `.metal` into `default.metallib`, but
+  ///   the resulting executables link `swift-nio`'s `ManagedAtomic<Bool>`
+  ///   without the required type metadata. The first socket allocation
+  ///   inside `BaseSocketChannel.init(...)` then crashes with
+  ///   `EXC_BAD_ACCESS` in `swift_allocObject`.
+  ///
+  /// Upstream context:
+  /// - https://github.com/ml-explore/mlx-swift/issues/345 (metallib packaging)
+  /// - https://github.com/ml-explore/mlx-swift/issues/36 (SwiftPM cannot compile Metal)
+  /// - https://github.com/vapor/vapor/issues/3369 (Tuist/swift-nio linkage bug)
+  ///
+  /// `stageBuildArtifacts` collects outputs from both systems into a single
+  /// staging directory under `Products/Build/<configuration>/`. `install`
+  /// reads exclusively from that staging directory and does not need to know
+  /// about either build system.
   private func build(configuration: String) throws {
-    try tuistInstallAndGenerate()
-    let directory = buildDirectory(configuration: configuration)
-    try removeIfExists(directory)
-    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-
-    for binary in productBinaries {
-      try buildGeneratedProduct(binary, configuration: configuration)
-    }
-
-    try stageRuntimeResources(for: configuration)
+    try buildSwiftPackage(configuration: configuration)
+    try buildMetallib(configuration: configuration)
+    try stageBuildArtifacts(products: productBinaries, configuration: configuration)
   }
 
-  private func buildProduct(_ binary: String, configuration: String) throws {
-    try tuistInstallAndGenerate()
-    try fileManager.createDirectory(
-      at: buildDirectory(configuration: configuration),
-      withIntermediateDirectories: true
+  /// Build a single product binary plus the metallib. Used by smoke targets
+  /// that only need `lmd-serve`. Same hybrid rationale as `build`.
+  private func buildProduct(_ product: String, configuration: String) throws {
+    try buildSwiftPackageProduct(product, configuration: configuration)
+    try buildMetallib(configuration: configuration)
+    try stageBuildArtifacts(products: [product], configuration: configuration)
+  }
+
+  /// SwiftPM build of every product. Outputs land at
+  /// `.build/<configuration>/<product>` (configuration is lower-cased per
+  /// SwiftPM's convention: `debug`, `release`).
+  private func buildSwiftPackage(configuration: String) throws {
+    try runPassthrough("swift", ["build", "-c", swiftPackageConfiguration(configuration)])
+  }
+
+  /// SwiftPM build of one product. Faster than `buildSwiftPackage` when the
+  /// caller only needs a single binary.
+  private func buildSwiftPackageProduct(_ product: String, configuration: String) throws {
+    try runPassthrough(
+      "swift",
+      ["build", "-c", swiftPackageConfiguration(configuration), "--product", product]
     )
-    try buildGeneratedProduct(binary, configuration: configuration)
-    try stageRuntimeResources(for: configuration)
   }
 
-  private func buildGeneratedProduct(_ binary: String, configuration: String) throws {
+  /// xcodebuild Release build invoked only for its `mlx-swift_Cmlx.bundle`
+  /// side-effect. The executables xcodebuild emits are intentionally
+  /// discarded; see `build(configuration:)` for the rationale.
+  private func buildMetallib(configuration: String) throws {
+    try tuistInstallAndGenerate()
     try runPassthrough(
       "xcodebuild",
-      xcodeBuildArguments(scheme: binary, configuration: configuration)
+      xcodeBuildArguments(scheme: "lmd-serve", configuration: configuration)
     )
-    try copyBuiltBinary(binary, configuration: configuration)
+  }
+
+  /// Copy SwiftPM binaries and the Xcode-built metallib into the single
+  /// staging directory at `Products/Build/<configuration>/`.
+  ///
+  /// Both halves of the hybrid build write here so `install` can read from
+  /// one location. Throws if SwiftPM did not produce an expected binary —
+  /// the failure message names the missing path so the operator can run
+  /// `swift build` standalone to surface the underlying compile error.
+  private func stageBuildArtifacts(products: [String], configuration: String) throws {
+    let staging = buildDirectory(configuration: configuration)
+    try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
+    let swiftBuild = swiftPackageBuildDirectory(configuration: configuration)
+    for product in products {
+      let source = swiftBuild.appendingPathComponent(product)
+      guard fileManager.isExecutableFile(atPath: source.path) else {
+        throw ToolError.failure("SwiftPM did not produce \(source.path)")
+      }
+      try copyReplacingItem(at: source, to: staging.appendingPathComponent(product))
+      try writeLine("  staged \(product)")
+    }
+    try stageRuntimeResources(for: configuration)
   }
 
   private func test() throws {
@@ -1029,6 +1077,21 @@ final class DevTool {
     return buildDirectory(configuration: "Release")
   }
 
+  /// SwiftPM's product directory: `.build/<configuration>/` relative to the
+  /// repo root. Configuration is the lower-cased SwiftPM form (`debug`,
+  /// `release`).
+  private func swiftPackageBuildDirectory(configuration: String) -> URL {
+    repoRoot
+      .appendingPathComponent(".build")
+      .appendingPathComponent(swiftPackageConfiguration(configuration))
+  }
+
+  /// Map an Xcode-style configuration name (`Release`, `Debug`) to the
+  /// lower-cased form SwiftPM expects on `-c`.
+  private func swiftPackageConfiguration(_ configuration: String) -> String {
+    configuration.lowercased()
+  }
+
   private func productsDirectory() -> URL {
     repoRoot.appendingPathComponent("Products")
   }
@@ -1086,23 +1149,6 @@ final class DevTool {
         try writeLine("  installed \(destinationDirectory.appendingPathComponent(resourceName).path)")
       }
     }
-  }
-
-  private func copyBuiltBinary(_ binary: String, configuration: String) throws {
-    guard let xcodeProductName = xcodeProductNames[binary] else {
-      throw ToolError.failure("unknown binary mapping for \(binary)")
-    }
-
-    let source = derivedProductsDirectory(configuration: configuration)
-      .appendingPathComponent(xcodeProductName)
-    guard fileManager.isExecutableFile(atPath: source.path) else {
-      throw ToolError.failure("build product missing: \(source.path)")
-    }
-
-    let destination = buildDirectory(configuration: configuration)
-      .appendingPathComponent(binary)
-    try copyReplacingItem(at: source, to: destination)
-    try writeLine("  built \(destination.path)")
   }
 
   private func signTargets(
