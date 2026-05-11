@@ -263,6 +263,43 @@ final class VideoChatRoutingTests: XCTestCase {
     )
   }
 
+  func testEveryRouteErrorHasNonEmptyDescriptionForJSONEnvelope() throws {
+    // The video route at lmd-serve catches typed errors and interpolates them
+    // into the response envelope's `message` field. A typed error that
+    // produces an empty string under `\(error)` would emit an envelope with
+    // an empty `message`, which violates the "no empty reply" guarantee in
+    // plan/VIDEO_ROUTING_FINAL_DECISION.md. Guard the property here so any
+    // new error case must ship a non-empty description.
+    let buildErrors: [VideoChatRequestBuildError] = [
+      .invalidJSON,
+      .missingMessages,
+      .invalidMessage,
+      .unsupportedRole("system"),
+      .unsupportedContent,
+      .noVideoContent,
+      .invalidMaxTokens,
+      .invalidTemperature,
+    ]
+    for error in buildErrors {
+      let description = error.description
+      XCTAssertFalse(
+        description.isEmpty,
+        "VideoChatRequestBuildError.\(error) has an empty description"
+      )
+      let interpolated = "\(error)"
+      XCTAssertFalse(
+        interpolated.isEmpty,
+        "VideoChatRequestBuildError.\(error) interpolates to an empty string"
+      )
+    }
+
+    let backendError: VideoChatBackendError = .notConfigured
+    XCTAssertFalse(
+      "\(backendError)".isEmpty,
+      "VideoChatBackendError.notConfigured interpolates to an empty string"
+    )
+  }
+
   // MARK: - Helpers
 
   private func writeFile(named name: String) throws -> URL {
