@@ -1577,18 +1577,41 @@ final class SmokeRunner {
       timeout: configuration.videoTimeoutSeconds
     )
     let responseText = bodySnippet(response.data)
-    guard response.statusCode == 200 else {
-      throw ToolError.failure("video acceptance failed with HTTP \(response.statusCode); response body: \(responseText)")
+
+    // The spec at plan/VIDEO_ROUTING_FINAL_DECISION.md treats either a valid
+    // JSON completion response or a valid JSON error response as a passing
+    // smoke result. An empty body or an unparseable body is the failing case.
+    if response.statusCode == 200 {
+      let completion = try jsonDecoder.decode(ChatCompletionResponse.self, from: response.data)
+      guard let firstChoice = completion.choices.first else {
+        throw ToolError.failure("video acceptance returned HTTP 200 but choices was empty; response body: \(responseText)")
+      }
+      guard firstChoice.message.content.isNonEmpty else {
+        throw ToolError.failure("video acceptance returned HTTP 200 but choices.0.message.content was empty; response body: \(responseText)")
+      }
+      writeLine("video acceptance OK: non-empty VLM response from \(configuration.videoModel)")
+      return
     }
 
-    let completion = try jsonDecoder.decode(ChatCompletionResponse.self, from: response.data)
-    guard let firstChoice = completion.choices.first else {
-      throw ToolError.failure("video acceptance returned HTTP 200 but choices was empty; response body: \(responseText)")
+    guard !response.data.isEmpty else {
+      throw ToolError.failure("video acceptance failed with HTTP \(response.statusCode) and empty body")
     }
-    guard firstChoice.message.content.isNonEmpty else {
-      throw ToolError.failure("video acceptance returned HTTP 200 but choices.0.message.content was empty; response body: \(responseText)")
+    do {
+      let envelope = try jsonDecoder.decode(VideoAcceptanceErrorEnvelope.self, from: response.data)
+      let errorType = envelope.error.type ?? "<unknown>"
+      writeLine("video acceptance OK: HTTP \(response.statusCode) with structured error type=\(errorType) message=\(envelope.error.message)")
+    } catch {
+      throw ToolError.failure("video acceptance failed with HTTP \(response.statusCode) and unparseable body: \(responseText)")
     }
-    writeLine("video acceptance OK: non-empty VLM response from \(configuration.videoModel)")
+  }
+
+  private struct VideoAcceptanceErrorEnvelope: Decodable {
+    let error: VideoAcceptanceErrorBody
+  }
+
+  private struct VideoAcceptanceErrorBody: Decodable {
+    let message: String
+    let type: String?
   }
 
   private func copyVideoSampleToTemporaryDirectory(_ videoSampleFile: URL) throws -> URL {
