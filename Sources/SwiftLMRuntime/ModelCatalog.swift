@@ -225,12 +225,74 @@ public struct ModelCatalog {
     }
     let metadata = modelMetadata(modelDir: modelDir, config: config, fileManager: fileManager)
     if qwen25VLSupportsVideo(config: config, metadata: metadata) {
-      return ModelCapabilities(text: true, vision: true, video: true)
+      return ModelCapabilities(
+        text: true, vision: true, video: true,
+        videoSamplingFPS: qwenFamilySamplingFPS()
+      )
     }
     if qwen25VLSupportsVision(config: config) {
       return ModelCapabilities(text: true, vision: true, video: false)
     }
+    if let smolVLMFPS = smolVLM2VideoSamplingFPS(config: config, metadata: metadata) {
+      return ModelCapabilities(
+        text: true, vision: true, video: true, videoSamplingFPS: smolVLMFPS
+      )
+    }
+    if let gemma4FPS = gemma4VideoSamplingFPS(config: config, metadata: metadata) {
+      return ModelCapabilities(
+        text: true, vision: true, video: true, videoSamplingFPS: gemma4FPS
+      )
+    }
     return .textOnly
+  }
+
+  /// The Qwen2-VL, Qwen2.5-VL, and Qwen3-VL Swift processors hardcode a 2.0
+  /// FPS sampling rate. Anything we extract on the route's behalf must match
+  /// that rate, so we declare it here as a single source of truth.
+  private static func qwenFamilySamplingFPS() -> Double {
+    return 2.0
+  }
+
+  private static func smolVLM2VideoSamplingFPS(
+    config: [String: Any],
+    metadata: [[String: Any]]
+  ) -> Double? {
+    let isSmolVLM2 = stringValue(config["model_type"])?.lowercased().hasPrefix("smolvlm") == true
+      || metadata.contains(where: { json in
+        stringValue(json["processor_class"])?.contains("SmolVLM") == true
+      })
+    guard isSmolVLM2 else {
+      return nil
+    }
+    for json in metadata {
+      if let sampling = json["video_sampling"] as? [String: Any],
+         let fps = doubleValue(sampling["fps"]) {
+        return fps
+      }
+      if let fps = doubleValue(json["video_fps"]) {
+        return fps
+      }
+    }
+    return 2.0
+  }
+
+  private static func gemma4VideoSamplingFPS(
+    config: [String: Any],
+    metadata: [[String: Any]]
+  ) -> Double? {
+    let isGemma4 = stringValue(config["model_type"])?.lowercased().hasPrefix("gemma4") == true
+      || metadata.contains(where: { json in
+        stringValue(json["processor_class"])?.contains("Gemma4") == true
+      })
+    guard isGemma4 else {
+      return nil
+    }
+    for json in metadata {
+      if let fps = doubleValue(json["video_fps"]) {
+        return fps
+      }
+    }
+    return 2.0
   }
 
   private static func architectureLooksEmbedding(_ arch: String) -> Bool {
@@ -319,6 +381,19 @@ public struct ModelCatalog {
 
   private static func stringValue(_ value: Any?) -> String? {
     value as? String
+  }
+
+  private static func doubleValue(_ value: Any?) -> Double? {
+    if let number = value as? NSNumber {
+      return number.doubleValue
+    }
+    if let int = value as? Int {
+      return Double(int)
+    }
+    if let double = value as? Double {
+      return double
+    }
+    return nil
   }
 
   private static func hasValue(_ value: Any?) -> Bool {

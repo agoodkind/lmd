@@ -42,7 +42,10 @@ final class ModelCatalogCapabilitiesTests: XCTestCase {
       fileManager: .default
     )
 
-    XCTAssertEqual(capabilities, ModelCapabilities(text: true, vision: true, video: true))
+    XCTAssertEqual(
+      capabilities,
+      ModelCapabilities(text: true, vision: true, video: true, videoSamplingFPS: 2.0)
+    )
   }
 
   func testQwen25VLWithoutVideoTokenAdvertisesVisionOnly() throws {
@@ -79,6 +82,25 @@ final class ModelCatalogCapabilitiesTests: XCTestCase {
     XCTAssertEqual(capabilities, .textOnly)
   }
 
+  func testQwen25VLDeclaresTwoFPSSamplingRate() throws {
+    try write(
+      filename: "config.json",
+      json: qwen25VLConfig(videoToken: true)
+    )
+    try write(
+      filename: "preprocessor_config.json",
+      json: qwen25VLProcessorConfig()
+    )
+
+    let capabilities = ModelCatalog.inferModelCapabilities(
+      modelDir: tempDir.path,
+      kind: .chat,
+      fileManager: .default
+    )
+
+    XCTAssertEqual(capabilities.videoSamplingFPS, 2.0)
+  }
+
   func testCatalogAttachesDetectedCapabilitiesToDescriptor() throws {
     let publisherDir = tempDir.appendingPathComponent("mlx-community")
     let modelDir = publisherDir.appendingPathComponent("Qwen2.5-VL")
@@ -99,7 +121,7 @@ final class ModelCatalogCapabilitiesTests: XCTestCase {
 
     XCTAssertEqual(
       models.first?.capabilities,
-      ModelCapabilities(text: true, vision: true, video: true)
+      ModelCapabilities(text: true, vision: true, video: true, videoSamplingFPS: 2.0)
     )
   }
 

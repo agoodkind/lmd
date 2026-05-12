@@ -27,8 +27,24 @@ final class ModelCapabilitiesTests: XCTestCase {
   func testCapabilitiesEncodeStableJSONKeys() throws {
     let capabilities = ModelCapabilities(text: true, vision: true, video: true)
     let data = try JSONEncoder().encode(capabilities)
-    let object = try JSONSerialization.jsonObject(with: data) as? [String: Bool]
+    let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
 
-    XCTAssertEqual(object, ["text": true, "vision": true, "video": true])
+    XCTAssertEqual(object?["text"] as? Bool, true)
+    XCTAssertEqual(object?["vision"] as? Bool, true)
+    XCTAssertEqual(object?["video"] as? Bool, true)
+    XCTAssertNil(object?["video_sampling_fps"])
+  }
+
+  func testVideoSamplingFPSRoundTripsThroughJSON() throws {
+    let capabilities = ModelCapabilities(
+      text: true, vision: true, video: true, videoSamplingFPS: 2.0
+    )
+    let data = try JSONEncoder().encode(capabilities)
+    let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    XCTAssertEqual(object?["video_sampling_fps"] as? Double, 2.0)
+
+    let decoded = try JSONDecoder().decode(ModelCapabilities.self, from: data)
+    XCTAssertEqual(decoded, capabilities)
+    XCTAssertEqual(decoded.videoSamplingFPS, 2.0)
   }
 }

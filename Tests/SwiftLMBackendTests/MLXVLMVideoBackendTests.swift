@@ -48,12 +48,8 @@ final class MLXVLMVideoBackendTests: XCTestCase {
     XCTAssertEqual(metadata.videoCount, 1)
     XCTAssertEqual(metadata.requestedFPS, 2)
     XCTAssertEqual(metadata.requestedMaxFrames, 12)
-    XCTAssertTrue(metadata.backendOwnsTemporalSampling)
-    XCTAssertFalse(metadata.samplingParametersApplied)
-    XCTAssertEqual(
-      metadata.samplingParameterNote,
-      MLXVLMVideoMetadata.backendSamplingNote
-    )
+    XCTAssertNil(metadata.sampledFPS)
+    XCTAssertNil(metadata.sampledFrameCount)
   }
 
   func testRequestBuildsChatMessageWithVideoURLOnLastUserMessage() throws {
@@ -167,11 +163,9 @@ final class MLXVLMVideoBackendTests: XCTestCase {
     XCTAssertNotNil(decoded?["usage"])
     XCTAssertNotNil(decoded?["metadata"])
     let metadataJSON = decoded?["metadata"] as? [String: Any]
-    XCTAssertEqual(metadataJSON?["backend_owns_temporal_sampling"] as? Bool, true)
-    XCTAssertEqual(
-      metadataJSON?["sampling_parameter_note"] as? String,
-      MLXVLMVideoMetadata.backendSamplingNote
-    )
+    XCTAssertEqual(metadataJSON?["video_count"] as? Int, 1)
+    XCTAssertEqual(metadataJSON?["requested_fps"] as? Double, 1.0)
+    XCTAssertEqual(metadataJSON?["requested_max_frames"] as? Int, 8)
   }
 
   private func makeTemporaryVideoFile() throws -> URL {

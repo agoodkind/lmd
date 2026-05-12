@@ -3,7 +3,7 @@ import Foundation
 
 let productBinaries = ["lmd", "lmd-serve", "lmd-tui", "lmd-bench", "lmd-qa"]
 let defaultBundleIdentifierPrefix = "io.goodkind.lmd"
-let defaultVideoModel = "mlx-community/Qwen2.5-VL-32B-Instruct-bf16"
+let defaultVideoModel = "mlx-community/Qwen2.5-VL-32B-Instruct-4bit"
 let supportedVideoExtensions: Set<String> = [
   "avi",
   "m4v",
@@ -1578,40 +1578,20 @@ final class SmokeRunner {
     )
     let responseText = bodySnippet(response.data)
 
-    // The spec at plan/VIDEO_ROUTING_FINAL_DECISION.md treats either a valid
-    // JSON completion response or a valid JSON error response as a passing
-    // smoke result. An empty body or an unparseable body is the failing case.
-    if response.statusCode == 200 {
-      let completion = try jsonDecoder.decode(ChatCompletionResponse.self, from: response.data)
-      guard let firstChoice = completion.choices.first else {
-        throw ToolError.failure("video acceptance returned HTTP 200 but choices was empty; response body: \(responseText)")
-      }
-      guard firstChoice.message.content.isNonEmpty else {
-        throw ToolError.failure("video acceptance returned HTTP 200 but choices.0.message.content was empty; response body: \(responseText)")
-      }
-      writeLine("video acceptance OK: non-empty VLM response from \(configuration.videoModel)")
-      return
+    // The spec at plan/VIDEO_ROUTING_FINAL_DECISION.md requires HTTP 200 with a
+    // populated assistant message because frame sampling at infinite tolerance
+    // succeeds against both the 1-frame and 2-second fixtures.
+    guard response.statusCode == 200 else {
+      throw ToolError.failure("video acceptance failed with HTTP \(response.statusCode); response body: \(responseText)")
     }
-
-    guard !response.data.isEmpty else {
-      throw ToolError.failure("video acceptance failed with HTTP \(response.statusCode) and empty body")
+    let completion = try jsonDecoder.decode(ChatCompletionResponse.self, from: response.data)
+    guard let firstChoice = completion.choices.first else {
+      throw ToolError.failure("video acceptance returned HTTP 200 but choices was empty; response body: \(responseText)")
     }
-    do {
-      let envelope = try jsonDecoder.decode(VideoAcceptanceErrorEnvelope.self, from: response.data)
-      let errorType = envelope.error.type ?? "<unknown>"
-      writeLine("video acceptance OK: HTTP \(response.statusCode) with structured error type=\(errorType) message=\(envelope.error.message)")
-    } catch {
-      throw ToolError.failure("video acceptance failed with HTTP \(response.statusCode) and unparseable body: \(responseText)")
+    guard firstChoice.message.content.isNonEmpty else {
+      throw ToolError.failure("video acceptance returned HTTP 200 but choices.0.message.content was empty; response body: \(responseText)")
     }
-  }
-
-  private struct VideoAcceptanceErrorEnvelope: Decodable {
-    let error: VideoAcceptanceErrorBody
-  }
-
-  private struct VideoAcceptanceErrorBody: Decodable {
-    let message: String
-    let type: String?
+    writeLine("video acceptance OK: non-empty VLM response from \(configuration.videoModel)")
   }
 
   private func copyVideoSampleToTemporaryDirectory(_ videoSampleFile: URL) throws -> URL {

@@ -25,11 +25,29 @@ public struct ModelCapabilities: Hashable, Sendable, Codable {
   public let text: Bool
   public let vision: Bool
   public let video: Bool
+  /// Frame rate the model's preprocessor expects when the caller supplies
+  /// pre-sampled video frames. The video route consults this value to size
+  /// the [VideoFrame] array it passes to the backend. `nil` for non-video
+  /// models or video-capable models with no detected sampling rate.
+  public let videoSamplingFPS: Double?
 
-  public init(text: Bool = true, vision: Bool = false, video: Bool = false) {
+  public init(
+    text: Bool = true,
+    vision: Bool = false,
+    video: Bool = false,
+    videoSamplingFPS: Double? = nil
+  ) {
     self.text = text
     self.vision = vision
     self.video = video
+    self.videoSamplingFPS = videoSamplingFPS
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case text
+    case vision
+    case video
+    case videoSamplingFPS = "video_sampling_fps"
   }
 
   public static let textOnly = ModelCapabilities()

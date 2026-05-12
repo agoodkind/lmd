@@ -780,6 +780,20 @@ func proxyChat(path: String, req: Request, state: BrokerState) async throws -> R
         type: "not_configured",
         code: "not_configured"
       )
+    } catch let backendError as VideoChatBackendError {
+      if case .modelMissingVideoSamplingFPS = backendError {
+        return errorResponse(
+          status: .serviceUnavailable,
+          message: backendError.description,
+          type: "model_missing_video_sampling_fps",
+          code: "model_missing_video_sampling_fps"
+        )
+      }
+      return errorResponse(
+        status: .serviceUnavailable,
+        message: backendError.description,
+        type: "video_backend_failed"
+      )
     } catch let error as VideoChatRequestBuildError {
       return errorResponse(
         status: .badRequest,

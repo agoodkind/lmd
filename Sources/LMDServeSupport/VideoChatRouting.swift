@@ -9,6 +9,7 @@
 import AppLogger
 import Foundation
 import Hummingbird
+import MLXLMCommon
 import SwiftLMBackend
 import SwiftLMCore
 
@@ -121,8 +122,19 @@ public enum ChatRoutingDecision: Sendable {
   case videoBackend(VideoChatRouteRequest)
 }
 
-public enum VideoChatBackendError: Error, Equatable {
+public enum VideoChatBackendError: Error, Equatable, CustomStringConvertible {
   case notConfigured
+  case modelMissingVideoSamplingFPS(modelID: String)
+
+  public var description: String {
+    switch self {
+    case .notConfigured:
+      return "video chat backend is not configured"
+    case .modelMissingVideoSamplingFPS(let modelID):
+      return
+        "model \(modelID) advertises video capability but has no videoSamplingFPS; cannot sample frames"
+    }
+  }
 }
 
 public protocol VideoChatBackend: Sendable {
@@ -147,8 +159,35 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
 
   public func complete(_ request: VideoChatRouteRequest) async throws -> Response {
     let completionRequest = try makeMLXVLMVideoCompletionRequest(from: request.bodyData)
+    guard let modelFPS = request.model.capabilities.videoSamplingFPS else {
+      throw VideoChatBackendError.modelMissingVideoSamplingFPS(modelID: request.model.id)
+    }
+    // Request-side `fps` overrides the model's declared rate when present.
+    // The model's declared rate is the default for callers that don't pass a
+    // value. Frame sampling honours `max_frames` as an upper cap regardless of
+    // the chosen FPS, so a runaway frame count is bounded by the request.
+    let effectiveFPS: Double = completionRequest.fps ?? modelFPS
+    let allVideoURLs = completionRequest.videoURLs
+      + completionRequest.messages.flatMap(\.videoURLs)
+    var preSampledVideos: [UserInput.Video] = []
+    preSampledVideos.reserveCapacity(allVideoURLs.count)
+    var totalFrames = 0
+    for url in allVideoURLs {
+      let frames = try await sampledVideoFrames(
+        originalURL: url,
+        targetFPS: effectiveFPS,
+        maxFrames: completionRequest.maxFrames
+      )
+      totalFrames += frames.count
+      preSampledVideos.append(.frames(frames))
+    }
+    let preparedRequest = completionRequest.replacingVideos(
+      preSampledVideos,
+      sampledFrameCount: totalFrames,
+      sampledFPS: effectiveFPS
+    )
     let backend = try backend(for: request.model)
-    let completion = try await backend.complete(completionRequest)
+    let completion = try await backend.complete(preparedRequest)
     let data = try JSONEncoder().encode(completion)
     return Response(
       status: .ok,

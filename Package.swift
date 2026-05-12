@@ -106,6 +106,7 @@ let package = Package(
         "SwiftLMCore",
         "SwiftLMBackend",
         .product(name: "Hummingbird", package: "hummingbird"),
+        .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
       ],
       path: "Sources/LMDServeSupport",
       swiftSettings: strictConcurrency

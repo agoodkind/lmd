@@ -131,9 +131,12 @@ public struct MLXVLMVideoModelDescriptor: Sendable, Equatable {
 
 // MARK: - Request DTO
 
-public struct MLXVLMVideoCompletionRequest: Sendable, Equatable {
+public struct MLXVLMVideoCompletionRequest: @unchecked Sendable {
   public let messages: [MLXVLMVideoMessage]
   public let videoURLs: [URL]
+  public let preSampledVideos: [UserInput.Video]?
+  public let sampledFrameCount: Int?
+  public let sampledFPS: Double?
   public let fps: Double?
   public let maxFrames: Int?
   public let maxTokens: Int
@@ -160,6 +163,9 @@ public struct MLXVLMVideoCompletionRequest: Sendable, Equatable {
   public init(
     messages: [MLXVLMVideoMessage],
     videoURLs: [URL] = [],
+    preSampledVideos: [UserInput.Video]? = nil,
+    sampledFrameCount: Int? = nil,
+    sampledFPS: Double? = nil,
     fps: Double? = nil,
     maxFrames: Int? = nil,
     maxTokens: Int = 512,
@@ -167,10 +173,34 @@ public struct MLXVLMVideoCompletionRequest: Sendable, Equatable {
   ) {
     self.messages = messages
     self.videoURLs = videoURLs
+    self.preSampledVideos = preSampledVideos
+    self.sampledFrameCount = sampledFrameCount
+    self.sampledFPS = sampledFPS
     self.fps = fps
     self.maxFrames = maxFrames
     self.maxTokens = maxTokens
     self.temperature = temperature
+  }
+
+  /// Return a copy that substitutes the URL-based video list for a
+  /// pre-decoded `UserInput.Video` array. The route calls this after running
+  /// frame extraction.
+  public func replacingVideos(
+    _ videos: [UserInput.Video],
+    sampledFrameCount: Int,
+    sampledFPS: Double
+  ) -> MLXVLMVideoCompletionRequest {
+    return MLXVLMVideoCompletionRequest(
+      messages: messages,
+      videoURLs: videoURLs,
+      preSampledVideos: videos,
+      sampledFrameCount: sampledFrameCount,
+      sampledFPS: sampledFPS,
+      fps: fps,
+      maxFrames: maxFrames,
+      maxTokens: maxTokens,
+      temperature: temperature
+    )
   }
 
   func validate(fileManager: FileManager = .default) throws {
@@ -208,16 +238,30 @@ public struct MLXVLMVideoCompletionRequest: Sendable, Equatable {
   }
 
   func makeUserInput() -> UserInput {
-    var remainingRequestVideos = videoURLs.map(UserInput.Video.url)
+    var preSampledQueue = preSampledVideos ?? []
+    var requestQueue: [UserInput.Video] = preSampledVideos == nil
+      ? videoURLs.map(UserInput.Video.url) : []
     var chatMessages: [Chat.Message] = []
     chatMessages.reserveCapacity(messages.count)
     let lastUserIndex = messages.lastIndex { $0.role == .user }
 
     for (index, message) in messages.enumerated() {
-      var videos = message.videoURLs.map(UserInput.Video.url)
+      var videos: [UserInput.Video]
+      if preSampledVideos != nil {
+        let take = min(message.videoURLs.count, preSampledQueue.count)
+        videos = Array(preSampledQueue.prefix(take))
+        preSampledQueue.removeFirst(take)
+      } else {
+        videos = message.videoURLs.map(UserInput.Video.url)
+      }
       if index == lastUserIndex {
-        videos.append(contentsOf: remainingRequestVideos)
-        remainingRequestVideos.removeAll()
+        if preSampledVideos != nil {
+          videos.append(contentsOf: preSampledQueue)
+          preSampledQueue.removeAll()
+        } else {
+          videos.append(contentsOf: requestQueue)
+          requestQueue.removeAll()
+        }
       }
       chatMessages.append(message.makeChatMessage(videos: videos))
     }
@@ -349,32 +393,26 @@ public struct MLXVLMVideoChatCompletionResponse: Sendable, Codable, Equatable {
 }
 
 public struct MLXVLMVideoMetadata: Sendable, Codable, Equatable {
-  public static let backendSamplingNote =
-    "LMD routes video files to mlx-swift-lm without decoding or retiming them. Temporal sampling is backend-defined. Current upstream Swift Qwen video processors in mlx-swift-lm sample at 2 FPS."
-
   public let videoCount: Int
   public let requestedFPS: Double?
   public let requestedMaxFrames: Int?
-  public let backendOwnsTemporalSampling: Bool
-  public let samplingParametersApplied: Bool
-  public let samplingParameterNote: String
+  public let sampledFPS: Double?
+  public let sampledFrameCount: Int?
 
   init(request: MLXVLMVideoCompletionRequest) {
     self.videoCount = request.videoURLs.count + request.messages.flatMap(\.videoURLs).count
     self.requestedFPS = request.fps
     self.requestedMaxFrames = request.maxFrames
-    self.backendOwnsTemporalSampling = true
-    self.samplingParametersApplied = false
-    self.samplingParameterNote = Self.backendSamplingNote
+    self.sampledFPS = request.sampledFPS
+    self.sampledFrameCount = request.sampledFrameCount
   }
 
   enum CodingKeys: String, CodingKey {
     case videoCount = "video_count"
     case requestedFPS = "requested_fps"
     case requestedMaxFrames = "requested_max_frames"
-    case backendOwnsTemporalSampling = "backend_owns_temporal_sampling"
-    case samplingParametersApplied = "sampling_parameters_applied"
-    case samplingParameterNote = "sampling_parameter_note"
+    case sampledFPS = "sampled_fps"
+    case sampledFrameCount = "sampled_frame_count"
   }
 }
 
