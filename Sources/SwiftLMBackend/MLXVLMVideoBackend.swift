@@ -8,9 +8,11 @@
 
 import AppLogger
 import Foundation
+import MLXHuggingFace
 import MLXLMCommon
 import MLXVLM
 import SwiftLMCore
+import Tokenizers
 
 private let videoLog = AppLogger.logger(category: "MLXVLMVideoBackend")
 
@@ -34,8 +36,10 @@ public actor MLXVLMVideoBackend {
     if container != nil {
       return
     }
-    let configuration = ModelConfiguration(directory: model.directoryURL)
-    container = try await VLMModelFactory.shared.loadContainer(configuration: configuration)
+    container = try await VLMModelFactory.shared.loadContainer(
+      from: model.directoryURL,
+      using: #huggingFaceTokenizerLoader()
+    )
     videoLog.notice(
       "vlm_video.model_loaded model=\(self.model.id, privacy: .public) path=\(self.model.path, privacy: .public)"
     )

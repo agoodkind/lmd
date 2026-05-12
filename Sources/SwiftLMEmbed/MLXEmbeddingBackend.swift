@@ -9,8 +9,11 @@
 import Foundation
 import MLX
 import MLXEmbedders
+import MLXHuggingFace
+import MLXLMCommon
 import SwiftLMBackend
 import SwiftLMCore
+import Tokenizers
 
 public enum MLXEmbeddingRuntimeError: Error {
   case modelNotLoaded
@@ -19,7 +22,7 @@ public enum MLXEmbeddingRuntimeError: Error {
 /// Loads weights from ``ModelDescriptor/path`` via MLXEmbedders and runs batched pooling.
 public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sendable {
   private let descriptor: ModelDescriptor
-  private var container: MLXEmbedders.ModelContainer?
+  private var container: MLXEmbedders.EmbedderModelContainer?
 
   public var modelID: String { descriptor.id }
   public var sizeBytes: Int64 { descriptor.sizeBytes }
@@ -29,8 +32,10 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
   }
 
   public func launch() async throws {
-    let configuration = ModelConfiguration(directory: URL(fileURLWithPath: descriptor.path))
-    container = try await loadModelContainer(configuration: configuration)
+    container = try await EmbedderModelFactory.shared.loadContainer(
+      from: URL(fileURLWithPath: descriptor.path),
+      using: #huggingFaceTokenizerLoader()
+    )
   }
 
   public func shutdown() {

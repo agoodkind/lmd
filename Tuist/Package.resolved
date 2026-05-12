@@ -1,5 +1,5 @@
 {
-  "originHash" : "3bd94d02e9479a5e5b771e528711259cf73e1a675eeceb12bbfebef823bf7429",
+  "originHash" : "76d2b352e27677db58d37228e40bffe8826ce6b6e295e928ecc3f21f4df709e2",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -44,15 +44,6 @@
       "state" : {
         "revision" : "61b9e011e09a62b489f6bd647958f1555bdf2896",
         "version" : "0.31.3"
-      }
-    },
-    {
-      "identity" : "mlx-swift-lm",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ml-explore/mlx-swift-lm.git",
-      "state" : {
-        "revision" : "25b00d4e22e61ec9c41efda47990cd2084ec87ff",
-        "version" : "2.31.3"
       }
     },
     {
@@ -272,6 +263,15 @@
       }
     },
     {
+      "identity" : "swift-syntax",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-syntax.git",
+      "state" : {
+        "revision" : "9de99a78f099e59caf2b2beec65a4c45d54b2081",
+        "version" : "603.0.1"
+      }
+    },
+    {
       "identity" : "swift-system",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-system",
@@ -285,8 +285,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/huggingface/swift-transformers",
       "state" : {
-        "revision" : "58c4bc11963a140358d791f678a60a2745a23146",
-        "version" : "1.2.1"
+        "revision" : "349a7ce54ccb8ebe4bc10c2022e9806f01adb7c6",
+        "version" : "1.3.2"
       }
     },
     {

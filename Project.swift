@@ -136,6 +136,8 @@ let project = Project(
         .target(name: "SwiftLMCore"),
         .external(name: "MLXLMCommon"),
         .external(name: "MLXVLM"),
+        .external(name: "MLXHuggingFace"),
+        .external(name: "Tokenizers"),
       ]
     ),
     frameworkTarget(
@@ -144,6 +146,9 @@ let project = Project(
         .target(name: "SwiftLMCore"),
         .target(name: "SwiftLMBackend"),
         .external(name: "MLXEmbedders"),
+        .external(name: "MLXLMCommon"),
+        .external(name: "MLXHuggingFace"),
+        .external(name: "Tokenizers"),
       ]
     ),
     frameworkTarget(
