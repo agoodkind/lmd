@@ -52,6 +52,30 @@ final class MLXVLMVideoBackendTests: XCTestCase {
     XCTAssertNil(metadata.sampledFrameCount)
   }
 
+  func testReplacingVideosPreservesRequestedAndSampledMetadata() throws {
+    let videoURL = try makeTemporaryVideoFile()
+    let request = MLXVLMVideoCompletionRequest(
+      chatText: "Describe the clip.",
+      videoURLs: [videoURL],
+      fps: 16,
+      maxFrames: 48,
+      maxTokens: 64,
+      temperature: 0
+    )
+    let replaced = request.replacingVideos(
+      [.frames([])],
+      sampledFrameCount: 32,
+      sampledFPS: 16
+    )
+    let metadata = MLXVLMVideoMetadata(request: replaced)
+
+    XCTAssertEqual(metadata.videoCount, 1)
+    XCTAssertEqual(metadata.requestedFPS, 16)
+    XCTAssertEqual(metadata.requestedMaxFrames, 48)
+    XCTAssertEqual(metadata.sampledFPS, 16)
+    XCTAssertEqual(metadata.sampledFrameCount, 32)
+  }
+
   func testRequestBuildsChatMessageWithVideoURLOnLastUserMessage() throws {
     let firstVideoURL = try makeTemporaryVideoFile()
     let secondVideoURL = try makeTemporaryVideoFile()

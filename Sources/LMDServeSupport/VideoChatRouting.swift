@@ -51,6 +51,8 @@ public struct OpenAIVideoInspection: Equatable, Sendable {
   }
 }
 
+public typealias ChatMediaInspection = OpenAIVideoInspection
+
 public enum OpenAIVideoParseError: Error, Equatable, CustomStringConvertible {
   case videoURLObjectMissing
   case videoURLMissing
@@ -97,29 +99,24 @@ public enum OpenAIVideoParseError: Error, Equatable, CustomStringConvertible {
 
 public struct VideoChatRouteRequest: Sendable {
   public let model: ModelDescriptor
-  public let path: String
+  public let endpoint: OpenAIChatEndpoint
   public let bodyData: Data
   public let wantsStream: Bool
   public let videos: [OpenAIVideoInput]
 
   public init(
     model: ModelDescriptor,
-    path: String,
+    endpoint: OpenAIChatEndpoint,
     bodyData: Data,
     wantsStream: Bool,
     videos: [OpenAIVideoInput]
   ) {
     self.model = model
-    self.path = path
+    self.endpoint = endpoint
     self.bodyData = bodyData
     self.wantsStream = wantsStream
     self.videos = videos
   }
-}
-
-public enum ChatRoutingDecision: Sendable {
-  case swiftLMProxy
-  case videoBackend(VideoChatRouteRequest)
 }
 
 public enum VideoChatBackendError: Error, Equatable, CustomStringConvertible {
@@ -138,13 +135,13 @@ public enum VideoChatBackendError: Error, Equatable, CustomStringConvertible {
 }
 
 public protocol VideoChatBackend: Sendable {
-  func complete(_ request: VideoChatRouteRequest) async throws -> Response
+  func complete(_ request: VideoChatRouteRequest) async throws -> BackendChatResult
 }
 
 public struct NotConfiguredVideoChatBackend: VideoChatBackend {
   public init() {}
 
-  public func complete(_ request: VideoChatRouteRequest) async throws -> Response {
+  public func complete(_ request: VideoChatRouteRequest) async throws -> BackendChatResult {
     log.info(
       "video.backend_not_configured model=\(request.model.id, privacy: .public) video_count=\(request.videos.count, privacy: .public)"
     )
@@ -152,12 +149,16 @@ public struct NotConfiguredVideoChatBackend: VideoChatBackend {
   }
 }
 
+func effectiveSamplingFPS(modelFPS: Double, requestFPS: Double?) -> Double {
+  return requestFPS ?? modelFPS
+}
+
 public actor InProcessVLMVideoChatBackend: VideoChatBackend {
   private var backends: [String: MLXVLMVideoBackend] = [:]
 
   public init() {}
 
-  public func complete(_ request: VideoChatRouteRequest) async throws -> Response {
+  public func complete(_ request: VideoChatRouteRequest) async throws -> BackendChatResult {
     let completionRequest = try makeMLXVLMVideoCompletionRequest(from: request.bodyData)
     guard let modelFPS = request.model.capabilities.videoSamplingFPS else {
       throw VideoChatBackendError.modelMissingVideoSamplingFPS(modelID: request.model.id)
@@ -166,7 +167,7 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
     // The model's declared rate is the default for callers that don't pass a
     // value. Frame sampling honours `max_frames` as an upper cap regardless of
     // the chosen FPS, so a runaway frame count is bounded by the request.
-    let effectiveFPS: Double = completionRequest.fps ?? modelFPS
+    let effectiveFPS = effectiveSamplingFPS(modelFPS: modelFPS, requestFPS: completionRequest.fps)
     let allVideoURLs = completionRequest.videoURLs
       + completionRequest.messages.flatMap(\.videoURLs)
     var preSampledVideos: [UserInput.Video] = []
@@ -187,12 +188,18 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
       sampledFPS: effectiveFPS
     )
     let backend = try backend(for: request.model)
+    if request.wantsStream {
+      return try await streamCompletion(
+        modelID: request.model.id,
+        backend: backend,
+        request: preparedRequest
+      )
+    }
     let completion = try await backend.complete(preparedRequest)
-    let data = try JSONEncoder().encode(completion)
-    return Response(
-      status: .ok,
-      headers: [.contentType: "application/json"],
-      body: .init(byteBuffer: ByteBuffer(data: data))
+    return .buffered(
+      statusCode: 200,
+      contentType: "application/json",
+      body: try JSONEncoder().encode(completion)
     )
   }
 
@@ -204,6 +211,60 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
     let backend = MLXVLMVideoBackend(model: descriptor)
     backends[model.id] = backend
     return backend
+  }
+
+  private func streamCompletion(
+    modelID: String,
+    backend: MLXVLMVideoBackend,
+    request: MLXVLMVideoCompletionRequest
+  ) async throws -> BackendChatResult {
+    let id = "chatcmpl-\(UUID().uuidString)"
+    let created = Int(Date().timeIntervalSince1970)
+    let generationEvents = try await backend.stream(request)
+    let stream = AsyncThrowingStream<BackendStreamEvent, Error> { continuation in
+      let task = Task {
+        var completionInfo: MLXVLMVideoCompletionInfo?
+        continuation.yield(.role(id: id, created: created, model: modelID, role: "assistant"))
+        do {
+          for try await event in generationEvents {
+            switch event {
+            case .chunk(let text):
+              continuation.yield(.content(id: id, created: created, model: modelID, content: text))
+            case .info(let info):
+              completionInfo = info
+            }
+          }
+          let usage = completionInfo.map { info in
+            BackendUsage(
+              promptTokens: info.promptTokenCount,
+              completionTokens: info.generationTokenCount,
+              totalTokens: info.promptTokenCount + info.generationTokenCount
+            )
+          }
+          continuation.yield(
+            .finish(
+              id: id,
+              created: created,
+              model: modelID,
+              finishReason: completionInfo?.finishReason ?? "stop",
+              usage: usage
+            ))
+          continuation.finish()
+        } catch {
+          continuation.finish(throwing: error)
+        }
+      }
+      continuation.onTermination = { @Sendable _ in
+        task.cancel()
+      }
+    }
+    return .streaming(
+      statusCode: 200,
+      contentType: "text/event-stream",
+      events: stream,
+      appendDoneFrame: true,
+      lifetimeToken: nil
+    )
   }
 }
 
@@ -346,27 +407,6 @@ private func videoMessageContent(_ rawContent: Any?) throws -> ParsedVideoMessag
     text: textParts.joined(separator: "\n"),
     videos: videos
   )
-}
-
-public func chatRoutingDecision(
-  path: String,
-  bodyData: Data,
-  model: ModelDescriptor,
-  wantsStream: Bool,
-  videoInspection: OpenAIVideoInspection
-) -> ChatRoutingDecision {
-  guard videoInspection.containsVideo else {
-    return .swiftLMProxy
-  }
-
-  return .videoBackend(
-    VideoChatRouteRequest(
-      model: model,
-      path: path,
-      bodyData: bodyData,
-      wantsStream: wantsStream,
-      videos: videoInspection.videos
-    ))
 }
 
 private func parseOpenAIVideoContentPart(_ contentPart: [String: Any]) throws -> OpenAIVideoInput {

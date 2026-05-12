@@ -468,10 +468,10 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
 
   // /v1/chat/completions and /v1/completions: parse, JIT-route, proxy.
   router.post("/v1/chat/completions") { req, _ async throws -> Response in
-    try await proxyChat(path: "/v1/chat/completions", req: req, state: state)
+    try await handleChat(endpoint: .chatCompletions, req: req, state: state)
   }
   router.post("/v1/completions") { req, _ async throws -> Response in
-    try await proxyChat(path: "/v1/completions", req: req, state: state)
+    try await handleChat(endpoint: .completions, req: req, state: state)
   }
 
   // GET /swiftlmd/events  Server-Sent-Events stream of broker lifecycle.
@@ -690,33 +690,31 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
   )
 }
 
-// MARK: - Proxy logic
+// MARK: - Chat ingress
 
-func proxyChat(path: String, req: Request, state: BrokerState) async throws -> Response {
-  // Buffer the request body so we can peek at `model`, `stream`, and
-  // `response_format`, then forward (possibly rewritten) to upstream.
+func handleChat(
+  endpoint: OpenAIChatEndpoint,
+  req: Request,
+  state: BrokerState
+) async throws -> Response {
   let bodyBuffer = try await req.body.collect(upTo: 100 * 1024 * 1024)
   var bodyData = Data(buffer: bodyBuffer)
 
-  guard var json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
-        let modelID = json["model"] as? String
-  else {
-    return errorResponse(
-      status: .badRequest,
-      message: "missing `model` field",
-      type: "invalid_request_error"
-    )
-  }
-  let wantsStream = (json["stream"] as? Bool) ?? false
-  let videoInspection: OpenAIVideoInspection
+  let ingress: ParsedChatIngress
   do {
-    videoInspection = try inspectOpenAIVideoInputs(in: json)
-  } catch let error as OpenAIVideoParseError {
-    return errorResponse(
-      status: .badRequest,
+    ingress = try parseChatIngress(endpoint: endpoint, bodyData: bodyData)
+  } catch let error as ChatIngressError {
+    return renderBackendChatResult(backendErrorResult(
+      statusCode: 400,
       message: error.description,
       type: "invalid_request_error"
-    )
+    ))
+  } catch {
+    return renderBackendChatResult(backendErrorResult(
+      statusCode: 400,
+      message: "missing `model` field",
+      type: "invalid_request_error"
+    ))
   }
 
   // JSON enforcement middleware. Local SwiftLM does not implement
@@ -724,162 +722,149 @@ func proxyChat(path: String, req: Request, state: BrokerState) async throws -> R
   // silently ignored. We inject a system message instructing the model to
   // emit JSON; combined with the already-reliable Qwen coder family this
   // lifts parse rate from roughly 50% to nearly 100% in practice.
+  var json = ingress.json
   if let rewritten = injectJSONInstructionIfNeeded(&json) {
     bodyData = rewritten
   }
 
-  guard let descriptor = state.resolve(id: modelID) else {
-    return errorResponse(
-      status: .notFound,
-      message: "model not found: \(modelID). try GET /v1/models",
+  guard let descriptor = state.resolve(id: ingress.modelID) else {
+    return renderBackendChatResult(backendErrorResult(
+      statusCode: 404,
+      message: "model not found: \(ingress.modelID). try GET /v1/models",
       type: "model_not_found",
       code: "model_not_found"
-    )
+    ))
   }
 
-  if descriptor.kind == .embedding {
-    return errorResponse(
-      status: .badRequest,
-      message: "model is an embedding model; use POST /v1/embeddings",
-      type: "invalid_request_error"
-    )
-  }
-  if videoInspection.containsVideo {
-    guard descriptor.capabilities.video else {
-      return errorResponse(
-        status: .badRequest,
-        message: "model does not support video input",
-        type: "invalid_request_error"
-      )
-    }
-    guard !wantsStream else {
-      return errorResponse(
-        status: .badRequest,
-        message: "streaming is not supported for video chat",
-        type: "invalid_request_error"
-      )
-    }
-  }
-
-  switch chatRoutingDecision(
-    path: path,
+  let prepared = prepareChatRequest(
+    ingress: ingress,
     bodyData: bodyData,
-    model: descriptor,
-    wantsStream: wantsStream,
-    videoInspection: videoInspection
-  ) {
+    json: json,
+    model: descriptor
+  )
+  let result: BackendChatResult
+  switch dispatchChatRequest(prepared) {
   case .swiftLMProxy:
-    break
+    result = try await swiftLMProxyResult(request: prepared, state: state)
   case .videoBackend(let videoRequest):
     do {
-      return try await state.videoChatBackend.complete(videoRequest)
+      result = try await state.videoChatBackend.complete(videoRequest)
     } catch VideoChatBackendError.notConfigured {
-      return errorResponse(
-        status: .serviceUnavailable,
+      result = backendErrorResult(
+        statusCode: 503,
         message: "video chat backend is not configured",
         type: "not_configured",
         code: "not_configured"
       )
     } catch let backendError as VideoChatBackendError {
-      if case .modelMissingVideoSamplingFPS = backendError {
-        return errorResponse(
-          status: .serviceUnavailable,
+      switch backendError {
+      case .modelMissingVideoSamplingFPS:
+        result = backendErrorResult(
+          statusCode: 503,
           message: backendError.description,
           type: "model_missing_video_sampling_fps",
           code: "model_missing_video_sampling_fps"
         )
+      case .notConfigured:
+        result = backendErrorResult(
+          statusCode: 503,
+          message: backendError.description,
+          type: "video_backend_failed"
+        )
       }
-      return errorResponse(
-        status: .serviceUnavailable,
-        message: backendError.description,
-        type: "video_backend_failed"
-      )
     } catch let error as VideoChatRequestBuildError {
-      return errorResponse(
-        status: .badRequest,
+      result = backendErrorResult(
+        statusCode: 400,
         message: error.description,
         type: "invalid_request_error"
       )
     } catch {
-      return errorResponse(
-        status: .serviceUnavailable,
+      result = backendErrorResult(
+        statusCode: 503,
         message: "video chat backend failed: \(error)",
         type: "video_backend_failed"
       )
     }
+  case .failure(let failure):
+    result = backendErrorResult(
+      statusCode: 400,
+      message: failure.description,
+      type: "invalid_request_error"
+    )
   }
+  return renderBackendChatResult(result)
+}
 
+func swiftLMProxyResult(
+  request prepared: PreparedChatRequest,
+  state: BrokerState
+) async throws -> BackendChatResult {
   let backend: SwiftLMBackendProtocol
   do {
-    backend = try await state.router.routeAndBegin(descriptor)
+    backend = try await state.router.routeAndBegin(prepared.model)
   } catch let err as ModelRouter.RouteError {
     switch err {
     case .cannotFitInBudget:
-      return errorResponse(
-        status: .serviceUnavailable,
-        message: "cannot fit \(descriptor.displayName) in memory budget",
+      return backendErrorResult(
+        statusCode: 503,
+        message: "cannot fit \(prepared.model.displayName) in memory budget",
         type: "capacity_exceeded"
       )
     case .noFreePort:
-      return errorResponse(
-        status: .serviceUnavailable,
+      return backendErrorResult(
+        statusCode: 503,
         message: "no free port in pool",
         type: "capacity_exceeded"
       )
     case .backendLaunchFailed:
-      return errorResponse(
-        status: .serviceUnavailable,
-        message: "failed to launch model \(descriptor.displayName)",
+      return backendErrorResult(
+        statusCode: 503,
+        message: "failed to launch model \(prepared.model.displayName)",
         type: "launch_failed"
       )
     case .wrongKindForChat:
-      return errorResponse(
-        status: .badRequest,
+      return backendErrorResult(
+        statusCode: 400,
         message: "model is an embedding model; use POST /v1/embeddings",
         type: "invalid_request_error"
       )
     case .wrongKindForEmbedding, .embeddingSpawnerMissing:
-      return errorResponse(
-        status: .internalServerError,
+      return backendErrorResult(
+        statusCode: 500,
         message: "router configuration error",
         type: "internal_error"
       )
     }
   }
 
-  let upstreamURL = URL(string: "http://localhost:\(backend.port)\(path)")!
+  let upstreamURL = URL(string: "http://localhost:\(backend.port)\(prepared.endpoint.path)")!
   var request = URLRequest(url: upstreamURL, timeoutInterval: 600)
   request.httpMethod = "POST"
-  request.httpBody = bodyData
+  request.httpBody = prepared.bodyData
   request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-  if wantsStream {
+  if prepared.wantsStream {
     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
   }
 
-  if wantsStream {
-    // Streaming path: proxy the SSE chunks back to the client as they arrive.
-    let modelIDCopy = descriptor.id
-    let router = state.router
+  if prepared.wantsStream {
+    let modelID = prepared.model.id
+    let lifetimeToken = BackendLifetimeToken {
+      await state.router.requestDone(modelID: modelID)
+    }
     do {
       let (bytes, resp) = try await URLSession.shared.bytes(for: request)
       let status = (resp as? HTTPURLResponse)?.statusCode ?? 502
       let contentType = (resp as? HTTPURLResponse)?
         .value(forHTTPHeaderField: "Content-Type") ?? "text/event-stream"
-
-      let responseBody = ResponseBody(asyncSequence: AsyncURLBytesSequence(bytes: bytes) {
-        Task { await router.requestDone(modelID: modelIDCopy) }
-      })
-
-      return Response(
-        status: .init(code: numericCast(status)),
-        headers: [
-          .contentType: contentType,
-          .cacheControl: "no-cache",
-        ],
-        body: responseBody
+      return .streaming(
+        statusCode: status,
+        contentType: contentType,
+        events: rawBackendStream(bytes: bytes, lifetimeToken: lifetimeToken),
+        appendDoneFrame: false,
+        lifetimeToken: lifetimeToken
       )
     } catch {
-      await state.router.requestDone(modelID: descriptor.id)
+      await lifetimeToken.finish()
       throw error
     }
   }
@@ -888,65 +873,55 @@ func proxyChat(path: String, req: Request, state: BrokerState) async throws -> R
   do {
     let (data, resp) = try await URLSession.shared.data(for: request)
     let status = (resp as? HTTPURLResponse)?.statusCode ?? 502
-    await state.router.requestDone(modelID: descriptor.id)
-    return Response(
-      status: .init(code: numericCast(status)),
-      headers: [.contentType: "application/json"],
-      body: .init(byteBuffer: ByteBuffer(data: data))
+    await state.router.requestDone(modelID: prepared.model.id)
+    return .buffered(
+      statusCode: status,
+      contentType: "application/json",
+      body: data
     )
   } catch {
-    await state.router.requestDone(modelID: descriptor.id)
+    await state.router.requestDone(modelID: prepared.model.id)
     throw error
   }
 }
 
-// MARK: - AsyncSequence wrapper for upstream SSE bytes
-
-/// Adapts `URLSession.AsyncBytes` into a `ByteBuffer` stream and fires
-/// `onFinish` exactly once so the router can drop the in-flight count.
-///
-/// We batch raw bytes into fixed-size chunks rather than parsing SSE frames,
-/// because the SwiftLM upstream already writes complete SSE chunks and the
-/// HTTP client just needs to forward bytes transparently. The chunk size
-/// is a throughput/latency trade; 4 KiB keeps tokens flowing promptly.
-struct AsyncURLBytesSequence: AsyncSequence, Sendable {
-  typealias Element = ByteBuffer
-
-  let bytes: URLSession.AsyncBytes
-  let onFinish: @Sendable () -> Void
-  let chunkSize: Int = 4096
-
-  func makeAsyncIterator() -> Iterator {
-    Iterator(upstream: bytes.makeAsyncIterator(), onFinish: onFinish, chunkSize: chunkSize)
-  }
-
-  struct Iterator: AsyncIteratorProtocol {
-    var upstream: URLSession.AsyncBytes.AsyncIterator
-    let onFinish: @Sendable () -> Void
-    let chunkSize: Int
-    var finished = false
-
-    init(upstream: URLSession.AsyncBytes.AsyncIterator, onFinish: @escaping @Sendable () -> Void, chunkSize: Int) {
-      self.upstream = upstream
-      self.onFinish = onFinish
-      self.chunkSize = chunkSize
-    }
-
-    mutating func next() async throws -> ByteBuffer? {
-      var bytes = [UInt8]()
-      bytes.reserveCapacity(chunkSize)
-      while bytes.count < chunkSize {
-        guard let byte = try await upstream.next() else { break }
-        bytes.append(byte)
-      }
-      if bytes.isEmpty {
-        if !finished {
-          finished = true
-          onFinish()
+func rawBackendStream(
+  bytes: URLSession.AsyncBytes,
+  lifetimeToken: BackendLifetimeToken
+) -> AsyncThrowingStream<BackendStreamEvent, Error> {
+  AsyncThrowingStream<BackendStreamEvent, Error> { continuation in
+    let task = Task {
+      var iterator = bytes.makeAsyncIterator()
+      let chunkSize = 4096
+      do {
+        while !Task.isCancelled {
+          var rawBytes: [UInt8] = []
+          rawBytes.reserveCapacity(chunkSize)
+          while rawBytes.count < chunkSize {
+            guard let byte = try await iterator.next() else {
+              break
+            }
+            rawBytes.append(byte)
+          }
+          if rawBytes.isEmpty {
+            await lifetimeToken.finish()
+            continuation.finish()
+            return
+          }
+          continuation.yield(.rawBytes(Data(rawBytes)))
         }
-        return nil
+        await lifetimeToken.finish()
+        continuation.finish()
+      } catch {
+        await lifetimeToken.finish()
+        continuation.finish(throwing: error)
       }
-      return ByteBuffer(bytes: bytes)
+    }
+    continuation.onTermination = { @Sendable _ in
+      task.cancel()
+      Task {
+        await lifetimeToken.finish()
+      }
     }
   }
 }

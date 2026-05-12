@@ -247,8 +247,8 @@ public struct ModelCatalog {
   }
 
   /// The Qwen2-VL, Qwen2.5-VL, and Qwen3-VL Swift processors hardcode a 2.0
-  /// FPS sampling rate. Anything we extract on the route's behalf must match
-  /// that rate, so we declare it here as a single source of truth.
+  /// FPS resampling rate. We declare that value as the model default while
+  /// still allowing callers to request a different route extraction rate.
   private static func qwenFamilySamplingFPS() -> Double {
     return 2.0
   }

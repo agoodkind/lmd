@@ -55,34 +55,17 @@ public actor MLXVLMVideoBackend {
   public func complete(
     _ request: MLXVLMVideoCompletionRequest
   ) async throws -> MLXVLMVideoChatCompletionResponse {
-    try request.validate()
-    try await load()
-    guard let container else {
-      throw MLXVLMVideoBackendError.modelNotLoaded(modelID: model.id)
-    }
-
-    let userInput = request.makeUserInput()
+    let generationEvents = try await stream(request)
     let metadata = MLXVLMVideoMetadata(request: request)
-    let parameters = GenerateParameters(
-      maxTokens: request.maxTokens,
-      temperature: request.temperature
-    )
-    let preparedInput = try await container.prepare(input: userInput)
-    let generationStream = try await container.generate(
-      input: preparedInput,
-      parameters: parameters
-    )
 
     var generatedText = ""
     var completionInfo: MLXVLMVideoCompletionInfo?
-    for await generation in generationStream {
-      switch generation {
+    for try await event in generationEvents {
+      switch event {
       case .chunk(let chunk):
         generatedText.append(chunk)
       case .info(let info):
-        completionInfo = MLXVLMVideoCompletionInfo(info: info)
-      case .toolCall:
-        videoLog.debug("vlm_video.tool_call_ignored model=\(self.model.id, privacy: .public)")
+        completionInfo = info
       }
     }
 
@@ -96,6 +79,54 @@ public actor MLXVLMVideoBackend {
       completionInfo: completionInfo
     )
   }
+
+  /// Generate semantic text and completion-info events after all validation,
+  /// model loading, and prompt preparation have completed.
+  public func stream(
+    _ request: MLXVLMVideoCompletionRequest
+  ) async throws -> AsyncThrowingStream<MLXVLMVideoGenerationEvent, Error> {
+    try request.validate()
+    try await load()
+    guard let container else {
+      throw MLXVLMVideoBackendError.modelNotLoaded(modelID: model.id)
+    }
+
+    let userInput = request.makeUserInput()
+    let parameters = GenerateParameters(
+      maxTokens: request.maxTokens,
+      temperature: request.temperature
+    )
+    let preparedInput = try await container.prepare(input: userInput)
+    let generationStream = try await container.generate(
+      input: preparedInput,
+      parameters: parameters
+    )
+
+    let modelID = model.id
+    return AsyncThrowingStream<MLXVLMVideoGenerationEvent, Error> { continuation in
+      let task = Task {
+        for await generation in generationStream {
+          switch generation {
+          case .chunk(let chunk):
+            continuation.yield(.chunk(chunk))
+          case .info(let info):
+            continuation.yield(.info(MLXVLMVideoCompletionInfo(info: info)))
+          case .toolCall:
+            videoLog.debug("vlm_video.tool_call_ignored model=\(modelID, privacy: .public)")
+          }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { @Sendable _ in
+        task.cancel()
+      }
+    }
+  }
+}
+
+public enum MLXVLMVideoGenerationEvent: Sendable, Equatable {
+  case chunk(String)
+  case info(MLXVLMVideoCompletionInfo)
 }
 
 // MARK: - Model descriptor

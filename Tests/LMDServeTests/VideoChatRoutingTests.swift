@@ -7,9 +7,21 @@
 //
 
 import Foundation
-import LMDServeSupport
 import SwiftLMCore
 import XCTest
+@testable import LMDServeSupport
+
+private actor CompletionCounter {
+  private(set) var value = 0
+
+  func increment() {
+    value += 1
+  }
+
+  func currentValue() -> Int {
+    value
+  }
+}
 
 final class VideoChatRoutingTests: XCTestCase {
   private var temporaryRoot: URL!
@@ -45,6 +57,11 @@ final class VideoChatRoutingTests: XCTestCase {
     XCTAssertEqual(inspection.videos[0].fileURL, videoFile.standardizedFileURL)
     XCTAssertEqual(inspection.videos[0].fps, 2.5)
     XCTAssertEqual(inspection.videos[0].maxFrames, 48)
+  }
+
+  func testExplicitRequestFPSOverridesModelSamplingFPS() {
+    XCTAssertEqual(effectiveSamplingFPS(modelFPS: 2.0, requestFPS: 16.0), 16.0)
+    XCTAssertEqual(effectiveSamplingFPS(modelFPS: 2.0, requestFPS: nil), 2.0)
   }
 
   func testIgnoresTextOnlyMessages() throws {
@@ -129,7 +146,8 @@ final class VideoChatRoutingTests: XCTestCase {
       id: "video-model",
       displayName: "Video Model",
       path: "/models/video-model",
-      sizeBytes: 42
+      sizeBytes: 42,
+      capabilities: .init(video: true, videoSamplingFPS: 2)
     )
 
     let decision = chatRoutingDecision(
@@ -145,7 +163,7 @@ final class VideoChatRoutingTests: XCTestCase {
       return
     }
     XCTAssertEqual(request.model.id, "video-model")
-    XCTAssertEqual(request.path, "/v1/chat/completions")
+    XCTAssertEqual(request.endpoint, .chatCompletions)
     XCTAssertEqual(request.bodyData, bodyData)
     XCTAssertFalse(request.wantsStream)
     XCTAssertEqual(request.videos, inspection.videos)
@@ -185,7 +203,7 @@ final class VideoChatRoutingTests: XCTestCase {
     )
     let request = VideoChatRouteRequest(
       model: model,
-      path: "/v1/chat/completions",
+      endpoint: .chatCompletions,
       bodyData: Data(),
       wantsStream: false,
       videos: inspection.videos
@@ -197,6 +215,167 @@ final class VideoChatRoutingTests: XCTestCase {
     } catch let error as VideoChatBackendError {
       XCTAssertEqual(error, .notConfigured)
     }
+  }
+
+  func testDispatchRulesCoverChatIngressCases() throws {
+    let videoFile = try writeFile(named: "dispatch.mp4")
+    let videoInspection = try inspectOpenAIVideoInputs(
+      in: chatRequest(videoURL: videoFile.absoluteString)
+    )
+    let textInspection = OpenAIVideoInspection(videos: [])
+    let cases: [(String, PreparedChatRequest, String)] = [
+      (
+        "text",
+        preparedRequest(model: model(id: "text"), inspection: textInspection),
+        "swiftLMProxy"
+      ),
+      (
+        "text stream",
+        preparedRequest(model: model(id: "text-stream"), wantsStream: true, inspection: textInspection),
+        "swiftLMProxy"
+      ),
+      (
+        "video stream",
+        preparedRequest(
+          model: model(id: "video", capabilities: .init(video: true, videoSamplingFPS: 2)),
+          wantsStream: true,
+          inspection: videoInspection
+        ),
+        "videoBackend"
+      ),
+      (
+        "embedding",
+        preparedRequest(model: model(id: "embedding", kind: .embedding), inspection: textInspection),
+        "failure: model is an embedding model; use POST /v1/embeddings"
+      ),
+      (
+        "missing video capability",
+        preparedRequest(model: model(id: "no-video"), inspection: videoInspection),
+        "failure: model does not support video input"
+      ),
+      (
+        "wrong endpoint",
+        preparedRequest(
+          endpoint: .completions,
+          model: model(id: "video-completions", capabilities: .init(video: true, videoSamplingFPS: 2)),
+          inspection: videoInspection
+        ),
+        "failure: video input is supported only on POST /v1/chat/completions"
+      ),
+    ]
+
+    for testCase in cases {
+      let decision = dispatchChatRequest(testCase.1)
+      XCTAssertEqual(dispatchLabel(decision), testCase.2, testCase.0)
+    }
+  }
+
+  func testParseChatIngressReportsUnknownModelForCallerResolution() throws {
+    let body = Data(
+      #"{"model":"missing-model","messages":[{"role":"user","content":"hello"}]}"#.utf8
+    )
+
+    let ingress = try parseChatIngress(endpoint: .chatCompletions, bodyData: body)
+
+    XCTAssertEqual(ingress.modelID, "missing-model")
+    XCTAssertFalse(ingress.wantsStream)
+    XCTAssertFalse(ingress.mediaInspection.containsVideo)
+  }
+
+  func testSSEEncoderProducesOrderedOpenAIFramesAndDone() async throws {
+    let stream = AsyncThrowingStream<BackendStreamEvent, Error> { continuation in
+      continuation.yield(.role(id: "chatcmpl-test", created: 1, model: "model-a", role: "assistant"))
+      continuation.yield(.content(id: "chatcmpl-test", created: 1, model: "model-a", content: "hello"))
+      continuation.yield(
+        .finish(
+          id: "chatcmpl-test",
+          created: 1,
+          model: "model-a",
+          finishReason: "stop",
+          usage: BackendUsage(promptTokens: 3, completionTokens: 2, totalTokens: 5)
+        ))
+      continuation.finish()
+    }
+    var iterator = BackendStreamingBodySequence(
+      events: stream,
+      appendDoneFrame: true,
+      lifetimeToken: nil
+    ).makeAsyncIterator()
+
+    let role = try await stringFromNextBuffer(&iterator)
+    let content = try await stringFromNextBuffer(&iterator)
+    let finish = try await stringFromNextBuffer(&iterator)
+    let done = try await stringFromNextBuffer(&iterator)
+    let end = try await iterator.next()
+
+    XCTAssertTrue(role.contains(#""role":"assistant""#))
+    XCTAssertTrue(content.contains(#""content":"hello""#))
+    XCTAssertTrue(finish.contains(#""finish_reason":"stop""#))
+    XCTAssertTrue(finish.contains(#""total_tokens":5"#))
+    XCTAssertEqual(done, "data: [DONE]\n\n")
+    XCTAssertNil(end)
+  }
+
+  func testStreamingBodyFinishesLifetimeOnceOnNormalCompletion() async throws {
+    let counter = CompletionCounter()
+    let token = BackendLifetimeToken {
+      await counter.increment()
+    }
+    let stream = AsyncThrowingStream<BackendStreamEvent, Error> { continuation in
+      continuation.finish()
+    }
+    var iterator = BackendStreamingBodySequence(
+      events: stream,
+      appendDoneFrame: false,
+      lifetimeToken: token
+    ).makeAsyncIterator()
+
+    let next = try await iterator.next()
+    XCTAssertNil(next)
+    await token.finish()
+
+    let value = await counter.currentValue()
+    XCTAssertEqual(value, 1)
+  }
+
+  func testStreamingBodyFinishesLifetimeOnceOnThrownError() async throws {
+    let counter = CompletionCounter()
+    let token = BackendLifetimeToken {
+      await counter.increment()
+    }
+    let stream = AsyncThrowingStream<BackendStreamEvent, Error> { continuation in
+      continuation.finish(throwing: TestStreamError.failed)
+    }
+    var iterator = BackendStreamingBodySequence(
+      events: stream,
+      appendDoneFrame: false,
+      lifetimeToken: token
+    ).makeAsyncIterator()
+
+    do {
+      _ = try await iterator.next()
+      XCTFail("expected stream error")
+    } catch TestStreamError.failed {
+    } catch {
+      XCTFail("unexpected error \(error)")
+    }
+    await token.finish()
+
+    let value = await counter.currentValue()
+    XCTAssertEqual(value, 1)
+  }
+
+  func testLifetimeTokenFinishesOnceForCancellationCleanup() async {
+    let counter = CompletionCounter()
+    let token = BackendLifetimeToken {
+      await counter.increment()
+    }
+
+    await token.finish()
+    await token.finish()
+
+    let value = await counter.currentValue()
+    XCTAssertEqual(value, 1)
   }
 
   func testBuildsMLXVLMRequestFromOpenAIVideoMessage() throws {
@@ -306,6 +485,61 @@ final class VideoChatRoutingTests: XCTestCase {
     let fileURL = temporaryRoot.appendingPathComponent(name)
     try Data([0, 1, 2, 3]).write(to: fileURL)
     return fileURL.standardizedFileURL
+  }
+
+  private func model(
+    id: String,
+    kind: ModelKind = .chat,
+    capabilities: ModelCapabilities = .textOnly
+  ) -> ModelDescriptor {
+    ModelDescriptor(
+      id: id,
+      displayName: id,
+      path: "/models/\(id)",
+      sizeBytes: 42,
+      kind: kind,
+      capabilities: capabilities
+    )
+  }
+
+  private func preparedRequest(
+    endpoint: OpenAIChatEndpoint = .chatCompletions,
+    model: ModelDescriptor,
+    wantsStream: Bool = false,
+    inspection: OpenAIVideoInspection
+  ) -> PreparedChatRequest {
+    PreparedChatRequest(
+      endpoint: endpoint,
+      bodyData: Data(),
+      json: [:],
+      model: model,
+      wantsStream: wantsStream,
+      mediaInspection: inspection
+    )
+  }
+
+  private func dispatchLabel(_ decision: ChatRoutingDecision) -> String {
+    switch decision {
+    case .swiftLMProxy:
+      return "swiftLMProxy"
+    case .videoBackend:
+      return "videoBackend"
+    case .failure(let failure):
+      return "failure: \(failure.description)"
+    }
+  }
+
+  private func stringFromNextBuffer(
+    _ iterator: inout BackendStreamingBodySequence.Iterator
+  ) async throws -> String {
+    let optionalBuffer = try await iterator.next()
+    let buffer = try XCTUnwrap(optionalBuffer)
+    let data = Data(buffer: buffer)
+    return try XCTUnwrap(String(data: data, encoding: .utf8))
+  }
+
+  private enum TestStreamError: Error {
+    case failed
   }
 
   private func chatRequest(
