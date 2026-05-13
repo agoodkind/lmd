@@ -153,32 +153,40 @@ final class TUILaunchTests: XCTestCase {
 
   // MARK: - Binary resolution
 
-  /// Locate the release binary. Uses `$LMD_BINARY_DIR` when set,
-  /// otherwise walks up from the test file to find Package.swift and
-  /// joins `.build/release/<name>`. Skips the test (not fails) when
-  /// the binary is missing. This lets `swift test` run without a
-  /// prior `swift build -c release`.
+  /// Locate the staged release binary. Uses `$LMD_BINARY_DIR` when set,
+  /// otherwise prefers `Products/Build/Release/<name>` and falls back to
+  /// `.build/release/<name>`. Skips the test (not fails) when the binary is
+  /// missing. This lets `swift test` run without a prior release build.
   private func resolveBinary(_ name: String) throws -> URL {
     let env = ProcessInfo.processInfo.environment
-    let baseDir: URL
     if let override = env["LMD_BINARY_DIR"], !override.isEmpty {
-      baseDir = URL(fileURLWithPath: override)
-    } else {
-      baseDir = try repoRoot()
+      let candidate = URL(fileURLWithPath: override).appendingPathComponent(name)
+      if FileManager.default.isExecutableFile(atPath: candidate.path) {
+        return candidate
+      }
+    }
+
+    let root = try repoRoot()
+    let candidates = [
+      root
+        .appendingPathComponent("Products", isDirectory: true)
+        .appendingPathComponent("Build", isDirectory: true)
+        .appendingPathComponent("Release", isDirectory: true)
+        .appendingPathComponent(name),
+      root
         .appendingPathComponent(".build", isDirectory: true)
         .appendingPathComponent("release", isDirectory: true)
+        .appendingPathComponent(name),
+    ]
+    for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate.path) {
+      return candidate
     }
-    let bin = baseDir.appendingPathComponent(name)
-    if !FileManager.default.isExecutableFile(atPath: bin.path) {
-      throw XCTSkip(
-        """
-        release binary not found at \(bin.path). \
-        Run `swift build -c release` or `make build` first, or set \
-        LMD_BINARY_DIR to a directory containing \(name).
-        """
-      )
-    }
-    return bin
+    throw XCTSkip(
+      """
+      release binary not found for \(name). Run `make build` first, or set \
+      LMD_BINARY_DIR to a directory containing \(name).
+      """
+    )
   }
 
   private func repoRoot() throws -> URL {

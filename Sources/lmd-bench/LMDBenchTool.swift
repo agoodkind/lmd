@@ -9,7 +9,6 @@ import SwiftLMBackend
 import SwiftLMMonitor
 import SwiftLMRuntime
 
-AppLogger.bootstrap(subsystem: "io.goodkind.lmd")
 private let log = AppLogger.logger(category: "BenchRunner")
 
 // Module name and one of its exported symbols clash. Shadow the library
@@ -756,46 +755,6 @@ func runModel(displayName: String, path: String, maxTokens: Int) {
     log.notice("model.phase_done model=\(displayName, privacy: .public)")
 }
 
-// MARK: - Signal handling for clean shutdown
-
-signal(SIGINT, SIG_IGN)
-signal(SIGTERM, SIG_IGN)
-let sigSrc1 = DispatchSource.makeSignalSource(signal: SIGINT)
-let sigSrc2 = DispatchSource.makeSignalSource(signal: SIGTERM)
-sigSrc1.setEventHandler {
-    log.notice("signal.received name=SIGINT action=shutdown")
-    FanController.shared.stop()
-    MemoryMonitor.shared.stop()
-    exit(130)
-}
-sigSrc2.setEventHandler {
-    log.notice("signal.received name=SIGTERM action=shutdown")
-    FanController.shared.stop()
-    MemoryMonitor.shared.stop()
-    exit(143)
-}
-sigSrc1.resume()
-sigSrc2.resume()
-
-// MARK: - Entry
-
-ensureDir(resultsDir)
-ensureDir(promptsDir)
-
-log.notice("bench.starting models=\(models.count, privacy: .public) tests=\(tests.count, privacy: .public) total=\(models.count * tests.count, privacy: .public)")
-
-// Take over fan control so we keep the machine quiet under light load
-FanController.shared.start()
-
-// Start integrated memory/system monitor (which will drive the fan curve)
-MemoryMonitor.shared.start()
-
-for m in models {
-    runModel(displayName: m.displayName, path: m.path, maxTokens: m.maxTokens)
-}
-
-log.notice("bench.main_phase_done")
-
 // MARK: - Reasoning-eval phase
 // For personal chat-driver evaluation on configs.
 // Different profile: thinking enabled, bigger max_tokens, chat-only prompts.
@@ -891,12 +850,50 @@ func runReasoningModel(_ m: ReasoningModel) {
     log.notice("reasoning.phase_done model=\(m.displayName, privacy: .public)")
 }
 
-log.notice("bench.reasoning_phase_starting")
-ensureDir(reasoningResultsDir)
-for rm in reasoningModels {
-    runReasoningModel(rm)
-}
+public enum LMDBenchTool {
+    public static func run() {
+        AppLogger.bootstrap(subsystem: "io.goodkind.lmd")
 
-log.notice("bench.complete")
-MemoryMonitor.shared.stop()
-FanController.shared.stop()
+        signal(SIGINT, SIG_IGN)
+        signal(SIGTERM, SIG_IGN)
+        let sigInt = DispatchSource.makeSignalSource(signal: SIGINT)
+        let sigTerm = DispatchSource.makeSignalSource(signal: SIGTERM)
+        sigInt.setEventHandler {
+            log.notice("signal.received name=SIGINT action=shutdown")
+            FanController.shared.stop()
+            MemoryMonitor.shared.stop()
+            exit(130)
+        }
+        sigTerm.setEventHandler {
+            log.notice("signal.received name=SIGTERM action=shutdown")
+            FanController.shared.stop()
+            MemoryMonitor.shared.stop()
+            exit(143)
+        }
+        sigInt.resume()
+        sigTerm.resume()
+
+        ensureDir(resultsDir)
+        ensureDir(promptsDir)
+
+        log.notice("bench.starting models=\(models.count, privacy: .public) tests=\(tests.count, privacy: .public) total=\(models.count * tests.count, privacy: .public)")
+
+        FanController.shared.start()
+        MemoryMonitor.shared.start()
+
+        for model in models {
+            runModel(displayName: model.displayName, path: model.path, maxTokens: model.maxTokens)
+        }
+
+        log.notice("bench.main_phase_done")
+        log.notice("bench.reasoning_phase_starting")
+        ensureDir(reasoningResultsDir)
+        for model in reasoningModels {
+            runReasoningModel(model)
+        }
+
+        log.notice("bench.complete")
+        MemoryMonitor.shared.stop()
+        FanController.shared.stop()
+    }
+}

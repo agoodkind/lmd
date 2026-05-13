@@ -1,7 +1,12 @@
 import Darwin
 import Foundation
 
-let productBinaries = ["lmd", "lmd-serve", "lmd-tui", "lmd-bench", "lmd-qa"]
+let productBinaries = ["lmd", "lmd-serve"]
+let compatibilityCommandLinks = [
+  "lmd-tui": "lmd",
+  "lmd-bench": "lmd",
+  "lmd-qa": "lmd",
+]
 let defaultBundleIdentifierPrefix = "io.goodkind.lmd"
 let defaultVideoModel = "mlx-community/Qwen2.5-VL-32B-Instruct-4bit"
 let supportedVideoExtensions: Set<String> = [
@@ -320,9 +325,9 @@ final class DevTool {
     case "run-serve":
       try runBuiltBinary("lmd-serve")
     case "run-tui":
-      try runBuiltBinary("lmd-tui")
+      try runBuiltCommand(["tui"])
     case "run-bench":
-      try runBuiltBinary("lmd-bench")
+      try runBuiltCommand(["bench"])
     case "smoke":
       try buildProduct("lmd-serve", configuration: "Release")
       try await smoke(requireVideo: false)
@@ -513,11 +518,14 @@ final class DevTool {
       try copyReplacingItem(at: source, to: staging.appendingPathComponent(product))
       try writeLine("  staged \(product)")
     }
+    try stageCompatibilityLinks(in: staging)
     try stageRuntimeResources(for: configuration)
   }
 
   private func test() throws {
     try tuistInstallAndGenerate()
+    var env = ProcessInfo.processInfo.environment
+    env["LMD_BINARY_DIR"] = releaseBuildDirectory().path
     try runPassthrough(
       tuistExecutable(),
       [
@@ -530,7 +538,8 @@ final class DevTool {
         "--no-selective-testing",
         "--inspect-mode",
         "off",
-      ]
+      ],
+      environment: env
     )
   }
 
@@ -583,6 +592,7 @@ final class DevTool {
       try copyReplacingItem(at: source, to: destination)
       try writeLine("  installed \(destination.path)")
     }
+    try stageCompatibilityLinks(in: binDirectory)
 
     try copyRuntimeResources(from: releaseBuildDirectory(), to: binDirectory)
 
@@ -604,7 +614,7 @@ final class DevTool {
     try removeIfExists(agentPlistURL())
 
     let binDirectory = prefixDirectory().appendingPathComponent("bin")
-    for binary in productBinaries {
+    for binary in productBinaries + Array(compatibilityCommandLinks.keys) {
       let path = binDirectory.appendingPathComponent(binary)
       if fileManager.fileExists(atPath: path.path) {
         try fileManager.removeItem(at: path)
@@ -659,6 +669,11 @@ final class DevTool {
     try runPassthrough(releaseBuildDirectory().appendingPathComponent(name).path, [])
   }
 
+  private func runBuiltCommand(_ arguments: [String]) throws {
+    try build(configuration: "Release")
+    try runPassthrough(releaseBuildDirectory().appendingPathComponent("lmd").path, arguments)
+  }
+
   private func smoke(requireVideo: Bool) async throws {
     let configuration = try SmokeConfiguration(environment: environment.values, repoRoot: repoRoot)
     if requireVideo, configuration.videoSampleFile == nil {
@@ -670,8 +685,13 @@ final class DevTool {
 
   private func tuiQA(target: String?) throws {
     _ = try runCaptured("tmux", ["-V"])
-    let args = target.map { [$0] } ?? []
-    try runPassthrough(releaseBuildDirectory().appendingPathComponent("lmd-qa").path, args)
+    var env = ProcessInfo.processInfo.environment
+    env["LMD_BINARY_DIR"] = releaseBuildDirectory().path
+    var args = ["qa"]
+    if let target {
+      args.append(target)
+    }
+    try runPassthrough(releaseBuildDirectory().appendingPathComponent("lmd").path, args, environment: env)
   }
 
   private func logAudit() throws {
@@ -1194,6 +1214,7 @@ final class DevTool {
       try runPassthrough("codesign", ["--verify", "--strict", source.path])
       try copyReplacingItem(at: source, to: directory.appendingPathComponent(binary))
     }
+    try stageCompatibilityLinks(in: directory)
     try copyRuntimeResources(from: releaseBuildDirectory(), to: directory)
   }
 
@@ -1384,6 +1405,15 @@ final class DevTool {
   private func copyReplacingItem(at source: URL, to destination: URL) throws {
     try removeIfExists(destination)
     try fileManager.copyItem(at: source, to: destination)
+  }
+
+  private func stageCompatibilityLinks(in directory: URL) throws {
+    for (linkName, destinationName) in compatibilityCommandLinks {
+      let linkPath = directory.appendingPathComponent(linkName)
+      try removeIfExists(linkPath)
+      try fileManager.createSymbolicLink(atPath: linkPath.path, withDestinationPath: destinationName)
+      try writeLine("  linked \(linkName) -> \(destinationName)")
+    }
   }
 
   private func temporaryDirectory(prefix: String) throws -> URL {

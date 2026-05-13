@@ -18,10 +18,7 @@ import SwiftLMControl
 import SwiftLMRuntime
 import SwiftLMTUI
 
-AppLogger.bootstrap(subsystem: "io.goodkind.lmd")
 private let log = AppLogger.logger(category: "TUIHost")
-
-log.info("tui.starting pid=\(getpid(), privacy: .public)")
 
 // MARK: - Configuration
 
@@ -98,9 +95,6 @@ func latestLibraryEntries() -> [LibraryEntry] {
 
 // MARK: - Boot
 
-Screen.installRestoreOnExit()
-Screen.enter(enableMouse: true)
-
 // Use explicit KeyParser + MouseParser inputs; tests never see raw stdin.
 let monitor = MonitorTab()
 let library = LibraryTab()
@@ -108,16 +102,8 @@ let bench = BenchTab()
 let events = EventsTab()
 let router = TabRouter(tabs: [monitor, library, bench, events])
 
-// Signals
-signal(SIGINT, SIG_IGN)
-signal(SIGTERM, SIG_IGN)
-signal(SIGPIPE, SIG_IGN)
 let sigInt = DispatchSource.makeSignalSource(signal: SIGINT)
 let sigTerm = DispatchSource.makeSignalSource(signal: SIGTERM)
-sigInt.setEventHandler { exit(0) }
-sigTerm.setEventHandler { exit(0) }
-sigInt.resume()
-sigTerm.resume()
 
 // Global state shared between render and input threads.
 let stateLock = NSLock()
@@ -138,19 +124,14 @@ func appendEvent(_ event: BrokerEvent) {
 // Raw terminal mode: disable echo and canonical line buffering so individual
 // keystrokes are delivered immediately and not echoed back to the screen.
 var origTermios = termios()
-tcgetattr(0, &origTermios)
-var rawTermios = origTermios
-rawTermios.c_lflag &= ~(UInt(ICANON) | UInt(ECHO))
-tcsetattr(0, TCSANOW, &rawTermios)
+var rawTermios = termios()
 
 func restoreTerminalMode() {
   tcsetattr(0, TCSANOW, &origTermios)
 }
-atexit(restoreTerminalMode)
 
 // Non-blocking stdin for the input loop.
 let tcFlags = fcntl(0, F_GETFL, 0)
-_ = fcntl(0, F_SETFL, tcFlags | O_NONBLOCK)
 
 // MARK: - Render
 
@@ -219,142 +200,13 @@ func renderFrame() {
   }
 }
 
-// Initial paint and snapshot seed.
-monitor.snapshot = latestMonitorSnapshot()
-library.entries = latestLibraryEntries()
-Screen.clearViewport()
-renderFrame()
-
-let eventsStream = broker.events()
-Task.detached {
-  do {
-    for try await event in eventsStream {
-      appendEvent(event)
-    }
-  } catch {
-    log.error("tui.events_stream_failed err=\(String(describing: error), privacy: .public)")
-  }
-}
-
 // MARK: - Background refresher
 
 let refreshQueue = DispatchQueue(label: "swiftlmui.refresh", qos: .utility)
-refreshQueue.async {
-  while true {
-    Thread.sleep(forTimeInterval: 2.0)
-    let snap = latestMonitorSnapshot()
-    let entries = latestLibraryEntries()
-    stateLock.lock()
-    monitor.snapshot = snap
-    library.entries = entries
-    stateLock.unlock()
-    renderFrame()
-  }
-}
 
 // MARK: - Input loop
 
 let inputQueue = DispatchQueue(label: "swiftlmui.input", qos: .userInteractive)
-inputQueue.async {
-  var buf = [UInt8](repeating: 0, count: 32)
-  while true {
-    let n = read(0, &buf, 32)
-    if n <= 0 {
-      Thread.sleep(forTimeInterval: 0.05)
-      continue
-    }
-
-    // Tab key switches to next tab. Clear the viewport and the differential
-    // render state so the new tab paints from a blank slate. Hold the lock
-    // across the clearViewport write so the refresh thread cannot repaint
-    // stale previousFrame entries between our clear and our renderFrame.
-    if n == 1 && buf[0] == 0x09 {
-      stateLock.lock()
-      let next = (router.activeIndex + 1) % router.tabs.count
-      router.setActive(index: next)
-      previousFrame.removeAll()
-      Screen.clearViewport()
-      stateLock.unlock()
-      renderFrame()
-      continue
-    }
-
-    // Library search mode takes precedence over tab number switching so
-    // that digits typed into the search query are not intercepted.
-    if n == 1, let lib = router.activeTab as? LibraryTab, lib.searchActive {
-      let b = buf[0]
-      if b == 0x1B {
-        // Escape cancels search.
-        stateLock.lock(); lib.cancelSearch(); stateLock.unlock()
-        renderFrame(); continue
-      }
-      if b == 0x0D || b == 0x0A {
-        // Enter commits search.
-        stateLock.lock(); lib.commitSearch(); stateLock.unlock()
-        renderFrame(); continue
-      }
-      if b == 0x7F || b == 0x08 {
-        stateLock.lock(); lib.backspaceSearch(); stateLock.unlock()
-        renderFrame(); continue
-      }
-      if b >= 0x20 && b < 0x7F {
-        let ch = Character(UnicodeScalar(b))
-        stateLock.lock(); lib.appendSearchChar(ch); stateLock.unlock()
-        renderFrame(); continue
-      }
-      // Fall through for anything else so the normal handlers apply.
-    }
-
-    // Number keys 1-9 select tab directly. Same clear-on-switch as Tab.
-    if n == 1, buf[0] >= UInt8(ascii: "1"), buf[0] <= UInt8(ascii: "9") {
-      let digit = Int(buf[0] - UInt8(ascii: "0"))
-      stateLock.lock()
-      router.setActive(index: min(digit - 1, router.tabs.count - 1))
-      previousFrame.removeAll()
-      Screen.clearViewport()
-      stateLock.unlock()
-      renderFrame()
-      continue
-    }
-
-    // Library single char keys: l/u/d/p actions plus / for search and s for
-    // sort toggle. Dispatched through LibraryTab.handleChar.
-    if n == 1, let active = router.activeTab as? LibraryTab {
-      let char = Character(UnicodeScalar(buf[0]))
-      if "luds/".contains(char) || char == "p" {
-        stateLock.lock()
-        let action = active.handleChar(char)
-        stateLock.unlock()
-        handleAction(action)
-        renderFrame()
-        continue
-      }
-    }
-
-    // Try SGR mouse event first (ESC [ < ... M/m sequences).
-    if n >= 6 && buf[0] == 0x1B {
-      if let mouseEvent = MouseParser.parse(Array(buf[0..<n]), start: 0, length: n) {
-        let input: TabInput = (mouseEvent.isWheelUp || mouseEvent.isWheelDown)
-          ? .mouseWheel(mouseEvent)
-          : .mouseClick(mouseEvent)
-        stateLock.lock()
-        let action = router.handle(input)
-        stateLock.unlock()
-        handleAction(action)
-        renderFrame()
-        continue
-      }
-    }
-
-    // Otherwise, decode via KeyParser.
-    let event = KeyParser.parse(Array(buf[0..<n]), start: 0, length: n)
-    stateLock.lock()
-    let action = router.handle(.key(event))
-    stateLock.unlock()
-    handleAction(action)
-    renderFrame()
-  }
-}
 
 func handleAction(_ action: TabAction) {
   switch action {
@@ -390,4 +242,158 @@ func handleAction(_ action: TabAction) {
   }
 }
 
-RunLoop.main.run()
+public enum LMDTUIHost {
+  public static func run() -> Never {
+    AppLogger.bootstrap(subsystem: "io.goodkind.lmd")
+    log.info("tui.starting pid=\(getpid(), privacy: .public)")
+
+    Screen.installRestoreOnExit()
+    Screen.enter(enableMouse: true)
+
+    signal(SIGINT, SIG_IGN)
+    signal(SIGTERM, SIG_IGN)
+    signal(SIGPIPE, SIG_IGN)
+    sigInt.setEventHandler { exit(0) }
+    sigTerm.setEventHandler { exit(0) }
+    sigInt.resume()
+    sigTerm.resume()
+
+    tcgetattr(0, &origTermios)
+    rawTermios = origTermios
+    rawTermios.c_lflag &= ~(UInt(ICANON) | UInt(ECHO))
+    tcsetattr(0, TCSANOW, &rawTermios)
+    atexit(restoreTerminalMode)
+    _ = fcntl(0, F_SETFL, tcFlags | O_NONBLOCK)
+
+    monitor.snapshot = latestMonitorSnapshot()
+    library.entries = latestLibraryEntries()
+    Screen.clearViewport()
+    renderFrame()
+
+    let eventsStream = broker.events()
+    Task.detached {
+      do {
+        for try await event in eventsStream {
+          appendEvent(event)
+        }
+      } catch {
+        log.error("tui.events_stream_failed err=\(String(describing: error), privacy: .public)")
+      }
+    }
+
+    refreshQueue.async {
+      while true {
+        Thread.sleep(forTimeInterval: 2.0)
+        let snap = latestMonitorSnapshot()
+        let entries = latestLibraryEntries()
+        stateLock.lock()
+        monitor.snapshot = snap
+        library.entries = entries
+        stateLock.unlock()
+        renderFrame()
+      }
+    }
+
+    inputQueue.async {
+      var buf = [UInt8](repeating: 0, count: 32)
+      while true {
+        let n = read(0, &buf, 32)
+        if n <= 0 {
+          Thread.sleep(forTimeInterval: 0.05)
+          continue
+        }
+
+        if n == 1 && buf[0] == 0x09 {
+          stateLock.lock()
+          let next = (router.activeIndex + 1) % router.tabs.count
+          router.setActive(index: next)
+          previousFrame.removeAll()
+          Screen.clearViewport()
+          stateLock.unlock()
+          renderFrame()
+          continue
+        }
+
+        if n == 1, let activeLibrary = router.activeTab as? LibraryTab, activeLibrary.searchActive {
+          let byte = buf[0]
+          if byte == 0x1B {
+            stateLock.lock()
+            activeLibrary.cancelSearch()
+            stateLock.unlock()
+            renderFrame()
+            continue
+          }
+          if byte == 0x0D || byte == 0x0A {
+            stateLock.lock()
+            activeLibrary.commitSearch()
+            stateLock.unlock()
+            renderFrame()
+            continue
+          }
+          if byte == 0x7F || byte == 0x08 {
+            stateLock.lock()
+            activeLibrary.backspaceSearch()
+            stateLock.unlock()
+            renderFrame()
+            continue
+          }
+          if byte >= 0x20 && byte < 0x7F {
+            let character = Character(UnicodeScalar(byte))
+            stateLock.lock()
+            activeLibrary.appendSearchChar(character)
+            stateLock.unlock()
+            renderFrame()
+            continue
+          }
+        }
+
+        if n == 1, buf[0] >= UInt8(ascii: "1"), buf[0] <= UInt8(ascii: "9") {
+          let digit = Int(buf[0] - UInt8(ascii: "0"))
+          stateLock.lock()
+          router.setActive(index: min(digit - 1, router.tabs.count - 1))
+          previousFrame.removeAll()
+          Screen.clearViewport()
+          stateLock.unlock()
+          renderFrame()
+          continue
+        }
+
+        if n == 1, let activeLibrary = router.activeTab as? LibraryTab {
+          let character = Character(UnicodeScalar(buf[0]))
+          if "luds/".contains(character) || character == "p" {
+            stateLock.lock()
+            let action = activeLibrary.handleChar(character)
+            stateLock.unlock()
+            handleAction(action)
+            renderFrame()
+            continue
+          }
+        }
+
+        if n >= 6 && buf[0] == 0x1B {
+          if let mouseEvent = MouseParser.parse(Array(buf[0..<n]), start: 0, length: n) {
+            let input: TabInput = (mouseEvent.isWheelUp || mouseEvent.isWheelDown)
+              ? .mouseWheel(mouseEvent)
+              : .mouseClick(mouseEvent)
+            stateLock.lock()
+            let action = router.handle(input)
+            stateLock.unlock()
+            handleAction(action)
+            renderFrame()
+            continue
+          }
+        }
+
+        let event = KeyParser.parse(Array(buf[0..<n]), start: 0, length: n)
+        stateLock.lock()
+        let action = router.handle(.key(event))
+        stateLock.unlock()
+        handleAction(action)
+        renderFrame()
+      }
+    }
+
+    RunLoop.main.run()
+    fatalError("RunLoop.main.run() returned unexpectedly")
+  }
+}

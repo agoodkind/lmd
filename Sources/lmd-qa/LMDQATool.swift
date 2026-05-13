@@ -840,97 +840,101 @@ func enforceCoverage(requiredLabels: [String], scopeFilter: String?, driverNames
 
 // MARK: Entry point
 
-let env = ProcessInfo.processInfo.environment
-let binDir = env["LMD_BINARY_DIR"] ?? ".build/release"
-let coverageFile = env["TUIQA_COVERAGE_FILE"] ?? "Tests/Fixtures/tuiqa-coverage.txt"
-screenshotDir = env["TUIQA_SCREENSHOT_DIR"]
+public enum LMDQATool {
+  public static func run(arguments: [String]) -> Int32 {
+    exercisedLabels = [:]
+    currentDriverName = ""
+    currentDriver = nil
+    failures = 0
 
-var positional: [String] = []
-var driverSpec: String? = nil
-var checkCoverage = true
-var argsIter = CommandLine.arguments.dropFirst().makeIterator()
-while let arg = argsIter.next() {
-  switch arg {
-  case "--no-coverage":
-    checkCoverage = false
-  case "--driver":
-    driverSpec = argsIter.next()
-  case "--screenshot-dir":
-    screenshotDir = argsIter.next()
-  case "--help", "-h":
-    say("""
-      tuiqa: interactive TUI QA driver
-      Usage: tuiqa [lmd-tui|all] [--driver tmux|pty|iterm|comma-list] [--no-coverage] [--screenshot-dir <path>]
+    let env = ProcessInfo.processInfo.environment
+    let binDir = env["LMD_BINARY_DIR"] ?? "Products/Build/Release"
+    let coverageFile = env["TUIQA_COVERAGE_FILE"] ?? "Tests/Fixtures/tuiqa-coverage.txt"
+    screenshotDir = env["TUIQA_SCREENSHOT_DIR"]
 
-      Environment:
-        LMD_BINARY_DIR        where release binaries live (default .build/release)
-        TUIQA_COVERAGE_FILE   coverage manifest (default Tests/Fixtures/tuiqa-coverage.txt)
-        TUIQA_SCREENSHOT_DIR  write PNG screenshots at each printScreen (iterm driver only)
-      """)
-    exit(0)
-  default:
-    positional.append(arg)
+    var positional: [String] = []
+    var driverSpec: String? = nil
+    var checkCoverage = true
+    var argsIter = arguments.makeIterator()
+    while let arg = argsIter.next() {
+      switch arg {
+      case "--no-coverage":
+        checkCoverage = false
+      case "--driver":
+        driverSpec = argsIter.next()
+      case "--screenshot-dir":
+        screenshotDir = argsIter.next()
+      default:
+        positional.append(arg)
+      }
+    }
+    let target = positional.first ?? "all"
+
+    let driverNames: [String]
+    if let spec = driverSpec {
+      driverNames = spec.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+    } else {
+      driverNames = ["tmux", "pty", "iterm"]
+    }
+
+    var scopeFilter: String?
+    switch target {
+    case "lmd-tui":
+      scopeFilter = "lmd-tui"
+    case "all":
+      scopeFilter = nil
+    default:
+      say("unknown target: \(target)")
+      return 2
+    }
+
+    for driverName in driverNames {
+      guard let driver = makeDriver(driverName) else {
+        failures += 1
+        continue
+      }
+      currentDriver = driver
+      currentDriverName = driverName
+
+      switch target {
+      case "lmd-tui", "all":
+        qaLmdTui(driver: driver, binDir: binDir)
+      default:
+        break
+      }
+    }
+
+    var coverageDeficit = 0
+    if checkCoverage {
+      if let required = loadRequiredLabels(from: coverageFile) {
+        coverageDeficit = enforceCoverage(requiredLabels: required, scopeFilter: scopeFilter, driverNames: driverNames)
+      } else {
+        say("\n[coverage] WARN: manifest not found at \(coverageFile). Skipping coverage check.")
+      }
+    }
+
+    say("")
+    if failures == 0 && coverageDeficit == 0 {
+      let total = exercisedLabels.values.reduce(0) { $0 + $1.count }
+      say("[tui-qa] PASSED (\(total) label-runs across \(driverNames.count) driver(s))")
+      return 0
+    }
+
+    say("[tui-qa] FAILED. assertions=\(failures) coverage=\(coverageDeficit)")
+    return 1
   }
-}
-let target = positional.first ?? "all"
 
-let driverNames: [String]
-if let spec = driverSpec {
-  driverNames = spec.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
-} else {
-  driverNames = ["tmux", "pty", "iterm"]
-}
-
-func makeDriver(_ name: String) -> TUIDriver? {
-  switch name {
-  case "tmux":  return TmuxDriver()
-  case "pty":   return PTYDriver()
-  case "iterm": return ITermDriver()
-  default:
-    say("unknown driver: \(name)")
-    return nil
+  private static func makeDriver(_ name: String) -> TUIDriver? {
+    switch name {
+    case "tmux":
+      return TmuxDriver()
+    case "pty":
+      return PTYDriver()
+    case "iterm":
+      return ITermDriver()
+    default:
+      say("unknown driver: \(name)")
+      return nil
+    }
   }
-}
-
-var scopeFilter: String?
-switch target {
-case "lmd-tui": scopeFilter = "lmd-tui"
-case "all":     scopeFilter = nil
-default:
-  say("unknown target: \(target)")
-  exit(2)
-}
-
-for dn in driverNames {
-  guard let driver = makeDriver(dn) else {
-    failures += 1
-    continue
-  }
-  currentDriver = driver
-  currentDriverName = dn
-
-  switch target {
-  case "lmd-tui", "all":
-    qaLmdTui(driver: driver, binDir: binDir)
-  default:
-    break
-  }
-}
-
-var coverageDeficit = 0
-if checkCoverage {
-  if let required = loadRequiredLabels(from: coverageFile) {
-    coverageDeficit = enforceCoverage(requiredLabels: required, scopeFilter: scopeFilter, driverNames: driverNames)
-  } else {
-    say("\n[coverage] WARN: manifest not found at \(coverageFile). Skipping coverage check.")
-  }
-}
-
-say("")
-if failures == 0 && coverageDeficit == 0 {
-  let total = exercisedLabels.values.reduce(0) { $0 + $1.count }
-  say("[tui-qa] PASSED (\(total) label-runs across \(driverNames.count) driver(s))")
-} else {
-  say("[tui-qa] FAILED. assertions=\(failures) coverage=\(coverageDeficit)")
-  exit(1)
 }

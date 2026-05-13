@@ -28,6 +28,7 @@ let package = Package(
     .library(name: "LMDServeSupport", targets: ["LMDServeSupport"]),
   ],
   dependencies: [
+    .package(url: "https://github.com/apple/swift-argument-parser", from: "1.7.0"),
     .package(url: "https://github.com/hummingbird-project/hummingbird", from: "2.22.0"),
     .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.23.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.12.0"),
@@ -106,6 +107,24 @@ let package = Package(
       swiftSettings: strictConcurrency
     ),
     .target(
+      name: "LMDTUIHost",
+      dependencies: ["AppLogger", "SwiftLMCore", "SwiftLMRuntime", "SwiftLMTUI", "SwiftLMControl"],
+      path: "Sources/lmd-tui",
+      swiftSettings: [.swiftLanguageMode(.v5)]
+    ),
+    .target(
+      name: "LMDBenchTool",
+      dependencies: ["AppLogger", "SwiftLMCore", "SwiftLMBackend", "SwiftLMRuntime", "SwiftLMMonitor"],
+      path: "Sources/lmd-bench",
+      swiftSettings: [.swiftLanguageMode(.v5)]
+    ),
+    .target(
+      name: "LMDQATool",
+      dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")],
+      path: "Sources/lmd-qa",
+      swiftSettings: [.swiftLanguageMode(.v5)]
+    ),
+    .target(
       name: "LMDServeSupport",
       dependencies: [
         "AppLogger",
@@ -121,10 +140,14 @@ let package = Package(
     .executableTarget(
       name: "lmd",
       dependencies: [
+        .product(name: "ArgumentParser", package: "swift-argument-parser"),
         "AppLogger",
         "SwiftLMCore",
         "SwiftLMRuntime",
         "SwiftLMControl",
+        "LMDTUIHost",
+        "LMDBenchTool",
+        "LMDQATool",
       ],
       path: "Sources/lmd"
     ),
@@ -145,25 +168,6 @@ let package = Package(
       ],
       path: "Sources/lmd-serve"
     ),
-    .executableTarget(
-      name: "lmd-tui",
-      dependencies: ["AppLogger", "SwiftLMCore", "SwiftLMRuntime", "SwiftLMTUI", "SwiftLMControl"],
-      path: "Sources/lmd-tui",
-      swiftSettings: [.swiftLanguageMode(.v5)]
-    ),
-    .executableTarget(
-      name: "lmd-bench",
-      dependencies: ["AppLogger", "SwiftLMCore", "SwiftLMBackend", "SwiftLMRuntime", "SwiftLMMonitor"],
-      path: "Sources/lmd-bench",
-      swiftSettings: [.swiftLanguageMode(.v5)]
-    ),
-    .executableTarget(
-      name: "lmd-qa",
-      dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")],
-      path: "Sources/lmd-qa",
-      swiftSettings: [.swiftLanguageMode(.v5)]
-    ),
-
     .testTarget(
       name: "AppLoggerTests",
       dependencies: ["AppLogger"],

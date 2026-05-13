@@ -5,25 +5,18 @@
 //  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
 //  Copyright © 2026
 //
-//  `lmd` is the unified dispatcher for the SwiftLM workstation toolkit.
-//  It accepts a subcommand as `argv[1]`, runs the matching inline
-//  command (status/load/unload/embed/pull/rm/bench/ls), or execs the
-//  matching sibling binary from the same directory (serve/tui/qa).
-//
-//  All broker-touching commands (status/load/unload/embed/pull) talk to
-//  `lmd-serve` over XPC via `SwiftLMControl.BrokerClient`. There is no
-//  HTTP or LMD_HOST/LMD_PORT in this file; launchd registers the
-//  broker's Mach service via the LaunchAgent plist.
-//
-//  Sub-binaries produced by this package:
-//    lmd-serve   broker + sensor sampler + fan control
-//    lmd-tui     interactive multi-tab TUI
-//    lmd-bench   benchmark orchestrator (long-running, detached)
-//    lmd-qa      test harness (CI / local QA)
+//  `lmd` is the unified foreground CLI for the SwiftLM workstation toolkit.
+//  It handles broker commands in process, exposes typed subcommands through
+//  Swift ArgumentParser, and keeps `lmd-serve` as the only separate daemon
+//  executable.
 //
 
 import AppLogger
+import ArgumentParser
 import Foundation
+import LMDBenchTool
+import LMDQATool
+import LMDTUIHost
 import SwiftLMControl
 import SwiftLMCore
 import SwiftLMRuntime
@@ -35,138 +28,15 @@ enum PullCommandError: Error {
   case missingDestination
 }
 
-// MARK: - User-facing IO helpers
-//
-// User-facing CLI output. Writes to stdout/stderr without `print`
-// machinery so `make log-audit` stays strict. Call-site convention:
-// use `say`/`sayErr` for anything the user ran the command to see;
-// use `log.<level>(...)` for diagnostics.
-
-private func say(_ s: String = "") {
-  FileHandle.standardOutput.write((s + "\n").data(using: .utf8) ?? Data())
+private func say(_ string: String = "") {
+  FileHandle.standardOutput.write((string + "\n").data(using: .utf8) ?? Data())
 }
 
-private func sayErr(_ s: String) {
-  FileHandle.standardError.write((s + "\n").data(using: .utf8) ?? Data())
+private func sayErr(_ string: String) {
+  FileHandle.standardError.write((string + "\n").data(using: .utf8) ?? Data())
 }
 
-// MARK: - Subcommand routing
-
-let subcommandMap: [String: String] = [
-  "serve": "lmd-serve",
-  "broker": "lmd-serve",
-  "lmd-serve": "lmd-serve",
-
-  "tui": "lmd-tui",
-  "lmd-tui": "lmd-tui",
-
-  "bench": "lmd-bench",
-  "benchmark": "lmd-bench",
-  "lmd-bench": "lmd-bench",
-
-  "qa": "lmd-qa",
-  "lmd-qa": "lmd-qa",
-]
-
-func showUsage() {
-  let msg = """
-lmd - unified dispatcher for the SwiftLM local-LLM toolkit
-
-USAGE:
-  lmd <subcommand> [args...]
-
-SUBCOMMANDS:
-  serve             run the broker daemon (broker + sampler + fans)
-  tui               launch the multi-tab TUI
-  bench             run the benchmark orchestrator
-  bench run <cfg>   run a BenchConfig (JSON or TOML) through the broker
-  qa                run the TUI QA harness
-  ls                list every model on disk (catalog)
-  status            show loaded models + memory budget from a running broker
-  load <model>      preload a model into the broker
-  unload <model>    force-unload a model from the broker
-  embed             POST embeddings to the broker (lmd embed -h)
-  pull <slug>       download a model from Hugging Face
-  rm <model>        delete a model from disk (prompts)
-
-  --help, -h        show this help and exit
-  --version, -v     print the version and exit
-
-The broker is reached via XPC (Mach service io.goodkind.lmd.control)
-registered by the LaunchAgent plist. There is no host/port to set.
-Any argument after a forwarded subcommand is passed verbatim to the
-sub-binary (lmd-serve, lmd-tui, lmd-bench, lmd-qa).
-"""
-  say(msg)
-}
-
-let version = "0.1.0"
-
-// MARK: - Dispatch
-
-let argv = CommandLine.arguments
-if argv.count < 2 {
-  showUsage()
-  exit(1)
-}
-
-let sub = argv[1]
-log.info("dispatcher.invoked sub=\(sub, privacy: .public)")
-
-switch sub {
-case "--help", "-h", "help":
-  showUsage()
-  exit(0)
-case "--version", "-v", "version":
-  say("lmd \(version)")
-  exit(0)
-case "ls", "list", "catalog":
-  listCatalog()
-  exit(0)
-case "status":
-  statusCommand()
-  exit(0)
-case "load":
-  loadCommand(argv: Array(argv.dropFirst(2)))
-  exit(0)
-case "unload":
-  unloadCommand(argv: Array(argv.dropFirst(2)))
-  exit(0)
-case "embed":
-  embedCommand(argv: Array(argv.dropFirst(2)))
-  exit(0)
-case "pull", "download":
-  pullCommand(argv: Array(argv.dropFirst(2)))
-  exit(0)
-case "rm", "delete":
-  rmCommand(argv: Array(argv.dropFirst(2)))
-  exit(0)
-case "bench":
-  // `lmd bench run <config>` runs an inline BenchConfig. Anything else
-  // falls through to execing the classic benchmark binary below.
-  let rest = Array(argv.dropFirst(2))
-  if rest.first == "run", let configPath = rest.dropFirst().first {
-    Task {
-      await runBenchFromConfig(configPath: configPath)
-      exit(0)
-    }
-    RunLoop.main.run()
-  }
-  break
-default:
-  break
-}
-
-// MARK: - Broker client helper
-
-/// Spin up a `BrokerClient` or print a friendly diagnostic and exit.
-///
-/// XPC session activation is the failure point operators care about:
-/// the LaunchAgent plist might be missing, or the daemon's binary
-/// might be wrong. Both surface as `BrokerClientError.sessionUnavailable`
-/// from `BrokerClient.init`, which we translate into a printable
-/// recovery hint.
-func openBroker() -> BrokerClient {
+private func openBroker() -> BrokerClient {
   do {
     return try BrokerClient()
   } catch {
@@ -178,45 +48,39 @@ func openBroker() -> BrokerClient {
   }
 }
 
-/// Bridge an async block into the synchronous CLI flow via
-/// `SwiftLMControl.runBlocking`, which returns `Result`.
-// MARK: - Command handlers
-
-func statusCommand() {
+private func statusCommand() {
   let client = openBroker()
   defer { client.close() }
   let result = runBlocking { try await client.loaded() }
   switch result {
-  case .success(let snap):
+  case .success(let snapshot):
     say("broker: io.goodkind.lmd.control (XPC)")
-    say("allocated: \(String(format: "%.1f", snap.allocatedGB)) GB")
-    if snap.models.isEmpty {
+    say("allocated: \(String(format: "%.1f", snapshot.allocatedGB)) GB")
+    if snapshot.models.isEmpty {
       say("no models loaded")
       return
     }
     say("loaded:")
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime]
-    for m in snap.models {
-      let mark = m.inFlightRequests > 0 ? "busy" : "idle"
-      let last = formatter.string(from: m.lastUsed)
-      say(String(
-        format: "  [%@] %@ kind=%@  %.1f GB  last_used=%@",
-        mark, m.modelID, m.kind, m.sizeGB, last
-      ))
+    for model in snapshot.models {
+      let mark = model.inFlightRequests > 0 ? "busy" : "idle"
+      let lastUsed = formatter.string(from: model.lastUsed)
+      say(
+        String(
+          format: "  [%@] %@ kind=%@  %.1f GB  last_used=%@",
+          mark, model.modelID, model.kind, model.sizeGB, lastUsed
+        )
+      )
     }
-  case .failure(let err):
-    log.error("status.failed err=\(String(describing: err), privacy: .public)")
-    sayErr("lmd status: \(err)")
+  case .failure(let error):
+    log.error("status.failed err=\(String(describing: error), privacy: .public)")
+    sayErr("lmd status: \(error)")
     exit(1)
   }
 }
 
-func loadCommand(argv: [String]) {
-  guard let model = argv.first else {
-    sayErr("lmd load: missing model id. usage: lmd load <model>")
-    exit(2)
-  }
+private func loadCommand(model: String) {
   let client = openBroker()
   defer { client.close() }
   let result = runBlocking { try await client.preload(model: model) }
@@ -224,18 +88,14 @@ func loadCommand(argv: [String]) {
   case .success:
     log.notice("load.completed model=\(model, privacy: .public)")
     say("loaded: \(model)")
-  case .failure(let err):
-    log.error("load.failed model=\(model, privacy: .public) err=\(String(describing: err), privacy: .public)")
-    sayErr("lmd load: \(err)")
+  case .failure(let error):
+    log.error("load.failed model=\(model, privacy: .public) err=\(String(describing: error), privacy: .public)")
+    sayErr("lmd load: \(error)")
     exit(1)
   }
 }
 
-func unloadCommand(argv: [String]) {
-  guard let model = argv.first else {
-    sayErr("lmd unload: missing model id. usage: lmd unload <model>")
-    exit(2)
-  }
+private func unloadCommand(model: String) {
   let client = openBroker()
   defer { client.close() }
   let result = runBlocking { try await client.unload(model: model) }
@@ -243,41 +103,14 @@ func unloadCommand(argv: [String]) {
   case .success:
     log.notice("unload.completed model=\(model, privacy: .public)")
     say("unloaded: \(model)")
-  case .failure(let err):
-    log.error("unload.failed model=\(model, privacy: .public) err=\(String(describing: err), privacy: .public)")
-    sayErr("lmd unload: \(err)")
+  case .failure(let error):
+    log.error("unload.failed model=\(model, privacy: .public) err=\(String(describing: error), privacy: .public)")
+    sayErr("lmd unload: \(error)")
     exit(1)
   }
 }
 
-func embedCommand(argv: [String]) {
-  if argv.first == "-h" || argv.first == "--help" {
-    say("usage: lmd embed --model <id> --input <text>")
-    say("  short flags: -m <id> -t <text>")
-    say("  Sends an embed RPC to the broker over XPC.")
-    return
-  }
-  var model: String?
-  var input: String?
-  var index = 0
-  while index < argv.count {
-    let token = argv[index]
-    if (token == "-m" || token == "--model"), index + 1 < argv.count {
-      model = argv[index + 1]
-      index += 2
-      continue
-    }
-    if (token == "-t" || token == "--input"), index + 1 < argv.count {
-      input = argv[index + 1]
-      index += 2
-      continue
-    }
-    index += 1
-  }
-  guard let modelId = model, let text = input else {
-    sayErr("lmd embed: need --model and --input. try lmd embed --help")
-    exit(2)
-  }
+private func embedCommand(modelId: String, text: String) {
   let client = openBroker()
   defer { client.close() }
   let result = runBlocking { try await client.embed(model: modelId, inputs: [text]) }
@@ -291,33 +124,25 @@ func embedCommand(argv: [String]) {
     say("model: \(modelId)")
     say("dims: \(first.count)")
     let preview = first.prefix(8).map { String(format: "%.4f", $0) }.joined(separator: ", ")
-    say("preview: [\(preview)\(first.count > 8 ? ", ..." : "")]")
-  case .failure(let err):
-    log.error("embed.failed model=\(modelId, privacy: .public) err=\(String(describing: err), privacy: .public)")
-    sayErr("lmd embed: \(err)")
+    let suffix = first.count > 8 ? ", ..." : ""
+    say("preview: [\(preview)\(suffix)]")
+  case .failure(let error):
+    log.error("embed.failed model=\(modelId, privacy: .public) err=\(String(describing: error), privacy: .public)")
+    sayErr("lmd embed: \(error)")
     exit(1)
   }
 }
 
-// MARK: - pull / rm
-
-/// `lmd pull <hf-slug>` downloads a model into `~/.lmstudio/models/<slug>`.
-///
-func pullCommand(argv: [String]) {
-  guard let slug = argv.first else {
-    sayErr("lmd pull: missing HF slug. usage: lmd pull <user/repo>")
-    log.error("pull.missing_slug")
-    exit(2)
-  }
+private func pullCommand(slug: String) {
   let parts = slug.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: true)
   guard parts.count == 2 else {
     sayErr("lmd pull: slug must be `<namespace>/<name>` (got `\(slug)`)")
     log.error("pull.bad_slug slug=\(slug, privacy: .public)")
     exit(2)
   }
-  let localDir = "\(NSHomeDirectory())/.lmstudio/models/\(slug)"
-  log.notice("pull.started slug=\(slug, privacy: .public) dest=\(localDir, privacy: .public)")
-  say("downloading \(slug) -> \(localDir)")
+  let localDirectory = "\(NSHomeDirectory())/.lmstudio/models/\(slug)"
+  log.notice("pull.started slug=\(slug, privacy: .public) dest=\(localDirectory, privacy: .public)")
+  say("downloading \(slug) -> \(localDirectory)")
 
   let client = openBroker()
   defer { client.close() }
@@ -340,32 +165,27 @@ func pullCommand(argv: [String]) {
     return destination
   }
   switch result {
-  case .success(let dest):
-    log.notice("pull.completed slug=\(slug, privacy: .public) dest=\(dest, privacy: .public)")
-    say("done. \(dest)")
-  case .failure(let err):
-    log.error("pull.failed slug=\(slug, privacy: .public) err=\(String(describing: err), privacy: .public)")
-    sayErr("lmd pull: \(err)")
+  case .success(let destination):
+    log.notice("pull.completed slug=\(slug, privacy: .public) dest=\(destination, privacy: .public)")
+    say("done. \(destination)")
+  case .failure(let error):
+    log.error("pull.failed slug=\(slug, privacy: .public) err=\(String(describing: error), privacy: .public)")
+    sayErr("lmd pull: \(error)")
     exit(1)
   }
 }
 
-/// `lmd rm <model>` deletes a model from disk. Prompts before deleting.
-func rmCommand(argv: [String]) {
-  guard let id = argv.first else {
-    sayErr("lmd rm: missing model id. usage: lmd rm <slug-or-name>")
-    exit(2)
-  }
+private func rmCommand(modelId: String) {
   let catalog = ModelCatalog(roots: ModelCatalog.defaultRoots)
   let match = catalog.allModels().first {
-    $0.id == id || $0.slug == id || $0.displayName == id
+    $0.id == modelId || $0.slug == modelId || $0.displayName == modelId
   }
   guard let descriptor = match else {
-    sayErr("lmd rm: no model matching `\(id)`. try `lmd ls`.")
+    sayErr("lmd rm: no model matching `\(modelId)`. try `lmd ls`.")
     exit(1)
   }
-  let gb = Double(descriptor.sizeBytes) / 1_073_741_824
-  say("remove \(descriptor.displayName) (\(String(format: "%.1f", gb)) GB) at \(descriptor.path) ? [y/N]")
+  let sizeGB = Double(descriptor.sizeBytes) / 1_073_741_824
+  say("remove \(descriptor.displayName) (\(String(format: "%.1f", sizeGB)) GB) at \(descriptor.path) ? [y/N]")
   guard let line = readLine(), line.lowercased().hasPrefix("y") else {
     say("aborted.")
     return
@@ -381,15 +201,7 @@ func rmCommand(argv: [String]) {
   }
 }
 
-// MARK: - bench run <config>
-//
-// `lmd bench run <file>` drives a BenchConfig against the broker. The
-// BrokerBenchBackend still talks to lmd-serve over HTTP because the
-// bench harness was designed against the OpenAI-compatible surface
-// and exercises proxying behavior we want to keep verifying. Migrating
-// it to XPC is out of scope for the user-facing control plane work.
-
-func runBenchFromConfig(configPath: String) async {
+private func runBenchFromConfig(configPath: String) async {
   let config: BenchConfig
   let useToml = configPath.hasSuffix(".toml") || configPath.hasSuffix(".tml")
   do {
@@ -405,8 +217,7 @@ func runBenchFromConfig(configPath: String) async {
   }
 
   let backend = BrokerBenchBackend(brokerHost: "localhost", brokerPort: 5400)
-
-  let orch = BenchOrchestrator(
+  let orchestrator = BenchOrchestrator(
     config: config,
     backend: backend,
     events: { event in
@@ -430,13 +241,20 @@ func runBenchFromConfig(configPath: String) async {
       }
     }
   )
-  _ = await orch.run()
+  _ = await orchestrator.run()
 }
 
-// MARK: - ls
+private func runBenchFromConfigSync(configPath: String) {
+  let group = DispatchGroup()
+  group.enter()
+  Task {
+    await runBenchFromConfig(configPath: configPath)
+    group.leave()
+  }
+  group.wait()
+}
 
-/// Print the ModelCatalog one row per line. Used by `lmd ls`.
-func listCatalog() {
+private func listCatalog() {
   let catalog = ModelCatalog(roots: ModelCatalog.defaultRoots)
   let models = catalog.allModels().filter { $0.sizeBytes > 0 }
   if models.isEmpty {
@@ -444,61 +262,296 @@ func listCatalog() {
     return
   }
 
-  func padRight(_ s: String, _ width: Int) -> String {
-    if s.count >= width { return String(s.prefix(width - 1)) + " " }
-    return s + String(repeating: " ", count: width - s.count)
-  }
-  func padLeft(_ s: String, _ width: Int) -> String {
-    if s.count >= width { return String(s.suffix(width)) }
-    return String(repeating: " ", count: width - s.count) + s
+  func padRight(_ string: String, _ width: Int) -> String {
+    if string.count >= width {
+      return String(string.prefix(width - 1)) + " "
+    }
+    return string + String(repeating: " ", count: width - string.count)
   }
 
-  let nameW = min(45, (models.map { $0.displayName.count }.max() ?? 30) + 2)
-  let slugW = min(50, (models.map { ($0.slug ?? "").count }.max() ?? 30) + 2)
-  let kindW = 12
+  func padLeft(_ string: String, _ width: Int) -> String {
+    if string.count >= width {
+      return String(string.suffix(width))
+    }
+    return String(repeating: " ", count: width - string.count) + string
+  }
+
+  let nameWidth = min(45, (models.map { $0.displayName.count }.max() ?? 30) + 2)
+  let slugWidth = min(50, (models.map { ($0.slug ?? "").count }.max() ?? 30) + 2)
+  let kindWidth = 12
   say(
-    padRight("NAME", nameW) + "  " + padRight("SLUG", slugW) + "  " + padRight("KIND", kindW)
-      + "  " + padLeft("SIZE", 8))
+    padRight("NAME", nameWidth)
+      + "  " + padRight("SLUG", slugWidth)
+      + "  " + padRight("KIND", kindWidth)
+      + "  " + padLeft("SIZE", 8)
+  )
 
-  for m in models {
-    let gb = Double(m.sizeBytes) / 1_073_741_824
-    let sizeStr = gb >= 0.1 ? String(format: "%.1f GB", gb) : "0"
+  for model in models {
+    let sizeGB = Double(model.sizeBytes) / 1_073_741_824
+    let sizeString = sizeGB >= 0.1 ? String(format: "%.1f GB", sizeGB) : "0"
     say(
-      padRight(m.displayName, nameW)
-        + "  " + padRight(m.slug ?? "-", slugW)
-        + "  " + padRight(m.kind.rawValue, kindW)
-        + "  " + padLeft(sizeStr, 8))
+      padRight(model.displayName, nameWidth)
+        + "  " + padRight(model.slug ?? "-", slugWidth)
+        + "  " + padRight(model.kind.rawValue, kindWidth)
+        + "  " + padLeft(sizeString, 8)
+    )
   }
 }
 
-// MARK: - exec passthrough
-
-guard let target = subcommandMap[sub] else {
-  sayErr("lmd: unknown subcommand `\(sub)`")
-  showUsage()
-  exit(1)
+private func resolveSiblingBinary(_ name: String) throws -> URL {
+  if let executableURL = Bundle.main.executableURL?.resolvingSymlinksInPath() {
+    return executableURL.deletingLastPathComponent().appendingPathComponent(name)
+  }
+  throw ValidationError("lmd: could not resolve the current executable path")
 }
 
-let selfPath = argv[0]
-let siblingDir = (selfPath as NSString).deletingLastPathComponent
-let targetPath = "\(siblingDir)/\(target)"
-
-guard FileManager.default.isExecutableFile(atPath: targetPath) else {
-  sayErr("lmd: target binary not executable at \(targetPath)")
-  exit(127)
+private func runServeBinary() -> Never {
+  do {
+    let process = Process()
+    process.executableURL = try resolveSiblingBinary("lmd-serve")
+    process.arguments = []
+    try process.run()
+    process.waitUntilExit()
+    if process.terminationReason == .uncaughtSignal {
+      exit(process.terminationStatus)
+    }
+    exit(process.terminationStatus)
+  } catch {
+    sayErr("lmd serve: \(error)")
+    exit(126)
+  }
 }
 
-let forwardArgs = Array(argv.dropFirst(2))
-let childArgv: [String] = [target] + forwardArgs
+private func remappedArguments() -> [String] {
+  let arguments = CommandLine.arguments
+  guard let executable = arguments.first else {
+    return arguments
+  }
+  let commandName = URL(fileURLWithPath: executable).lastPathComponent
+  switch commandName {
+  case "lmd-tui":
+    return ["tui"] + Array(arguments.dropFirst())
+  case "lmd-bench":
+    return ["bench"] + Array(arguments.dropFirst())
+  case "lmd-qa":
+    return ["qa"] + Array(arguments.dropFirst())
+  default:
+    return Array(arguments.dropFirst())
+  }
+}
 
-// execv replaces our process image with the target binary; safer than
-// spawning a child because the caller's tty, signals, and exit code
-// pass through unchanged.
-let cargs: [UnsafeMutablePointer<CChar>?] = childArgv.map { strdup($0) } + [nil]
-defer { for p in cargs where p != nil { free(p) } }
-let cpath = strdup(targetPath)
-defer { if cpath != nil { free(cpath) } }
+struct LMDCommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "lmd",
+    abstract: "Unified CLI for the SwiftLM local-LLM toolkit.",
+    version: "0.1.0",
+    subcommands: [
+      LMDServeCommand.self,
+      LMDTUICommand.self,
+      LMDBenchCommand.self,
+      LMDQACommand.self,
+      LMDListCommand.self,
+      LMDStatusCommand.self,
+      LMDLoadCommand.self,
+      LMDUnloadCommand.self,
+      LMDEmbedCommand.self,
+      LMDPullCommand.self,
+      LMDRmCommand.self,
+    ]
+  )
 
-let rc = execv(cpath, cargs)
-sayErr("lmd: execv `\(targetPath)` failed (rc=\(rc), errno=\(errno))")
-exit(126)
+  mutating func run() throws {
+    throw CleanExit.helpRequest()
+  }
+}
+
+struct LMDServeCommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "serve",
+    abstract: "Run the broker daemon in the foreground.",
+    aliases: ["broker"]
+  )
+
+  mutating func run() throws {
+    runServeBinary()
+  }
+}
+
+struct LMDTUICommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "tui",
+    abstract: "Launch the multi-tab TUI.",
+    aliases: ["lmd-tui"]
+  )
+
+  mutating func run() throws {
+    LMDTUIHost.run()
+  }
+}
+
+struct LMDBenchCommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "bench",
+    abstract: "Run the benchmark orchestrator.",
+    subcommands: [LMDBenchRunCommand.self],
+    aliases: ["benchmark", "lmd-bench"]
+  )
+
+  mutating func run() throws {
+    LMDBenchTool.run()
+  }
+}
+
+struct LMDBenchRunCommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "run",
+    abstract: "Run a BenchConfig JSON or TOML file through the broker."
+  )
+
+  @Argument(help: "Path to the BenchConfig JSON or TOML file.")
+  var configPath: String
+
+  mutating func run() throws {
+    runBenchFromConfigSync(configPath: configPath)
+  }
+}
+
+struct LMDQACommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "qa",
+    abstract: "Run the TUI QA harness.",
+    aliases: ["lmd-qa"]
+  )
+
+  @Argument(help: "Optional QA target. Valid values are `lmd-tui` or `all`.")
+  var target: String = "all"
+
+  @Option(name: .long, help: "Driver list such as `tmux`, `pty`, `iterm`, or a comma-separated set.")
+  var driver: String?
+
+  @Flag(name: .long, help: "Skip coverage enforcement.")
+  var noCoverage = false
+
+  @Option(name: .long, help: "Directory for iTerm PNG screenshots.")
+  var screenshotDir: String?
+
+  mutating func run() throws {
+    var arguments: [String] = []
+    if target != "all" {
+      arguments.append(target)
+    }
+    if let driver {
+      arguments.append(contentsOf: ["--driver", driver])
+    }
+    if noCoverage {
+      arguments.append("--no-coverage")
+    }
+    if let screenshotDir {
+      arguments.append(contentsOf: ["--screenshot-dir", screenshotDir])
+    }
+    let exitCode = LMDQATool.run(arguments: arguments)
+    guard exitCode == 0 else {
+      throw ExitCode(exitCode)
+    }
+  }
+}
+
+struct LMDListCommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "ls",
+    abstract: "List every model on disk.",
+    aliases: ["list", "catalog"]
+  )
+
+  mutating func run() throws {
+    listCatalog()
+  }
+}
+
+struct LMDStatusCommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "status",
+    abstract: "Show loaded models and memory budget from the running broker."
+  )
+
+  mutating func run() throws {
+    statusCommand()
+  }
+}
+
+struct LMDLoadCommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "load",
+    abstract: "Preload a model into the broker."
+  )
+
+  @Argument(help: "Model identifier to preload.")
+  var model: String
+
+  mutating func run() throws {
+    loadCommand(model: model)
+  }
+}
+
+struct LMDUnloadCommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "unload",
+    abstract: "Unload a model from the broker."
+  )
+
+  @Argument(help: "Model identifier to unload.")
+  var model: String
+
+  mutating func run() throws {
+    unloadCommand(model: model)
+  }
+}
+
+struct LMDEmbedCommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "embed",
+    abstract: "POST embeddings to the broker over XPC."
+  )
+
+  @Option(name: .shortAndLong, help: "Embedding model identifier.")
+  var model: String
+
+  @Option(name: [.customShort("t"), .long], help: "Input text to embed.")
+  var input: String
+
+  mutating func run() throws {
+    embedCommand(modelId: model, text: input)
+  }
+}
+
+struct LMDPullCommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "pull",
+    abstract: "Download a model from Hugging Face.",
+    aliases: ["download"]
+  )
+
+  @Argument(help: "Hugging Face slug in `<namespace>/<name>` format.")
+  var slug: String
+
+  mutating func run() throws {
+    pullCommand(slug: slug)
+  }
+}
+
+struct LMDRmCommand: ParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "rm",
+    abstract: "Delete a model from disk after confirmation.",
+    aliases: ["delete"]
+  )
+
+  @Argument(help: "Model id, slug, or display name.")
+  var model: String
+
+  mutating func run() throws {
+    rmCommand(modelId: model)
+  }
+}
+
+LMDCommand.main(remappedArguments())

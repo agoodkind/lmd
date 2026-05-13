@@ -79,9 +79,6 @@ func testTarget(
 let commandLineToolNames = [
   "lmd",
   "lmd-serve",
-  "lmd-tui",
-  "lmd-bench",
-  "lmd-qa",
 ]
 
 let testTargetNames = [
@@ -181,6 +178,50 @@ let project = Project(
       .target(name: "SwiftLMRuntime"),
     ]
   ),
+    .target(
+      name: "LMDTUIHost",
+      destinations: .macOS,
+      product: .staticFramework,
+      bundleId: "io.goodkind.lmd.LMDTUIHost",
+      deploymentTargets: deploymentTargets,
+      sources: ["Sources/lmd-tui/**/*.swift"],
+      dependencies: [
+        .target(name: "AppLogger"),
+        .target(name: "SwiftLMCore"),
+        .target(name: "SwiftLMRuntime"),
+        .target(name: "SwiftLMTUI"),
+        .target(name: "SwiftLMControl"),
+      ],
+      settings: swiftFiveSettings
+    ),
+    .target(
+      name: "LMDBenchTool",
+      destinations: .macOS,
+      product: .staticFramework,
+      bundleId: "io.goodkind.lmd.LMDBenchTool",
+      deploymentTargets: deploymentTargets,
+      sources: ["Sources/lmd-bench/**/*.swift"],
+      dependencies: [
+        .target(name: "AppLogger"),
+        .target(name: "SwiftLMCore"),
+        .target(name: "SwiftLMBackend"),
+        .target(name: "SwiftLMRuntime"),
+        .target(name: "SwiftLMMonitor"),
+      ],
+      settings: swiftFiveSettings
+    ),
+    .target(
+      name: "LMDQATool",
+      destinations: .macOS,
+      product: .staticFramework,
+      bundleId: "io.goodkind.lmd.LMDQATool",
+      deploymentTargets: deploymentTargets,
+      sources: ["Sources/lmd-qa/**/*.swift"],
+      dependencies: [
+        .external(name: "SwiftTerm"),
+      ],
+      settings: swiftFiveSettings
+    ),
     frameworkTarget(
       "LMDServeSupport",
       dependencies: [
@@ -194,10 +235,14 @@ let project = Project(
       "lmd",
       bundleIdSuffix: "cli",
       dependencies: [
+        .external(name: "ArgumentParser"),
         .target(name: "AppLogger"),
         .target(name: "SwiftLMCore"),
         .target(name: "SwiftLMRuntime"),
         .target(name: "SwiftLMControl"),
+        .target(name: "LMDTUIHost"),
+        .target(name: "LMDBenchTool"),
+        .target(name: "LMDQATool"),
       ],
       settings: swiftSixSettings
     ),
@@ -218,36 +263,6 @@ let project = Project(
         .external(name: "HuggingFace"),
       ],
       settings: lmdServeSettings
-    ),
-    commandLineTarget(
-      "lmd-tui",
-      bundleIdSuffix: "tui",
-      dependencies: [
-        .target(name: "AppLogger"),
-        .target(name: "SwiftLMCore"),
-        .target(name: "SwiftLMRuntime"),
-        .target(name: "SwiftLMTUI"),
-        .target(name: "SwiftLMControl"),
-      ],
-      settings: swiftFiveSettings
-    ),
-    commandLineTarget(
-      "lmd-bench",
-      bundleIdSuffix: "bench",
-      dependencies: [
-        .target(name: "AppLogger"),
-        .target(name: "SwiftLMCore"),
-        .target(name: "SwiftLMBackend"),
-        .target(name: "SwiftLMRuntime"),
-        .target(name: "SwiftLMMonitor"),
-      ],
-      settings: swiftFiveSettings
-    ),
-    commandLineTarget(
-      "lmd-qa",
-      bundleIdSuffix: "qa",
-      dependencies: [.external(name: "SwiftTerm")],
-      settings: swiftFiveSettings
     ),
     testTarget(
       "AppLoggerTests",
