@@ -7,10 +7,11 @@
 
 TUIST ?= tuist
 TARGET ?=
+CONFIG ?= Debug
 LMD_DEV := TUIST="$(TUIST)" swift Tools/lmd-dev.swift
 
-.PHONY: help toolchain build debug test lint format install uninstall clean \
-        run-serve run-tui run-bench stop-serve start-serve restart-serve \
+.PHONY: help toolchain preflight build debug test lint format install install-debug \
+        uninstall clean run-serve run-tui run-bench stop-serve start-serve restart-serve \
         snapshot-update log-audit log-smoke tui-qa smoke video-smoke \
         sign notarize notary-setup dist ci-import-cert ci-sign ci-notarize \
         release-tag push-tag github-release cleanup-keychain
@@ -21,8 +22,11 @@ help:
 toolchain:
 	@$(LMD_DEV) toolchain
 
+preflight:
+	@$(LMD_DEV) preflight
+
 build:
-	@$(LMD_DEV) build Release
+	@$(LMD_DEV) build $(CONFIG)
 
 debug:
 	@$(LMD_DEV) debug
@@ -34,7 +38,10 @@ clean:
 	@$(LMD_DEV) clean
 
 install:
-	@$(LMD_DEV) install
+	@$(LMD_DEV) install $(CONFIG)
+
+install-debug:
+	@CONFIG=Debug $(LMD_DEV) install Debug
 
 uninstall:
 	@$(LMD_DEV) uninstall
@@ -85,7 +92,7 @@ notarize:
 	@$(LMD_DEV) notarize
 
 dist:
-	@$(LMD_DEV) dist
+	@CONFIG=Release $(LMD_DEV) dist
 
 ci-import-cert:
 	@$(LMD_DEV) ci-import-cert

@@ -34,22 +34,40 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install ccache
+        run: brew install ccache
+
       - name: Show toolchain
         run: swift Tools/lmd-dev.swift toolchain
 
-      - name: Cache SwiftPM build + deps
+      - name: Preflight (Metal toolchain, etc.)
+        run: swift Tools/lmd-dev.swift preflight
+
+      - name: Cache build outputs
         uses: actions/cache@v5
         with:
           path: |
+            .build
             Tuist/.build
             Derived
             Products/Build
             ~/Library/Caches/org.swift.swiftpm
-          key: tuist-${{ runner.os }}-${{ hashFiles('Tuist/Package.resolved') }}
+          key: build-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Tuist/Package.resolved', 'Project.swift', 'Tuist.swift') }}
           restore-keys: |
-            tuist-${{ runner.os }}-
+            build-${{ runner.os }}-
+
+      - name: Cache ccache
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-${{ runner.os }}-release-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-release-
+            ccache-${{ runner.os }}-
 
       - name: Build (release)
+        env:
+          LMD_ENABLE_CCACHE: "1"
         run: swift Tools/lmd-dev.swift build Release
 
       - name: Import Developer ID certificate

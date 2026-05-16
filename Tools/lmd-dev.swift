@@ -313,7 +313,7 @@ final class DevTool {
     case "clean":
       try clean()
     case "install":
-      try install()
+      try install(configuration: configuration(from: rest.first, defaultValue: "Release"))
     case "uninstall":
       try uninstall()
     case "start-serve":
@@ -342,6 +342,8 @@ final class DevTool {
       try logSmoke()
     case "notary-setup":
       try notarySetup()
+    case "preflight":
+      try preflight()
     case "sign":
       try build(configuration: "Release")
       try signLocal(targets: rest)
@@ -401,16 +403,19 @@ final class DevTool {
     try writeLine(
       """
       lmd-dev commands:
+        preflight               verify Swift, Tuist, and the Metal toolchain;
+                                download the Metal toolchain if missing
         build [Release|Debug]   SwiftPM build of every product binary, plus
-                                Tuist+xcodebuild to produce the MLX metallib
+                                xcodebuild build of just the MLX shader bundle
         debug                   build every product binary in Debug
+        install [Release|Debug] build and copy to PREFIX/bin (default Release)
         test                    run Tuist test for LMDTests
         smoke                   build and run the Swift HTTP smoke test
         video-smoke             build and require real video acceptance via LMD_VIDEO_SAMPLE_FILE
         log-audit               enforce first-party logging rules
         log-smoke               exercise CLI logging and check redactions
-        sign                    build and codesign product CLIs
-        notarize                build, sign, and notarize product CLIs
+        sign                    build and codesign product CLIs and shader bundle
+        notarize                build, sign, and notarize the staged release
         dist                    build, sign, notarize, and write the artifact path
       """
     )
@@ -476,7 +481,11 @@ final class DevTool {
   /// `.build/<configuration>/<product>` (configuration is lower-cased per
   /// SwiftPM's convention: `debug`, `release`).
   private func buildSwiftPackage(configuration: String) throws {
-    try runPassthrough("swift", ["build", "-c", swiftPackageConfiguration(configuration)])
+    try runPassthrough(
+      "swift",
+      ["build", "-c", swiftPackageConfiguration(configuration)],
+      environment: try buildEnvironment()
+    )
   }
 
   /// SwiftPM build of one product. Faster than `buildSwiftPackage` when the
@@ -484,18 +493,89 @@ final class DevTool {
   private func buildSwiftPackageProduct(_ product: String, configuration: String) throws {
     try runPassthrough(
       "swift",
-      ["build", "-c", swiftPackageConfiguration(configuration), "--product", product]
+      ["build", "-c", swiftPackageConfiguration(configuration), "--product", product],
+      environment: try buildEnvironment()
     )
   }
 
-  /// xcodebuild Release build invoked only for its `mlx-swift_Cmlx.bundle`
-  /// side-effect. The executables xcodebuild emits are intentionally
-  /// discarded; see `build(configuration:)` for the rationale.
+  /// xcodebuild build of the `mlx-swift_Cmlx` target only. Produces
+  /// `Derived/Build/Products/<configuration>/mlx-swift_Cmlx.bundle` and
+  /// nothing else. The target has no dependencies and contains no Swift, so
+  /// it sidesteps the NIO type-metadata crash that affects Xcode-built Swift
+  /// executables in this project. SwiftPM cannot compile `.metal` files, so
+  /// this xcodebuild call exists for that one capability.
   private func buildMetallib(configuration: String) throws {
+    try ensureMetalToolchain()
     try tuistInstallAndGenerate()
     try runPassthrough(
       "xcodebuild",
-      xcodeBuildArguments(scheme: "lmd-serve", configuration: configuration)
+      try xcodeBuildArguments(
+        project: mlxSwiftProjectPath(),
+        scheme: "mlx-swift_Cmlx",
+        configuration: configuration
+      ),
+      environment: try buildEnvironment()
+    )
+  }
+
+  /// Verify that the Metal shader compiler is on disk. Apple distributes it
+  /// through an on-demand cryptex mount, and a fresh Xcode install ships
+  /// without it. When `xcrun --find metal` fails we run
+  /// `xcodebuild -downloadComponent MetalToolchain` once and re-check.
+  private func ensureMetalToolchain() throws {
+    if hasMetalCompiler() {
+      return
+    }
+    try writeLine("[preflight] Metal toolchain missing; running xcodebuild -downloadComponent MetalToolchain")
+    try runPassthrough("xcodebuild", ["-downloadComponent", "MetalToolchain"])
+    guard hasMetalCompiler() else {
+      throw ToolError.failure(
+        "preflight: Metal toolchain still missing after download; check Xcode install"
+      )
+    }
+  }
+
+  private func hasMetalCompiler() -> Bool {
+    let result = try? run(
+      "xcrun",
+      ["--find", "metal"],
+      currentDirectory: nil,
+      environment: nil,
+      captureOutput: true
+    )
+    return (result?.status ?? 1) == 0
+  }
+
+  /// One-shot environment check. Confirms Swift, Tuist, and the Metal
+  /// shader compiler are all reachable, and downloads the Metal toolchain
+  /// if absent. Safe to run repeatedly.
+  private func preflight() throws {
+    try runPassthrough("swift", ["--version"])
+    try runPassthrough(tuistExecutable(), ["version"])
+    try ensureMetalToolchain()
+    if let path = try? captureMetalPath() {
+      try writeLine("[preflight] metal: \(path)")
+    }
+    try writeLine("[preflight] ok")
+  }
+
+  private func captureMetalPath() throws -> String {
+    let result = try run(
+      "xcrun",
+      ["--find", "metal"],
+      currentDirectory: nil,
+      environment: nil,
+      captureOutput: true
+    )
+    return result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /// Path to the mlx-swift Xcode project that Tuist generates under
+  /// `Tuist/.build/tuist-derived/Projects/`. The path is stable across
+  /// Tuist versions in use today.
+  private func mlxSwiftProjectPath() -> URL {
+    repoRoot.appendingPathComponent(
+      "Tuist/.build/tuist-derived/Projects/mlx-swift/mlx-swift.xcodeproj"
     )
   }
 
@@ -581,20 +661,21 @@ final class DevTool {
     }
   }
 
-  private func install() throws {
-    try build(configuration: "Release")
+  private func install(configuration: String) throws {
+    try build(configuration: configuration)
+    let sourceDirectory = buildDirectory(configuration: configuration)
     let binDirectory = prefixDirectory().appendingPathComponent("bin")
     try fileManager.createDirectory(at: binDirectory, withIntermediateDirectories: true)
 
     for binary in productBinaries {
-      let source = releaseBuildDirectory().appendingPathComponent(binary)
+      let source = sourceDirectory.appendingPathComponent(binary)
       let destination = binDirectory.appendingPathComponent(binary)
       try copyReplacingItem(at: source, to: destination)
       try writeLine("  installed \(destination.path)")
     }
     try stageCompatibilityLinks(in: binDirectory)
 
-    try copyRuntimeResources(from: releaseBuildDirectory(), to: binDirectory)
+    try copyRuntimeResources(from: sourceDirectory, to: binDirectory)
 
     let agentDirectory = homeDirectory().appendingPathComponent("Library/LaunchAgents")
     try fileManager.createDirectory(at: agentDirectory, withIntermediateDirectories: true)
@@ -635,12 +716,50 @@ final class DevTool {
       throw ToolError.failure("no agent plist at \(agentPlistURL().path); run 'make install' first")
     }
 
-    let service = "gui/\(getuid())"
+    let domain = "gui/\(getuid())"
+    let serviceTarget = "\(domain)/io.goodkind.lmd.serve"
+
+    // Bootout first if loaded so launchd re-reads the plist and picks up
+    // the binary we just copied. The bootout call returns before launchd
+    // finishes removing the service label from the domain, so a tight
+    // bootstrap right after races and gets EIO. Poll until the label is
+    // gone before bootstrapping.
+    if isServiceLoaded(serviceTarget) {
+      _ = try? runPassthrough("launchctl", ["bootout", serviceTarget])
+      waitForServiceUnload(serviceTarget, timeoutSeconds: 5)
+    }
+
+    try runPassthrough("launchctl", ["bootstrap", domain, agentPlistURL().path])
+    try writeLine("  bootstrapped io.goodkind.lmd.serve")
+  }
+
+  /// Probe whether a launchd service is loaded. Uses `launchctl print` and
+  /// swallows its stderr so the not-loaded case ("Bad request") does not
+  /// leak to the user's terminal.
+  private func isServiceLoaded(_ serviceTarget: String) -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    process.arguments = ["print", serviceTarget]
+    let sink = Pipe()
+    process.standardOutput = sink
+    process.standardError = sink
     do {
-      try runPassthrough("launchctl", ["bootstrap", service, agentPlistURL().path])
-      try writeLine("  bootstrapped io.goodkind.lmd.serve")
+      try process.run()
     } catch {
-      try writeLine("  io.goodkind.lmd.serve was already loaded or \(service) is unavailable")
+      return false
+    }
+    process.waitUntilExit()
+    sink.fileHandleForReading.readDataToEndOfFile()
+    return process.terminationStatus == 0
+  }
+
+  private func waitForServiceUnload(_ serviceTarget: String, timeoutSeconds: Int) {
+    let deadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
+    while Date() < deadline {
+      if !isServiceLoaded(serviceTarget) {
+        return
+      }
+      Thread.sleep(forTimeInterval: 0.1)
     }
   }
 
@@ -992,10 +1111,20 @@ final class DevTool {
     environment.value("TUIST", default: "tuist")
   }
 
-  private func xcodeBuildArguments(scheme: String, configuration: String) throws -> [String] {
-    var arguments = [
-      "-workspace",
-      "lmd.xcworkspace",
+  /// Compose `xcodebuild` arguments for either a workspace+scheme build or
+  /// a project+scheme build. `project` is nil for the workspace form.
+  private func xcodeBuildArguments(
+    project: URL? = nil,
+    scheme: String,
+    configuration: String
+  ) throws -> [String] {
+    var arguments: [String] = []
+    if let project {
+      arguments.append(contentsOf: ["-project", project.path])
+    } else {
+      arguments.append(contentsOf: ["-workspace", "lmd.xcworkspace"])
+    }
+    arguments.append(contentsOf: [
       "-scheme",
       scheme,
       "-configuration",
@@ -1005,15 +1134,23 @@ final class DevTool {
       "-derivedDataPath",
       repoRoot.appendingPathComponent("Derived").path,
       "build",
-    ]
+    ])
+    return arguments
+  }
 
+  /// Environment for build invocations. Merges the parent environment with
+  /// `CC` and `CXX` set to a `ccache`/`sccache` wrapper when one is enabled.
+  /// Both `swift build` and `xcodebuild` honor these variables, so the same
+  /// wrapper applies to MLX's C/C++ Metal kernels regardless of which build
+  /// system is invoked.
+  private func buildEnvironment() throws -> [String: String] {
+    var environmentMap = ProcessInfo.processInfo.environment
     if let buildCacheTool = try resolveBuildCacheTool() {
       try writeLine("[build-cache] using \(buildCacheTool.name): \(buildCacheTool.executable)")
-      arguments.append("CC=\(buildCacheTool.executable) /usr/bin/clang")
-      arguments.append("CXX=\(buildCacheTool.executable) /usr/bin/clang++")
+      environmentMap["CC"] = "\(buildCacheTool.executable) /usr/bin/clang"
+      environmentMap["CXX"] = "\(buildCacheTool.executable) /usr/bin/clang++"
     }
-
-    return arguments
+    return environmentMap
   }
 
   private func resolveBuildCacheTool() throws -> BuildCacheTool? {
@@ -1181,28 +1318,58 @@ final class DevTool {
       let binaryPath = fileManager.fileExists(atPath: inputURL.path)
         ? inputURL
         : releaseBuildDirectory().appendingPathComponent(target)
-      let binaryName = binaryPath.lastPathComponent
-
-      guard fileManager.fileExists(atPath: binaryPath.path) else {
-        throw ToolError.failure("sign: not found: \(binaryPath.path)")
-      }
-
-      try runPassthrough(
-        "codesign",
-        [
-          "--sign",
-          identity,
-          "--identifier",
-          "\(bundleIdentifierPrefix).\(binaryName)",
-          "--options",
-          "runtime",
-          "--timestamp",
-          "--force",
-          binaryPath.path,
-        ]
+      try signPath(
+        binaryPath,
+        identity: identity,
+        identifier: "\(bundleIdentifierPrefix).\(binaryPath.lastPathComponent)"
       )
-      try runPassthrough("codesign", ["--verify", "--strict", "--verbose=2", binaryPath.path])
     }
+    for bundle in resourceBundlesToSign() {
+      let bundleName = bundle.deletingPathExtension().lastPathComponent
+      try signPath(
+        bundle,
+        identity: identity,
+        identifier: "\(bundleIdentifierPrefix).\(bundleName)"
+      )
+    }
+  }
+
+  /// Codesign a single Mach-O or bundle with the Hardened Runtime and a
+  /// secure timestamp, then verify the signature.
+  private func signPath(_ path: URL, identity: String, identifier: String) throws {
+    guard fileManager.fileExists(atPath: path.path) else {
+      throw ToolError.failure("sign: not found: \(path.path)")
+    }
+    try runPassthrough(
+      "codesign",
+      [
+        "--sign",
+        identity,
+        "--identifier",
+        identifier,
+        "--options",
+        "runtime",
+        "--timestamp",
+        "--force",
+        path.path,
+      ]
+    )
+    try runPassthrough("codesign", ["--verify", "--strict", "--verbose=2", path.path])
+  }
+
+  /// Resource bundles in the staged release directory that need a real
+  /// signature for notarization. Today this is just the MLX shader bundle,
+  /// but any future `*.bundle` Tuist drops alongside the binaries gets
+  /// picked up automatically.
+  private func resourceBundlesToSign() -> [URL] {
+    let staging = releaseBuildDirectory()
+    guard let contents = try? fileManager.contentsOfDirectory(
+      at: staging,
+      includingPropertiesForKeys: nil
+    ) else {
+      return []
+    }
+    return contents.filter { $0.pathExtension == "bundle" }
   }
 
   private func stageSignedBinaries(into directory: URL) throws {
@@ -1216,6 +1383,9 @@ final class DevTool {
     }
     try stageCompatibilityLinks(in: directory)
     try copyRuntimeResources(from: releaseBuildDirectory(), to: directory)
+    for bundle in resourceBundlesToSign() {
+      try runPassthrough("codesign", ["--verify", "--strict", bundle.path])
+    }
   }
 
   private func localSigningConfig() throws -> [String: String] {
