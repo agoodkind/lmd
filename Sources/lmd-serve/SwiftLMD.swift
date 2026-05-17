@@ -293,7 +293,7 @@ struct SwiftLMD {
         LiveBackend(model: model, port: port, binaryPath: binary, logPath: defaultLogPath)
       },
       embeddingSpawner: { model in
-        let backend = MLXEmbeddingBackend(descriptor: model)
+        let backend = try EmbeddingBackendFactory.makeBackend(descriptor: model)
         try await backend.launch()
         return backend
       },
@@ -619,6 +619,12 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
         message: "failed to load embedding model",
         type: "launch_failed"
       )
+    case .unsupportedEmbeddingBackend(_, let reason):
+      return errorResponse(
+        status: .badRequest,
+        message: reason,
+        type: "unsupported_embedding_backend"
+      )
     case .embeddingSpawnerMissing:
       return errorResponse(
         status: .serviceUnavailable,
@@ -821,6 +827,12 @@ func swiftLMProxyResult(
         statusCode: 503,
         message: "failed to launch model \(prepared.model.displayName)",
         type: "launch_failed"
+      )
+    case .unsupportedEmbeddingBackend:
+      return backendErrorResult(
+        statusCode: 500,
+        message: "router configuration error",
+        type: "internal_error"
       )
     case .wrongKindForChat:
       return backendErrorResult(

@@ -64,7 +64,7 @@ Defaults live in `deploy/io.goodkind.lmd.serve.plist.example`. All `lmd-serve` e
 | `LMD_PORT` | `5400` | Broker bind port. |
 | `LMD_BUDGET_GB` | `80` | Max GB of models resident at once. Evictions happen above this. |
 | `LMD_IDLE_MINUTES` | `15` | After this many minutes idle, unload a chat (SwiftLM) model. |
-| `LMD_EMBEDDING_IDLE_MINUTES` | `60` | Idle timeout for in-process MLX embedding backends (often longer than chat). |
+| `LMD_EMBEDDING_IDLE_MINUTES` | `60` | Idle timeout for in-process embedding backends (often longer than chat). |
 | `LMD_SAMPLE_INTERVAL` | `15` | Seconds between sensor samples. |
 | `LMD_DATA_DIR` | `~/Library/Application Support/io.goodkind.lmd` | Where `memory.jsonl` lands. |
 | `LMD_SWIFTLM_BINARY` | `~/Sites/SwiftLM/.build/arm64-apple-macosx/release/SwiftLM` | SwiftLM inference engine to spawn. |
@@ -79,7 +79,7 @@ Models are classified as `chat` or `embedding` when the catalog scans disk: `sen
 
 `GET /v1/models` and `GET /swiftlmd/loaded` include a `kind` field per entry (`chat` or `embedding`). Chat requests against an embedding id return HTTP 400.
 
-Embedding inference uses MLXEmbedders in process (`SwiftLMEmbed`, weights from the same directories as chat models). Example model id style: `Snowflake/snowflake-arctic-embed-l` when that layout exists under `~/.lmstudio/models`.
+Embedding inference uses backend families in process (`SwiftLMEmbed`, weights from the same directories as chat models). MLX-compatible embedder metadata routes to MLXEmbedders. NVIDIA Mistral bidirectional SentenceTransformers metadata, including models such as `nvidia/NV-EmbedCode-7b-v1`, routes to the native NVIDIA embedding backend.
 
 Smoke test from the dispatcher: `lmd embed -h` then `lmd embed -m <id> -t "hello"`.
 
@@ -132,7 +132,7 @@ lmd/
     AppLogger/           shared os.Logger + swift-log bridge
     SwiftLMCore/         model descriptors, shared types
     SwiftLMBackend/      SwiftLM child-process lifecycle + MLX VLM video backend
-    SwiftLMEmbed/        MLX embedding backends (MLXEmbedders)
+    SwiftLMEmbed/        embedding backend families (MLXEmbedders + native NVIDIA)
     SwiftLMRuntime/      router, bench config + orchestrator, fan policy library, event bus
     SwiftLMMonitor/      macmon client, sensor sampler, battery reader
     SwiftLMControl/      XPC broker client + protocol

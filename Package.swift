@@ -67,6 +67,7 @@ let package = Package(
     .target(
       name: "SwiftLMEmbed",
       dependencies: [
+        "AppLogger",
         "SwiftLMCore",
         "SwiftLMBackend",
         .product(name: "MLXEmbedders", package: "mlx-swift-lm"),
@@ -184,6 +185,12 @@ let package = Package(
       name: "SwiftLMBackendTests",
       dependencies: ["SwiftLMBackend"],
       path: "Tests/SwiftLMBackendTests",
+      swiftSettings: strictConcurrency
+    ),
+    .testTarget(
+      name: "SwiftLMEmbedTests",
+      dependencies: ["SwiftLMEmbed", "SwiftLMCore"],
+      path: "Tests/SwiftLMEmbedTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(

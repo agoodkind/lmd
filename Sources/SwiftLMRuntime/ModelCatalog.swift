@@ -195,7 +195,7 @@ public struct ModelCatalog {
     }
     if let mt = json["model_type"] as? String {
       let lower = mt.lowercased()
-      if ["bert", "nomic_bert", "xlm-roberta", "mpnet"].contains(lower) {
+      if ["bert", "mistralbidirectional", "nomic_bert", "xlm-roberta", "mpnet"].contains(lower) {
         return .embedding
       }
     }
@@ -297,7 +297,7 @@ public struct ModelCatalog {
 
   private static func architectureLooksEmbedding(_ arch: String) -> Bool {
     let pattern =
-      "^(Bert|XLMRoberta|MPNet|NomicBert|JinaBert|GTE|SnowflakeArcticEmbed|RobertaForMaskedLM)"
+      "^(Bert|XLMRoberta|MPNet|NomicBert|JinaBert|GTE|SnowflakeArcticEmbed|RobertaForMaskedLM|MistralBiDirectional)"
     guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
       return false
     }

@@ -18,15 +18,21 @@ final class ModelCatalogKindTests: XCTestCase {
     return dir
   }
 
-  private func writeConfig(_ dir: String, json: String) throws {
-    let path = "\(dir)/config.json"
-    try json.write(toFile: path, atomically: true, encoding: .utf8)
+  private func writeConfig<T: Encodable>(_ dir: String, value: T) throws {
+    try writeJSON(value, to: "\(dir)/config.json")
+  }
+
+  private func writeJSON<T: Encodable>(_ value: T, to path: String) throws {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let data = try encoder.encode(value)
+    try data.write(to: URL(fileURLWithPath: path), options: [.atomic])
   }
 
   func testSentenceBertConfigImpliesEmbedding() throws {
     let dir = try tempModelDir()
-    try "{}".write(toFile: "\(dir)/sentence_bert_config.json", atomically: true, encoding: .utf8)
-    try writeConfig(dir, json: #"{"model_type": "llama"}"#)
+    try writeJSON(EmptyJSONFixture(), to: "\(dir)/sentence_bert_config.json")
+    try writeConfig(dir, value: CatalogConfigFixture(modelType: "llama"))
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "m", slug: nil, fileManager: .default)
     XCTAssertEqual(kind, .embedding)
@@ -34,8 +40,8 @@ final class ModelCatalogKindTests: XCTestCase {
 
   func testModulesJsonImpliesEmbedding() throws {
     let dir = try tempModelDir()
-    try "{}".write(toFile: "\(dir)/modules.json", atomically: true, encoding: .utf8)
-    try writeConfig(dir, json: #"{"model_type": "llama"}"#)
+    try writeJSON(EmptyJSONFixture(), to: "\(dir)/modules.json")
+    try writeConfig(dir, value: CatalogConfigFixture(modelType: "llama"))
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "m", slug: nil, fileManager: .default)
     XCTAssertEqual(kind, .embedding)
@@ -45,7 +51,10 @@ final class ModelCatalogKindTests: XCTestCase {
     let dir = try tempModelDir()
     try writeConfig(
       dir,
-      json: #"{"architectures": ["BertModel"], "model_type": "bert"}"#
+      value: CatalogConfigFixture(
+        architectures: ["BertModel"],
+        modelType: "bert"
+      )
     )
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "m", slug: nil, fileManager: .default)
@@ -56,16 +65,34 @@ final class ModelCatalogKindTests: XCTestCase {
     let dir = try tempModelDir()
     try writeConfig(
       dir,
-      json: #"{"architectures": ["SnowflakeArcticEmbeddingModel"]}"#
+      value: CatalogConfigFixture(architectures: ["SnowflakeArcticEmbeddingModel"])
     )
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "m", slug: nil, fileManager: .default)
     XCTAssertEqual(kind, .embedding)
   }
 
+  func testNVIDIAMistralBidirectionalArchitectureImpliesEmbedding() throws {
+    let dir = try tempModelDir()
+    try writeConfig(
+      dir,
+      value: CatalogConfigFixture(
+        architectures: ["MistralBiDirectionalModel"],
+        modelType: "mistralbidirectional"
+      )
+    )
+    let kind = ModelCatalog.inferModelKind(
+      modelDir: dir,
+      displayName: "NV-EmbedCode-7b-v1",
+      slug: "nvidia/NV-EmbedCode-7b-v1",
+      fileManager: .default
+    )
+    XCTAssertEqual(kind, .embedding)
+  }
+
   func testModelTypeBertImpliesEmbedding() throws {
     let dir = try tempModelDir()
-    try writeConfig(dir, json: #"{"model_type": "bert"}"#)
+    try writeConfig(dir, value: CatalogConfigFixture(modelType: "bert"))
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "m", slug: nil, fileManager: .default)
     XCTAssertEqual(kind, .embedding)
@@ -73,7 +100,13 @@ final class ModelCatalogKindTests: XCTestCase {
 
   func testLlamaStaysChat() throws {
     let dir = try tempModelDir()
-    try writeConfig(dir, json: #"{"model_type": "llama", "architectures": ["LlamaForCausalLM"]}"#)
+    try writeConfig(
+      dir,
+      value: CatalogConfigFixture(
+        architectures: ["LlamaForCausalLM"],
+        modelType: "llama"
+      )
+    )
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "qwen", slug: nil, fileManager: .default)
     XCTAssertEqual(kind, .chat)
@@ -81,7 +114,7 @@ final class ModelCatalogKindTests: XCTestCase {
 
   func testNameHeuristicEmbed() throws {
     let dir = try tempModelDir()
-    try writeConfig(dir, json: #"{"model_type": "custom"}"#)
+    try writeConfig(dir, value: CatalogConfigFixture(modelType: "custom"))
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "foo-embed-bar", slug: nil, fileManager: .default)
     XCTAssertEqual(kind, .embedding)
@@ -89,9 +122,29 @@ final class ModelCatalogKindTests: XCTestCase {
 
   func testNameHeuristicBge() throws {
     let dir = try tempModelDir()
-    try writeConfig(dir, json: #"{"model_type": "custom"}"#)
+    try writeConfig(dir, value: CatalogConfigFixture(modelType: "custom"))
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "model-x", slug: "org/bge-small", fileManager: .default)
     XCTAssertEqual(kind, .embedding)
+  }
+}
+
+private struct EmptyJSONFixture: Encodable {}
+
+private struct CatalogConfigFixture: Encodable {
+  let architectures: [String]?
+  let modelType: String?
+
+  init(
+    architectures: [String]? = nil,
+    modelType: String? = nil
+  ) {
+    self.architectures = architectures
+    self.modelType = modelType
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case architectures
+    case modelType = "model_type"
   }
 }

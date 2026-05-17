@@ -85,6 +85,7 @@ let testTargetNames = [
   "AppLoggerTests",
   "SwiftLMCoreTests",
   "SwiftLMBackendTests",
+  "SwiftLMEmbedTests",
   "SwiftLMMonitorTests",
   "SwiftLMRuntimeTests",
   "SwiftLMControlTests",
@@ -140,6 +141,7 @@ let project = Project(
     frameworkTarget(
       "SwiftLMEmbed",
       dependencies: [
+        .target(name: "AppLogger"),
         .target(name: "SwiftLMCore"),
         .target(name: "SwiftLMBackend"),
         .external(name: "MLXEmbedders"),
@@ -275,6 +277,13 @@ let project = Project(
     testTarget(
       "SwiftLMBackendTests",
       dependencies: [.target(name: "SwiftLMBackend")]
+    ),
+    testTarget(
+      "SwiftLMEmbedTests",
+      dependencies: [
+        .target(name: "SwiftLMEmbed"),
+        .target(name: "SwiftLMCore"),
+      ]
     ),
     testTarget(
       "SwiftLMMonitorTests",

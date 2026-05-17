@@ -36,12 +36,14 @@ final class EmbeddingsRouteTests: XCTestCase {
     }
 
     let slug = embModel.slug ?? embModel.displayName
+    let expectedDimension = expectedEmbeddingDimension(for: embModel)
     let port = 5400 + Int.random(in: 50...250)
     let host = "localhost"
 
     let proc = Process()
     proc.executableURL = brokerBin
     proc.arguments = []
+    proc.currentDirectoryURL = try brokerWorkingDirectory(for: brokerBin)
     proc.environment = buildBrokerEnvironment(
       host: host, port: port, swiftLM: swiftLM)
 
@@ -53,6 +55,10 @@ final class EmbeddingsRouteTests: XCTestCase {
 
     let base = "http://\(host):\(port)"
     try await waitForHealth(url: "\(base)/health", deadlineSeconds: 45)
+    try await assertModelsRouteListsEmbedding(
+      baseURL: base,
+      slug: slug
+    )
 
     let embPayload: [String: Any] = [
       "model": slug,
@@ -78,8 +84,11 @@ final class EmbeddingsRouteTests: XCTestCase {
     }
     XCTAssertEqual(rows.count, 2)
     for row in rows {
-      let vec = row["embedding"] as? [Float] ?? []
+      let vec = embeddingVector(from: row)
       XCTAssertGreaterThan(vec.count, 0)
+      if let expectedDimension {
+        XCTAssertEqual(vec.count, expectedDimension)
+      }
     }
 
     let (loadedStatus, loadedBody) = await httpGet(url: "\(base)/swiftlmd/loaded")
@@ -109,17 +118,31 @@ final class EmbeddingsRouteTests: XCTestCase {
     let debugDir = try repoRoot()
       .appendingPathComponent(".build", isDirectory: true)
       .appendingPathComponent("debug", isDirectory: true)
-    let releaseBin = baseDir.appendingPathComponent("lmd-serve")
-    if FileManager.default.isExecutableFile(atPath: releaseBin.path) {
-      return releaseBin
-    }
     let debugBin = debugDir.appendingPathComponent("lmd-serve")
     if FileManager.default.isExecutableFile(atPath: debugBin.path) {
       return debugBin
     }
+    let releaseBin = baseDir.appendingPathComponent("lmd-serve")
+    if FileManager.default.isExecutableFile(atPath: releaseBin.path) {
+      return releaseBin
+    }
     throw XCTSkip(
       "lmd-serve not found. Run `swift build -c release` or `swift build`, or set LMD_BINARY_DIR."
     )
+  }
+
+  private func brokerWorkingDirectory(for brokerBinary: URL) throws -> URL {
+    let root = try repoRoot()
+    let configuration = brokerBinary.path.contains("/release/") ? "Release" : "Debug"
+    let productsDirectory = root
+      .appendingPathComponent("Products", isDirectory: true)
+      .appendingPathComponent("Build", isDirectory: true)
+      .appendingPathComponent(configuration, isDirectory: true)
+    let metallib = productsDirectory.appendingPathComponent("default.metallib")
+    if FileManager.default.fileExists(atPath: metallib.path) {
+      return productsDirectory
+    }
+    return brokerBinary.deletingLastPathComponent()
   }
 
   private func repoRoot() throws -> URL {
@@ -148,7 +171,48 @@ final class EmbeddingsRouteTests: XCTestCase {
 
   private func findEmbeddingModel(under root: String) -> ModelDescriptor? {
     let catalog = ModelCatalog(roots: [root])
-    return catalog.allModels().first(where: { $0.kind == .embedding })
+    let models = catalog.allModels().filter { $0.kind == .embedding }
+    if let nvidiaModel = models.first(where: { $0.slug == "nvidia/NV-EmbedCode-7b-v1" }) {
+      return nvidiaModel
+    }
+    return models.first
+  }
+
+  private func expectedEmbeddingDimension(for model: ModelDescriptor) -> Int? {
+    if model.slug == "nvidia/NV-EmbedCode-7b-v1" {
+      return 4096
+    }
+    return nil
+  }
+
+  private func embeddingVector(from row: [String: Any]) -> [Double] {
+    if let values = row["embedding"] as? [Double] {
+      return values
+    }
+    if let values = row["embedding"] as? [NSNumber] {
+      return values.map { $0.doubleValue }
+    }
+    return []
+  }
+
+  private func assertModelsRouteListsEmbedding(
+    baseURL: String,
+    slug: String
+  ) async throws {
+    let (status, body) = await httpGet(url: "\(baseURL)/v1/models")
+    XCTAssertEqual(status, 200)
+    guard
+      let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+      let data = json["data"] as? [[String: Any]]
+    else {
+      XCTFail("invalid /v1/models JSON")
+      return
+    }
+    let model = data.first { row in
+      row["id"] as? String == slug
+    }
+    let unwrappedModel = try XCTUnwrap(model, "missing \(slug) from /v1/models")
+    XCTAssertEqual(unwrappedModel["kind"] as? String, "embedding")
   }
 
   private func waitForHealth(url: String, deadlineSeconds: Int) async throws {

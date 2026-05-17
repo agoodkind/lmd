@@ -127,6 +127,7 @@ public actor ModelRouter {
     case wrongKindForChat(modelID: String)
     case wrongKindForEmbedding(modelID: String)
     case embeddingSpawnerMissing
+    case unsupportedEmbeddingBackend(modelID: String, reason: String)
   }
 
   public func routeAndBegin(_ model: ModelDescriptor) throws -> SwiftLMBackendProtocol {
@@ -210,6 +211,11 @@ public actor ModelRouter {
     let backend: EmbeddingBackendProtocol
     do {
       backend = try await embeddingSpawner(model)
+    } catch let error as UnsupportedEmbeddingBackendError {
+      let reason = error.description
+      log.error("router.embedding_backend_unsupported model=\(model.id, privacy: .public) err=\(reason, privacy: .public)")
+      logSink("embedding backend unsupported model=\(model.id) err=\(reason)")
+      throw RouteError.unsupportedEmbeddingBackend(modelID: model.id, reason: reason)
     } catch {
       log.error("router.embedding_launch_failed model=\(model.id, privacy: .public) err=\(String(describing: error), privacy: .public)")
       logSink("embedding launch failed model=\(model.id) err=\(error)")
