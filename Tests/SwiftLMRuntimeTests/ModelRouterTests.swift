@@ -7,6 +7,7 @@
 //
 
 import XCTest
+@testable import SwiftLMBackend
 @testable import SwiftLMCore
 @testable import SwiftLMRuntime
 
@@ -28,10 +29,35 @@ private final class FakeBackend: SwiftLMBackendProtocol, @unchecked Sendable {
   func shutdown() { stopped = true }
 }
 
+private final class FakeEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sendable {
+  let modelID: String
+  let sizeBytes: Int64
+  var stopped = false
+
+  init(modelID: String, sizeBytes: Int64) {
+    self.modelID = modelID
+    self.sizeBytes = sizeBytes
+  }
+
+  func launch() async throws {}
+  func shutdown() { stopped = true }
+  func embed(inputs: [String]) async throws -> [[Float]] {
+    inputs.map { _ in [0.0] }
+  }
+}
+
+enum TestEmbeddingError: Error {
+  case failed
+}
+
 final class ModelRouterTests: XCTestCase {
   private let gb: Int64 = 1_073_741_824
 
-  private func makeRouter(ceiling: Int64 = 80, reserve: Int64 = 0) -> (ModelRouter, () -> [FakeBackend]) {
+  private func makeRouter(
+    ceiling: Int64 = 80,
+    reserve: Int64 = 0,
+    eventSink: @escaping @Sendable (RouterLifecycleEvent) -> Void = { _ in }
+  ) -> (ModelRouter, () -> [FakeBackend]) {
     let created = FakesBox()
     let spawner: BackendSpawner = { model, port in
       let fake = FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
@@ -42,13 +68,28 @@ final class ModelRouterTests: XCTestCase {
       ceilingBytes: ceiling * 1_073_741_824,
       reservedBytes: reserve * 1_073_741_824
     )
-    let router = ModelRouter(budget: budget, portRange: 5500...5502, spawner: spawner)
+    let router = ModelRouter(
+      budget: budget,
+      portRange: 5500...5502,
+      spawner: spawner,
+      eventSink: eventSink
+    )
     return (router, created.getAll)
   }
 
   /// Helper to descriptor from a name and size in GB.
   private func desc(_ name: String, _ sizeGB: Int64) -> ModelDescriptor {
     ModelDescriptor(id: name, displayName: name, path: "/tmp/\(name)", sizeBytes: sizeGB * gb)
+  }
+
+  private func embeddingDesc(_ name: String, _ sizeGB: Int64) -> ModelDescriptor {
+    ModelDescriptor(
+      id: name,
+      displayName: name,
+      path: "/tmp/\(name)",
+      sizeBytes: sizeGB * gb,
+      kind: .embedding
+    )
   }
 
   func testFirstRouteSpawnsBackend() async throws {
@@ -123,6 +164,225 @@ final class ModelRouterTests: XCTestCase {
     let next = try await router.routeAndBegin(desc("B", 10))
     XCTAssertEqual(next.port, 5500)
   }
+
+  func testRouterPublishesTypedLifecycleEvents() async throws {
+    let events = RouterEventsBox()
+    let (router, _) = makeRouter(eventSink: { event in
+      events.append(event)
+    })
+
+    _ = try await router.routeAndBegin(desc("A", 10))
+    await router.requestDone(modelID: "A")
+    await router.unload(modelID: "A")
+
+    XCTAssertEqual(
+      events.getAll(),
+      [
+        .modelSpawned(modelID: "A", port: 5500),
+        .modelUnloaded(modelID: "A", port: 5500),
+      ]
+    )
+  }
+
+  func testBudgetEvictionPublishesModelEvictedLifecycleEvent() async throws {
+    let events = RouterEventsBox()
+    let (router, created) = makeRouter(ceiling: 80, eventSink: { event in
+      events.append(event)
+    })
+
+    _ = try await router.routeAndBegin(desc("A", 40))
+    await router.requestDone(modelID: "A")
+    _ = try await router.routeAndBegin(desc("B", 30))
+    await router.requestDone(modelID: "B")
+    _ = try await router.routeAndBegin(desc("C", 40))
+
+    XCTAssertTrue(created()[0].stopped)
+    XCTAssertEqual(
+      events.getAll(),
+      [
+        .modelSpawned(modelID: "A", port: 5500),
+        .modelSpawned(modelID: "B", port: 5501),
+        .modelEvicted(modelID: "A", port: 5500),
+        .modelSpawned(modelID: "C", port: 5500),
+      ]
+    )
+  }
+
+  func testBudgetEvictionPublishesEmbeddingEvictedLifecycleEvent() async throws {
+    let events = RouterEventsBox()
+    let embeddingModel = embeddingDesc("embed", 40)
+    let embeddingBackend = FakeEmbeddingBackend(
+      modelID: embeddingModel.id,
+      sizeBytes: embeddingModel.sizeBytes
+    )
+    let router = ModelRouter(
+      budget: MemoryBudget(ceilingBytes: 80 * gb),
+      portRange: 5500...5502,
+      spawner: { model, port in
+        FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
+      },
+      embeddingSpawner: { _ in embeddingBackend },
+      eventSink: { event in
+        events.append(event)
+      }
+    )
+
+    _ = try await router.routeEmbeddingAndBegin(embeddingModel)
+    await router.embeddingRequestDone(modelID: embeddingModel.id)
+    _ = try await router.routeAndBegin(desc("chat", 50))
+
+    XCTAssertTrue(embeddingBackend.stopped)
+    XCTAssertEqual(
+      events.getAll(),
+      [
+        .embeddingSpawned(modelID: "embed"),
+        .embeddingEvicted(modelID: "embed"),
+        .modelSpawned(modelID: "chat", port: 5500),
+      ]
+    )
+  }
+
+  func testBrokerEventMapsRouterEvictionsToModelEvictedKind() {
+    let modelEvent = BrokerEvent(routerEvent: .modelEvicted(modelID: "A", port: 5500))
+    XCTAssertEqual(modelEvent.kind, .modelEvicted)
+    XCTAssertEqual(modelEvent.model, "A")
+    XCTAssertEqual(modelEvent.message, "evicted model=A port=5500")
+
+    let embeddingEvent = BrokerEvent(routerEvent: .embeddingEvicted(modelID: "embed"))
+    XCTAssertEqual(embeddingEvent.kind, .modelEvicted)
+    XCTAssertEqual(embeddingEvent.model, "embed")
+    XCTAssertEqual(embeddingEvent.message, "evicted embedding model=embed")
+  }
+
+  func testConcurrentEmbeddingRoutesShareLoadingTask() async throws {
+    let model = embeddingDesc("embed", 10)
+    let embeddingBackend = FakeEmbeddingBackend(modelID: model.id, sizeBytes: model.sizeBytes)
+    let delayedSpawner = DelayedEmbeddingSpawner(backend: embeddingBackend)
+    let router = ModelRouter(
+      budget: MemoryBudget(ceilingBytes: 80 * gb),
+      spawner: { model, port in
+        FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
+      },
+      embeddingSpawner: delayedSpawner.makeSpawner()
+    )
+
+    async let firstBackend = router.routeEmbeddingAndBegin(model)
+    await delayedSpawner.waitUntilStarted()
+    async let secondBackend = router.routeEmbeddingAndBegin(model)
+    await Task.yield()
+    await delayedSpawner.release()
+
+    let routedBackends = try await [firstBackend, secondBackend]
+    XCTAssertTrue(routedBackends[0] === routedBackends[1])
+    let delayedSpawnCount = await delayedSpawner.spawnCount()
+    XCTAssertEqual(delayedSpawnCount, 1)
+
+    let snapshot = await router.snapshot()
+    XCTAssertEqual(snapshot.loaded.count, 1)
+    XCTAssertEqual(snapshot.loaded.first?.inFlightRequests, 2)
+  }
+
+  func testEmbeddingLoadFailureClearsLoadingStateForRetry() async throws {
+    let model = embeddingDesc("embed", 10)
+    let embeddingBackend = FakeEmbeddingBackend(modelID: model.id, sizeBytes: model.sizeBytes)
+    let retrySpawner = RetryEmbeddingSpawner(backend: embeddingBackend)
+    let router = ModelRouter(
+      budget: MemoryBudget(ceilingBytes: 80 * gb),
+      spawner: { model, port in
+        FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
+      },
+      embeddingSpawner: retrySpawner.makeSpawner()
+    )
+
+    do {
+      _ = try await router.routeEmbeddingAndBegin(model)
+      XCTFail("expected first embedding load to fail")
+    } catch let error as ModelRouter.RouteError {
+      guard case .backendLaunchFailed = error else {
+        XCTFail("expected backendLaunchFailed, got \(error)")
+        return
+      }
+    }
+
+    let routedBackend = try await router.routeEmbeddingAndBegin(model)
+    XCTAssertTrue(routedBackend === embeddingBackend)
+    let retrySpawnCount = await retrySpawner.spawnCount()
+    XCTAssertEqual(retrySpawnCount, 2)
+  }
+}
+
+private actor DelayedEmbeddingSpawner {
+  private let backend: FakeEmbeddingBackend
+  private var startedContinuation: CheckedContinuation<Void, Never>?
+  private var releaseContinuation: CheckedContinuation<Void, Never>?
+  private var hasStarted = false
+  private var count = 0
+
+  init(backend: FakeEmbeddingBackend) {
+    self.backend = backend
+  }
+
+  nonisolated func makeSpawner() -> EmbeddingSpawner {
+    { model in
+      try await self.spawn(model: model)
+    }
+  }
+
+  func waitUntilStarted() async {
+    if hasStarted {
+      return
+    }
+    await withCheckedContinuation { continuation in
+      startedContinuation = continuation
+    }
+  }
+
+  func release() {
+    releaseContinuation?.resume()
+    releaseContinuation = nil
+  }
+
+  func spawnCount() -> Int {
+    count
+  }
+
+  private func spawn(model: ModelDescriptor) async throws -> EmbeddingBackendProtocol {
+    count += 1
+    hasStarted = true
+    startedContinuation?.resume()
+    startedContinuation = nil
+    await withCheckedContinuation { continuation in
+      releaseContinuation = continuation
+    }
+    return backend
+  }
+}
+
+private actor RetryEmbeddingSpawner {
+  private let backend: FakeEmbeddingBackend
+  private var count = 0
+
+  init(backend: FakeEmbeddingBackend) {
+    self.backend = backend
+  }
+
+  nonisolated func makeSpawner() -> EmbeddingSpawner {
+    { model in
+      try await self.spawn(model: model)
+    }
+  }
+
+  func spawnCount() -> Int {
+    count
+  }
+
+  private func spawn(model: ModelDescriptor) async throws -> EmbeddingBackendProtocol {
+    count += 1
+    if count == 1 {
+      throw TestEmbeddingError.failed
+    }
+    return backend
+  }
 }
 
 /// Small thread-safe list wrapper used to observe spawner output from outside.
@@ -131,4 +391,11 @@ private final class FakesBox: @unchecked Sendable {
   private let lock = NSLock()
   func append(_ item: FakeBackend) { lock.lock(); items.append(item); lock.unlock() }
   func getAll() -> [FakeBackend] { lock.lock(); defer { lock.unlock() }; return items }
+}
+
+private final class RouterEventsBox: @unchecked Sendable {
+  private var items: [RouterLifecycleEvent] = []
+  private let lock = NSLock()
+  func append(_ item: RouterLifecycleEvent) { lock.lock(); items.append(item); lock.unlock() }
+  func getAll() -> [RouterLifecycleEvent] { lock.lock(); defer { lock.unlock() }; return items }
 }

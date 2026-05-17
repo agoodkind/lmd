@@ -218,21 +218,24 @@ private final class SessionHandler: @unchecked Sendable {
       "model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public)"
     )
     defer { signposter.endInterval("xpc.embed", intervalState) }
+    let requestID = UUID().uuidString
+    log.notice("embedding.request_started request_id=\(requestID, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public)")
 
     let backend: EmbeddingBackendProtocol
     do {
       backend = try await state.router.routeEmbeddingAndBegin(descriptor)
     } catch {
-      log.error("xpc.embed_route_failed model=\(descriptor.id, privacy: .public) err=\(String(describing: error), privacy: .public)")
+      log.error("embedding.request_failed request_id=\(requestID, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=route err=\(String(describing: error), privacy: .public)")
       return .error(BrokerError(kind: .embeddingFailed, message: "route: \(error)"))
     }
     do {
       let vectors = try await backend.embed(inputs: inputs)
       await state.router.embeddingRequestDone(modelID: descriptor.id)
+      log.notice("embedding.request_completed request_id=\(requestID, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) vectors=\(vectors.count, privacy: .public)")
       return .embeddings(vectors)
     } catch {
       await state.router.embeddingRequestDone(modelID: descriptor.id)
-      log.error("xpc.embed_failed model=\(descriptor.id, privacy: .public) err=\(String(describing: error), privacy: .public)")
+      log.error("embedding.request_failed request_id=\(requestID, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=embed err=\(String(describing: error), privacy: .public)")
       return .error(BrokerError(kind: .embeddingFailed, message: "\(error)"))
     }
   }

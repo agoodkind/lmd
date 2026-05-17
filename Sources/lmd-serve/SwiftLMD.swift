@@ -99,32 +99,9 @@ nonisolated(unsafe) let isoFormatter: ISO8601DateFormatter = {
 
 // MARK: - Router event helper
 
-/// Classify a router log line into a `BrokerEvent` and publish it to
-/// the shared bus. Best-effort string parsing; unknown shapes fall
-/// through to `.note`.
-func publishRouterEvent(message: String) {
-  let kind: BrokerEvent.Kind
-  var model: String?
-  if message.contains("spawned model=") || message.contains("spawned embedding model=") {
-    kind = .modelLoaded
-    model = extractModel(from: message)
-  } else if message.contains("unloaded model=") || message.contains("unloaded embedding model=") {
-    kind = .modelUnloaded
-    model = extractModel(from: message)
-  } else if message.contains("evict") {
-    kind = .modelEvicted
-    model = extractModel(from: message)
-  } else {
-    kind = .note
-  }
-  Task { await EventBus.shared.publish(kind: kind, model: model, message: message) }
-}
-
-/// Pick the model id out of a "key=value" router log line.
-private func extractModel(from message: String) -> String? {
-  guard let range = message.range(of: "model=") else { return nil }
-  let tail = message[range.upperBound...]
-  return tail.split(separator: " ", maxSplits: 1).first.map(String.init)
+/// Publish a typed router lifecycle event to the shared bus.
+func publishRouterEvent(_ event: RouterLifecycleEvent) {
+  Task { await EventBus.shared.publish(BrokerEvent(routerEvent: event)) }
 }
 
 // MARK: - Legacy `slog` shim
@@ -132,8 +109,7 @@ private func extractModel(from message: String) -> String? {
 // Routes the broker's existing `slog("...")` call sites through the
 // unified `os.Logger` at `.notice` level so operators tail via
 // `log stream --subsystem io.goodkind.lmd --info`. Kept as a helper
-// because several library callbacks (ModelRouter, SwiftLMServer)
-// accept a `(String) -> Void` sink that this satisfies.
+// because `SwiftLMServer` still accepts a `(String) -> Void` sink.
 //
 // Messages are marked `.public` because the broker does not handle
 // user prompt text through this channel. It only carries lifecycle
@@ -284,9 +260,10 @@ struct SwiftLMD {
       exit(1)
     }
 
-    // Router. The plain-text log callback tees into `slog` and into the
-    // shared `EventBus` so subscribers (`/swiftlmd/events`, future
-    // EventsTab) see lifecycle transitions.
+    // Router. `ModelRouter` writes its own structured logs directly.
+    // The typed lifecycle hook only feeds the shared `EventBus` so
+    // subscribers (`/swiftlmd/events`, future EventsTab) see state
+    // transitions without a duplicate broker log line.
     let router = ModelRouter(
       budget: budget,
       spawner: { model, port in
@@ -297,9 +274,8 @@ struct SwiftLMD {
         try await backend.launch()
         return backend
       },
-      log: { message in
-        slog("router: \(message)")
-        publishRouterEvent(message: message)
+      eventSink: { event in
+        publishRouterEvent(event)
       }
     )
 
@@ -602,10 +578,14 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
     )
   }
 
+  let requestID = UUID().uuidString
+  log.notice("embedding.request_started request_id=\(requestID, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public)")
+
   let backend: EmbeddingBackendProtocol
   do {
     backend = try await state.router.routeEmbeddingAndBegin(descriptor)
   } catch let err as ModelRouter.RouteError {
+    log.error("embedding.request_failed request_id=\(requestID, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=route err=\(String(describing: err), privacy: .public)")
     switch err {
     case .cannotFitInBudget:
       return errorResponse(
@@ -656,6 +636,7 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
     vectors = try await backend.embed(inputs: inputs)
   } catch {
     await state.router.embeddingRequestDone(modelID: descriptor.id)
+    log.error("embedding.request_failed request_id=\(requestID, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=embed err=\(String(describing: error), privacy: .public)")
     return errorResponse(
       status: .serviceUnavailable,
       message: "embedding failed: \(error)",
@@ -663,6 +644,7 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
     )
   }
   await state.router.embeddingRequestDone(modelID: descriptor.id)
+  log.notice("embedding.request_completed request_id=\(requestID, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) vectors=\(vectors.count, privacy: .public)")
 
   struct EmbRow: Codable {
     let object: String
