@@ -32,7 +32,7 @@ public typealias EmbeddingSpawner = @Sendable (_ model: ModelDescriptor) async t
 
 // MARK: - Router state
 
-private final class LoadedEntry: @unchecked Sendable {
+private struct LoadedEntry: Sendable {
   let backend: SwiftLMBackendProtocol
   var lastUsed: Date
   var inFlight: Int
@@ -43,7 +43,7 @@ private final class LoadedEntry: @unchecked Sendable {
   }
 }
 
-private final class EmbeddingLoadedEntry: @unchecked Sendable {
+private struct EmbeddingLoadedEntry: Sendable {
   let backend: EmbeddingBackendProtocol
   var lastUsed: Date
   var inFlight: Int
@@ -54,7 +54,7 @@ private final class EmbeddingLoadedEntry: @unchecked Sendable {
   }
 }
 
-private final class EmbeddingLoadingEntry: @unchecked Sendable {
+private final class EmbeddingLoadingEntry: Sendable {
   let id: UUID
   let task: Task<EmbeddingBackendProtocol, Error>
 
@@ -64,7 +64,7 @@ private final class EmbeddingLoadingEntry: @unchecked Sendable {
   }
 }
 
-private enum EmbeddingRouteState: @unchecked Sendable {
+private enum EmbeddingRouteState: Sendable {
   case loading(EmbeddingLoadingEntry)
   case loaded(EmbeddingLoadedEntry)
 }
@@ -170,9 +170,10 @@ public actor ModelRouter {
     guard model.kind != .embedding else {
       throw RouteError.wrongKindForChat(modelID: model.id)
     }
-    if let entry = loaded[model.id] {
+    if var entry = loaded[model.id] {
       entry.lastUsed = Date()
       entry.inFlight += 1
+      loaded[model.id] = entry
       return entry.backend
     }
 
@@ -207,7 +208,7 @@ public actor ModelRouter {
       throw RouteError.backendLaunchFailed(modelID: model.id)
     }
 
-    let entry = LoadedEntry(backend: backend)
+    var entry = LoadedEntry(backend: backend)
     entry.inFlight = 1
     loaded[model.id] = entry
     log.notice("router.model_spawned model=\(model.id, privacy: .public) port=\(port, privacy: .public)")
@@ -227,9 +228,10 @@ public actor ModelRouter {
 
     if let state = embeddingRoutes[model.id] {
       switch state {
-      case .loaded(let entry):
+      case .loaded(var entry):
         entry.lastUsed = Date()
         entry.inFlight += 1
+        embeddingRoutes[model.id] = .loaded(entry)
         return entry.backend
       case .loading(let loading):
         log.debug("router.embedding_load_wait model=\(model.id, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)")
@@ -260,22 +262,30 @@ public actor ModelRouter {
   }
 
   public func requestDone(modelID: String) {
-    guard let entry = loaded[modelID] else {
+    guard var entry = loaded[modelID] else {
       log.fault("router.request_done_unknown_chat_model model=\(modelID, privacy: .public)")
       return
     }
     if entry.inFlight > 0 { entry.inFlight -= 1 }
     entry.lastUsed = Date()
+    loaded[modelID] = entry
     log.debug("router.request_done model=\(modelID, privacy: .public) in_flight=\(entry.inFlight, privacy: .public)")
   }
 
   public func embeddingRequestDone(modelID: String) {
-    guard let state = embeddingRoutes[modelID], case .loaded(let entry) = state else {
+    guard let state = embeddingRoutes[modelID] else {
       log.fault("router.request_done_unknown_embedding_model model=\(modelID, privacy: .public)")
       return
     }
+
+    guard case .loaded(var entry) = state else {
+      log.fault("router.request_done_unknown_embedding_model model=\(modelID, privacy: .public)")
+      return
+    }
+
     if entry.inFlight > 0 { entry.inFlight -= 1 }
     entry.lastUsed = Date()
+    embeddingRoutes[modelID] = .loaded(entry)
     log.debug("router.embedding_request_done model=\(modelID, privacy: .public) in_flight=\(entry.inFlight, privacy: .public)")
   }
 
@@ -362,12 +372,13 @@ public actor ModelRouter {
     }
 
     switch state {
-    case .loaded(let entry):
+    case .loaded(var entry):
       entry.lastUsed = Date()
       entry.inFlight += 1
+      embeddingRoutes[model.id] = .loaded(entry)
       return entry.backend
     case .loading(let current) where current.id == loading.id:
-      let entry = EmbeddingLoadedEntry(backend: backend)
+      var entry = EmbeddingLoadedEntry(backend: backend)
       entry.inFlight = 1
       embeddingRoutes[model.id] = .loaded(entry)
       log.notice("router.embedding_spawned model=\(model.id, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)")
