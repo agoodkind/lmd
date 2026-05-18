@@ -198,8 +198,11 @@ private final class SessionHandler: @unchecked Sendable {
   }
 
   private func unload(model: String) async throws -> BrokerResponse {
-    await state.router.unload(modelID: model)
-    return .unloaded(modelID: model)
+    guard let descriptor = state.resolve(id: model) else {
+      return .error(BrokerError(kind: .modelNotFound, message: "unknown model \(model)"))
+    }
+    await state.router.unload(modelID: descriptor.id)
+    return .unloaded(modelID: descriptor.id)
   }
 
   private func embed(model: String, inputs: [String]) async throws -> BrokerResponse {

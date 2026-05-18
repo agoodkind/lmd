@@ -104,7 +104,11 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
   }
 
   public func shutdown() {
+    guard runtime != nil else {
+      return
+    }
     runtime = nil
+    Memory.clearCache()
   }
 
   public func embed(inputs: [String]) async throws -> [[Float]] {

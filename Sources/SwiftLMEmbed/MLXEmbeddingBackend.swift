@@ -39,7 +39,11 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
   }
 
   public func shutdown() {
+    guard container != nil else {
+      return
+    }
     container = nil
+    Memory.clearCache()
   }
 
   public func embed(inputs: [String]) async throws -> [[Float]] {
