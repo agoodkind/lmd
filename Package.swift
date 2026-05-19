@@ -19,6 +19,7 @@ let package = Package(
   products: [
     .library(name: "AppLogger", targets: ["AppLogger"]),
     .library(name: "SwiftLMCore", targets: ["SwiftLMCore"]),
+    .library(name: "SwiftLMTrace", targets: ["SwiftLMTrace"]),
     .library(name: "SwiftLMBackend", targets: ["SwiftLMBackend"]),
     .library(name: "SwiftLMEmbed", targets: ["SwiftLMEmbed"]),
     .library(name: "SwiftLMRuntime", targets: ["SwiftLMRuntime"]),
@@ -52,10 +53,20 @@ let package = Package(
       swiftSettings: strictConcurrency
     ),
     .target(
+      name: "SwiftLMTrace",
+      dependencies: [
+        "AppLogger",
+        .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+      ],
+      path: "Sources/SwiftLMTrace",
+      swiftSettings: strictConcurrency
+    ),
+    .target(
       name: "SwiftLMBackend",
       dependencies: [
         "AppLogger",
         "SwiftLMCore",
+        "SwiftLMTrace",
         .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
         .product(name: "MLXVLM", package: "mlx-swift-lm"),
         .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
@@ -70,6 +81,7 @@ let package = Package(
         "AppLogger",
         "SwiftLMCore",
         "SwiftLMBackend",
+        "SwiftLMTrace",
         .product(name: "MLXEmbedders", package: "mlx-swift-lm"),
         .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
         .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
@@ -84,6 +96,7 @@ let package = Package(
         "AppLogger",
         "SwiftLMCore",
         "SwiftLMBackend",
+        "SwiftLMTrace",
         .product(name: "SMCFanXPCClient", package: "macos-smc-fan"),
       ],
       path: "Sources/SwiftLMRuntime",
@@ -162,6 +175,7 @@ let package = Package(
         "SwiftLMRuntime",
         "SwiftLMMonitor",
         "SwiftLMControl",
+        "SwiftLMTrace",
         "LMDServeSupport",
         .product(name: "Hummingbird", package: "hummingbird"),
         .product(name: "NIOTransportServices", package: "swift-nio-transport-services"),
