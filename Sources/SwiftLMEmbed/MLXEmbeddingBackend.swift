@@ -50,12 +50,12 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
     guard let container else {
       throw MLXEmbeddingRuntimeError.modelNotLoaded
     }
-    return await container.perform { model, tokenizer, pooling in
-      let encoded = inputs.map { tokenizer.encode(text: $0, addSpecialTokens: true) }
+    return await container.perform { context in
+      let encoded = inputs.map { context.tokenizer.encode(text: $0, addSpecialTokens: true) }
       let maxLength = encoded.reduce(into: 1) { acc, elem in
         acc = max(acc, elem.count)
       }
-      let padId = tokenizer.eosTokenId ?? 0
+      let padId = context.tokenizer.eosTokenId ?? 0
       let padded = stacked(
         encoded.map { elem in
           MLXArray(
@@ -63,9 +63,9 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
         })
       let mask = (padded .!= padId)
       let tokenTypes = MLXArray.zeros(like: padded)
-      let modelOutput = model(
+      let modelOutput = context.model(
         padded, positionIds: nil, tokenTypeIds: tokenTypes, attentionMask: mask)
-      let result = pooling(modelOutput, normalize: true, applyLayerNorm: true)
+      let result = context.pooling(modelOutput, normalize: true, applyLayerNorm: true)
       result.eval()
       let batchCount = result.shape[0]
       var rows: [[Float]] = []
