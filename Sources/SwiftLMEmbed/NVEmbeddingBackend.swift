@@ -149,6 +149,12 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
       snapshot: .current()
     )
     runtime = NVEmbeddingRuntime(model: model, tokenizer: tokenizer)
+    // Bound MLX's allocator cache so per-request intermediates do not
+    // accumulate without limit. Data from BackendTrace `phase=tick`
+    // showed `mlx_cache` growing from 4 KB to 40 GB in 80 s of indexing
+    // traffic with `mlx_active` flat at the model weight; this cap holds
+    // the cache near the steady-state working set instead.
+    Memory.cacheLimit = NVEmbeddingBackend.cacheLimitBytes
     log.notice("nv_embedding.loaded model=\(self.descriptor.id, privacy: .public)")
     BackendTrace.notice(
       phase: TracePhase.Embedding.spawnRuntimeReady.rawValue,
@@ -156,6 +162,19 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
       snapshot: .current()
     )
   }
+
+  /// Hard cap on MLX's allocator cache. 2 GiB is large enough to retain
+  /// the typical forward-pass intermediates across requests with similar
+  /// shapes, and small enough to keep total footprint near the model
+  /// weight plus working set.
+  ///
+  /// The value is calibrated against the BackendTrace data captured in
+  /// the `Settle Duplicate-Load vs MLX-Cache` reproduction: without a
+  /// cap, `mlx_cache` climbed from `4 KB` to `40 GB` over 80 seconds of
+  /// indexing traffic; with the cap, it holds in a `2.09 GB - 2.18 GB`
+  /// band. Silently lowering the value risks throughput; silently
+  /// removing the call site reintroduces the leak.
+  static let cacheLimitBytes: Int = 2 * 1024 * 1024 * 1024
 
   public func shutdown() {
     guard runtime != nil else {

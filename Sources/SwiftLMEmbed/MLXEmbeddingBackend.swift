@@ -65,12 +65,19 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
       from: URL(fileURLWithPath: descriptor.path),
       using: #huggingFaceTokenizerLoader()
     )
+    // Bound MLX's allocator cache; see NVEmbeddingBackend for the
+    // rationale and the trace data this is calibrated against.
+    Memory.cacheLimit = MLXEmbeddingBackend.cacheLimitBytes
     BackendTrace.notice(
       phase: TracePhase.Embedding.spawnRuntimeReady.rawValue,
       context: lifecycleContext(),
       snapshot: .current()
     )
   }
+
+  /// Mirrors `NVEmbeddingBackend.cacheLimitBytes`. See the rationale on
+  /// that constant for why this value is the contract.
+  static let cacheLimitBytes: Int = 2 * 1024 * 1024 * 1024
 
   public func shutdown() {
     guard container != nil else {
