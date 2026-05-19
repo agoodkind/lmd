@@ -2,6 +2,9 @@
 //  FanCoordinatorTests.swift
 //  SwiftLMRuntimeTests
 //
+//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-19.
+//  Copyright © 2026
+//
 
 import XCTest
 @testable import SwiftLMRuntime

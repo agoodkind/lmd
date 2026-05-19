@@ -2,6 +2,9 @@
 //  CLICompatibilityTests.swift
 //  IntegrationTests
 //
+//  Created by Alex Goodkind <alex@goodkind.io> on 2026-05-12.
+//  Copyright © 2026
+//
 //  Verifies the single foreground CLI and the compatibility symlinks both
 //  resolve to the expected help surfaces from staged release artifacts.
 //

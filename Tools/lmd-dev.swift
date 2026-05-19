@@ -1,3 +1,11 @@
+//
+//  lmd-dev.swift
+//  lmd-dev
+//
+//  Created by Alex Goodkind <alex@goodkind.io> on 2026-05-10.
+//  Copyright © 2026
+//
+
 import Darwin
 import Foundation
 
@@ -583,8 +591,8 @@ final class DevTool {
   /// staging directory at `Products/Build/<configuration>/`.
   ///
   /// Both halves of the hybrid build write here so `install` can read from
-  /// one location. Throws if SwiftPM did not produce an expected binary —
-  /// the failure message names the missing path so the operator can run
+  /// one location. Throws if SwiftPM did not produce an expected binary.
+  /// The failure message names the missing path so the operator can run
   /// `swift build` standalone to surface the underlying compile error.
   private func stageBuildArtifacts(products: [String], configuration: String) throws {
     let staging = buildDirectory(configuration: configuration)

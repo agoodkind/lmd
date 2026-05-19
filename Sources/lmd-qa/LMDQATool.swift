@@ -1,3 +1,11 @@
+//
+//  LMDQATool.swift
+//  lmd-qa
+//
+//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-19.
+//  Copyright © 2026
+//
+
 // tuiqa: interactive TUI QA driver.
 //
 // Three-layer driver stack:

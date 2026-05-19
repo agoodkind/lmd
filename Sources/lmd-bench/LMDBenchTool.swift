@@ -1,3 +1,11 @@
+//
+//  LMDBenchTool.swift
+//  lmd-bench
+//
+//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-19.
+//  Copyright © 2026
+//
+
 // lmd-bench: MLX inference benchmark orchestrator.
 // Spawns SwiftLM server per model, runs test prompts against its
 // OpenAI-compatible endpoint, saves structured JSON results.

@@ -2,6 +2,9 @@
 //  SensorSampler.swift
 //  SwiftLMMonitor
 //
+//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-19.
+//  Copyright © 2026
+//
 //  Samples the host's macmon + battery + vm_stat + swap + loadavg once
 //  per call and appends one JSONL record to a rolling data file.
 //

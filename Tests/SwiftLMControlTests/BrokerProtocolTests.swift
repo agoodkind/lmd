@@ -2,6 +2,9 @@
 //  BrokerProtocolTests.swift
 //  SwiftLMControlTests
 //
+//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-19.
+//  Copyright © 2026
+//
 //  Round-trips every BrokerRequest/BrokerResponse case through
 //  JSONEncoder + JSONDecoder so an enum-evolution mistake (renamed
 //  case, dropped associated value) fails loudly at build time.

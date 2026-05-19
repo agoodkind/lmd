@@ -2,6 +2,9 @@
 //  XPCBrokerTests.swift
 //  IntegrationTests
 //
+//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-19.
+//  Copyright © 2026
+//
 //  Spawns `lmd-serve`, waits for XPC readiness, and exercises
 //  `health`, `loaded`, `preload`, `embed`, and `unload` over
 //  `BrokerClient`.
