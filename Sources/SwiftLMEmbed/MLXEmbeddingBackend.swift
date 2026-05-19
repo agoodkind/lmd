@@ -13,6 +13,7 @@ import MLXHuggingFace
 import MLXLMCommon
 import SwiftLMBackend
 import SwiftLMCore
+import SwiftLMTrace
 import Tokenizers
 
 public enum MLXEmbeddingRuntimeError: Error {
@@ -31,10 +32,43 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
     self.descriptor = descriptor
   }
 
+  private var traceBackendObjectID: String {
+    TraceContext.backendObjectID(of: self)
+  }
+
+  private func lifecycleContext() -> TraceContext {
+    TraceContext(
+      modelID: descriptor.id,
+      modelKind: .embedding,
+      loadID: TraceTaskLocal.loadID,
+      backendObjectID: traceBackendObjectID
+    )
+  }
+
+  private func requestContext() -> TraceContext {
+    TraceContext(
+      modelID: descriptor.id,
+      modelKind: .embedding,
+      loadID: TraceTaskLocal.loadID,
+      backendObjectID: traceBackendObjectID,
+      requestID: TraceTaskLocal.requestID
+    )
+  }
+
   public func launch() async throws {
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.spawnBegin.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
     container = try await EmbedderModelFactory.shared.loadContainer(
       from: URL(fileURLWithPath: descriptor.path),
       using: #huggingFaceTokenizerLoader()
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.spawnRuntimeReady.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
     )
   }
 
@@ -42,14 +76,36 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
     guard container != nil else {
       return
     }
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.shutdownPre.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
     container = nil
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.shutdownRuntimeNil.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
     Memory.clearCache()
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.shutdownPostClearCache.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
   }
 
   public func embed(inputs: [String]) async throws -> [[Float]] {
     guard let container else {
       throw MLXEmbeddingRuntimeError.modelNotLoaded
     }
+    BackendTrace.debug(
+      phase: TracePhase.Embedding.requestPreTokenize.rawValue,
+      context: requestContext(),
+      snapshot: .current(),
+      extras: ["input_count": "\(inputs.count)"]
+    )
+    let traceCtx = requestContext()
     return await container.perform { context in
       let encoded = inputs.map { context.tokenizer.encode(text: $0, addSpecialTokens: true) }
       let maxLength = encoded.reduce(into: 1) { acc, elem in
@@ -61,18 +117,59 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
           MLXArray(
             elem + Array(repeating: padId, count: maxLength - elem.count))
         })
+      let batchSize = encoded.count
+      let totalTokens = encoded.reduce(0) { $0 + $1.count }
+      let totalSlots = batchSize * maxLength
+      let paddingRatio = totalSlots > 0 ? Double(totalSlots - totalTokens) / Double(totalSlots) : 0.0
+      BackendTrace.debug(
+        phase: TracePhase.Embedding.requestPostTokenize.rawValue,
+        context: traceCtx,
+        snapshot: .current(),
+        extras: [
+          "batch_size": "\(batchSize)",
+          "max_seq_len": "\(maxLength)",
+          "total_tokens": "\(totalTokens)",
+          "padding_ratio": String(format: "%.4f", paddingRatio),
+        ]
+      )
       let mask = (padded .!= padId)
       let tokenTypes = MLXArray.zeros(like: padded)
+      BackendTrace.debug(
+        phase: TracePhase.Embedding.requestPreForward.rawValue,
+        context: traceCtx,
+        snapshot: .current()
+      )
       let modelOutput = context.model(
         padded, positionIds: nil, tokenTypeIds: tokenTypes, attentionMask: mask)
+      BackendTrace.debug(
+        phase: TracePhase.Embedding.requestPostForward.rawValue,
+        context: traceCtx,
+        snapshot: .current()
+      )
       let result = context.pooling(modelOutput, normalize: true, applyLayerNorm: true)
+      BackendTrace.debug(
+        phase: TracePhase.Embedding.requestPostPool.rawValue,
+        context: traceCtx,
+        snapshot: .current()
+      )
       result.eval()
+      BackendTrace.debug(
+        phase: TracePhase.Embedding.requestPostEval.rawValue,
+        context: traceCtx,
+        snapshot: .current()
+      )
       let batchCount = result.shape[0]
       var rows: [[Float]] = []
       rows.reserveCapacity(batchCount)
       for i in 0..<batchCount {
         rows.append(result[i].asArray(Float.self))
       }
+      BackendTrace.debug(
+        phase: TracePhase.Embedding.requestPreReturn.rawValue,
+        context: traceCtx,
+        snapshot: .current(),
+        extras: ["row_count": "\(rows.count)"]
+      )
       return rows
     }
   }

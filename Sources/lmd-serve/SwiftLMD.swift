@@ -22,6 +22,7 @@ import SwiftLMCore
 import SwiftLMEmbed
 import SwiftLMMonitor
 import SwiftLMRuntime
+import SwiftLMTrace
 
 // File-scope os.Logger. `@main` mode forbids top-level expressions, so
 // the `AppLogger.bootstrap` call lives inside `SwiftLMD.main()` below.
@@ -343,6 +344,12 @@ struct SwiftLMD {
     ))
     sampler.start()
 
+    // BackendTrace background ticker. Emits `phase=tick` lines once per
+    // second while any backend is loaded so the trace stream has
+    // time-series memory data independent of request flow.
+    let traceSampler = BackendTraceSampler(router: router)
+    await traceSampler.start()
+
     log.notice("fan_control.disabled reason=moratorium")
 
     // HTTP router
@@ -578,14 +585,42 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
     )
   }
 
-  let requestID = UUID().uuidString
-  log.notice("embedding.request_started request_id=\(requestID, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public)")
+  let requestID = UUID()
+  let requestIDString = requestID.uuidString
+  let receivedContext = TraceContext(
+    modelID: descriptor.id,
+    modelKind: .embedding,
+    requestID: requestID
+  )
+  BackendTrace.notice(
+    phase: TracePhase.Broker.requestReceived.rawValue,
+    context: receivedContext,
+    snapshot: .current(),
+    extras: ["transport": "http", "input_count": "\(inputs.count)"]
+  )
+  log.notice("embedding.request_started request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public)")
+  BackendTrace.notice(
+    phase: TracePhase.Broker.requestStarted.rawValue,
+    context: receivedContext,
+    snapshot: .current(),
+    extras: ["transport": "http", "input_count": "\(inputs.count)"]
+  )
 
   let backend: EmbeddingBackendProtocol
   do {
     backend = try await state.router.routeEmbeddingAndBegin(descriptor)
   } catch let err as ModelRouter.RouteError {
-    log.error("embedding.request_failed request_id=\(requestID, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=route err=\(String(describing: err), privacy: .public)")
+    log.error("embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=route err=\(String(describing: err), privacy: .public)")
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestFailed.rawValue,
+      context: receivedContext,
+      snapshot: .current(),
+      extras: [
+        "transport": "http",
+        "stage": "route",
+        "error": String(describing: err),
+      ]
+    )
     switch err {
     case .cannotFitInBudget:
       return errorResponse(
@@ -631,12 +666,44 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
       )
     }
   }
+
+  let routerInfo = await state.router.embeddingLoadInfo(modelID: descriptor.id)
+  let routedContext = TraceContext(
+    modelID: descriptor.id,
+    modelKind: .embedding,
+    loadID: routerInfo?.loadID,
+    backendObjectID: routerInfo?.backendObjectID,
+    requestID: requestID
+  )
+  BackendTrace.notice(
+    phase: TracePhase.Broker.requestRouted.rawValue,
+    context: routedContext,
+    snapshot: .current(),
+    extras: ["transport": "http"]
+  )
+
   let vectors: [[Float]]
   do {
-    vectors = try await backend.embed(inputs: inputs)
+    vectors = try await TraceTaskLocal.$requestID.withValue(requestID) {
+      try await TraceTaskLocal.$loadID.withValue(routerInfo?.loadID) {
+        try await TraceTaskLocal.$backendObjectID.withValue(routerInfo?.backendObjectID) {
+          try await backend.embed(inputs: inputs)
+        }
+      }
+    }
   } catch {
     await state.router.embeddingRequestDone(modelID: descriptor.id)
-    log.error("embedding.request_failed request_id=\(requestID, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=embed err=\(String(describing: error), privacy: .public)")
+    log.error("embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=embed err=\(String(describing: error), privacy: .public)")
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestFailed.rawValue,
+      context: routedContext,
+      snapshot: .current(),
+      extras: [
+        "transport": "http",
+        "stage": "embed",
+        "error": String(describing: error),
+      ]
+    )
     return errorResponse(
       status: .serviceUnavailable,
       message: "embedding failed: \(error)",
@@ -644,7 +711,19 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
     )
   }
   await state.router.embeddingRequestDone(modelID: descriptor.id)
-  log.notice("embedding.request_completed request_id=\(requestID, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) vectors=\(vectors.count, privacy: .public)")
+  BackendTrace.notice(
+    phase: TracePhase.Broker.requestDoneAck.rawValue,
+    context: routedContext,
+    snapshot: .current(),
+    extras: ["transport": "http", "vectors": "\(vectors.count)"]
+  )
+  log.notice("embedding.request_completed request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) vectors=\(vectors.count, privacy: .public)")
+  BackendTrace.notice(
+    phase: TracePhase.Broker.requestCompleted.rawValue,
+    context: routedContext,
+    snapshot: .current(),
+    extras: ["transport": "http", "vectors": "\(vectors.count)"]
+  )
 
   struct EmbRow: Codable {
     let object: String
@@ -671,6 +750,12 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
     usage: .init(prompt_tokens: 0, total_tokens: 0)
   )
   let data = try JSONEncoder().encode(out)
+  BackendTrace.notice(
+    phase: TracePhase.Broker.requestResponseSent.rawValue,
+    context: routedContext,
+    snapshot: .current(),
+    extras: ["transport": "http", "bytes": "\(data.count)"]
+  )
   return Response(
     status: .ok,
     headers: [.contentType: "application/json"],

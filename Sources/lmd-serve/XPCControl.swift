@@ -24,6 +24,7 @@ import SwiftLMBackend
 import SwiftLMControl
 import SwiftLMCore
 import SwiftLMRuntime
+import SwiftLMTrace
 import XPC
 
 private let log = AppLogger.logger(category: "XPCControl")
@@ -221,24 +222,102 @@ private final class SessionHandler: @unchecked Sendable {
       "model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public)"
     )
     defer { signposter.endInterval("xpc.embed", intervalState) }
-    let requestID = UUID().uuidString
-    log.notice("embedding.request_started request_id=\(requestID, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public)")
+    let requestID = UUID()
+    let requestIDString = requestID.uuidString
+    let receivedContext = TraceContext(
+      modelID: descriptor.id,
+      modelKind: .embedding,
+      requestID: requestID
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestReceived.rawValue,
+      context: receivedContext,
+      snapshot: .current(),
+      extras: ["transport": "xpc", "input_count": "\(inputs.count)"]
+    )
+    log.notice("embedding.request_started request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public)")
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestStarted.rawValue,
+      context: receivedContext,
+      snapshot: .current(),
+      extras: ["transport": "xpc", "input_count": "\(inputs.count)"]
+    )
 
     let backend: EmbeddingBackendProtocol
     do {
       backend = try await state.router.routeEmbeddingAndBegin(descriptor)
     } catch {
-      log.error("embedding.request_failed request_id=\(requestID, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=route err=\(String(describing: error), privacy: .public)")
+      log.error("embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=route err=\(String(describing: error), privacy: .public)")
+      BackendTrace.notice(
+        phase: TracePhase.Broker.requestFailed.rawValue,
+        context: receivedContext,
+        snapshot: .current(),
+        extras: [
+          "transport": "xpc",
+          "stage": "route",
+          "error": String(describing: error),
+        ]
+      )
       return .error(BrokerError(kind: .embeddingFailed, message: "route: \(error)"))
     }
+
+    let routerInfo = await state.router.embeddingLoadInfo(modelID: descriptor.id)
+    let routedContext = TraceContext(
+      modelID: descriptor.id,
+      modelKind: .embedding,
+      loadID: routerInfo?.loadID,
+      backendObjectID: routerInfo?.backendObjectID,
+      requestID: requestID
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestRouted.rawValue,
+      context: routedContext,
+      snapshot: .current(),
+      extras: ["transport": "xpc"]
+    )
+
     do {
-      let vectors = try await backend.embed(inputs: inputs)
+      let vectors = try await TraceTaskLocal.$requestID.withValue(requestID) {
+        try await TraceTaskLocal.$loadID.withValue(routerInfo?.loadID) {
+          try await TraceTaskLocal.$backendObjectID.withValue(routerInfo?.backendObjectID) {
+            try await backend.embed(inputs: inputs)
+          }
+        }
+      }
       await state.router.embeddingRequestDone(modelID: descriptor.id)
-      log.notice("embedding.request_completed request_id=\(requestID, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) vectors=\(vectors.count, privacy: .public)")
+      BackendTrace.notice(
+        phase: TracePhase.Broker.requestDoneAck.rawValue,
+        context: routedContext,
+        snapshot: .current(),
+        extras: ["transport": "xpc", "vectors": "\(vectors.count)"]
+      )
+      log.notice("embedding.request_completed request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) vectors=\(vectors.count, privacy: .public)")
+      BackendTrace.notice(
+        phase: TracePhase.Broker.requestCompleted.rawValue,
+        context: routedContext,
+        snapshot: .current(),
+        extras: ["transport": "xpc", "vectors": "\(vectors.count)"]
+      )
+      BackendTrace.notice(
+        phase: TracePhase.Broker.requestResponseSent.rawValue,
+        context: routedContext,
+        snapshot: .current(),
+        extras: ["transport": "xpc", "vectors": "\(vectors.count)"]
+      )
       return .embeddings(vectors)
     } catch {
       await state.router.embeddingRequestDone(modelID: descriptor.id)
-      log.error("embedding.request_failed request_id=\(requestID, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=embed err=\(String(describing: error), privacy: .public)")
+      log.error("embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=embed err=\(String(describing: error), privacy: .public)")
+      BackendTrace.notice(
+        phase: TracePhase.Broker.requestFailed.rawValue,
+        context: routedContext,
+        snapshot: .current(),
+        extras: [
+          "transport": "xpc",
+          "stage": "embed",
+          "error": String(describing: error),
+        ]
+      )
       return .error(BrokerError(kind: .embeddingFailed, message: "\(error)"))
     }
   }

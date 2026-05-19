@@ -14,6 +14,7 @@ import MLXLMCommon
 import MLXNN
 import SwiftLMBackend
 import SwiftLMCore
+import SwiftLMTrace
 import Tokenizers
 
 private let log = AppLogger.logger(category: "NVEmbeddingBackend")
@@ -89,40 +90,145 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
     self.metadata = metadata
   }
 
+  private var traceBackendObjectID: String {
+    TraceContext.backendObjectID(of: self)
+  }
+
+  private func lifecycleContext() -> TraceContext {
+    TraceContext(
+      modelID: descriptor.id,
+      modelKind: .embedding,
+      loadID: TraceTaskLocal.loadID,
+      backendObjectID: traceBackendObjectID
+    )
+  }
+
+  private func requestContext() -> TraceContext {
+    TraceContext(
+      modelID: descriptor.id,
+      modelKind: .embedding,
+      loadID: TraceTaskLocal.loadID,
+      backendObjectID: traceBackendObjectID,
+      requestID: TraceTaskLocal.requestID
+    )
+  }
+
   public func launch() async throws {
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.spawnBegin.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
     let modelDirectory = URL(fileURLWithPath: descriptor.path)
     let data = try Data(contentsOf: modelDirectory.appendingPathComponent("config.json"))
     let configuration = try JSONDecoder().decode(
       NVMistralBiDirectionalConfiguration.self,
       from: data
     )
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.spawnConfigParsed.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
     let model = NVMistralBiDirectionalModel(configuration)
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.spawnModelConstructed.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
     try loadWeights(modelDirectory: modelDirectory, model: model)
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.spawnWeightsLoaded.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
     let tokenizer = try await #huggingFaceTokenizerLoader().load(from: modelDirectory)
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.spawnTokenizerLoaded.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
     runtime = NVEmbeddingRuntime(model: model, tokenizer: tokenizer)
     log.notice("nv_embedding.loaded model=\(self.descriptor.id, privacy: .public)")
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.spawnRuntimeReady.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
   }
 
   public func shutdown() {
     guard runtime != nil else {
       return
     }
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.shutdownPre.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
     runtime = nil
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.shutdownRuntimeNil.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
     Memory.clearCache()
+    BackendTrace.notice(
+      phase: TracePhase.Embedding.shutdownPostClearCache.rawValue,
+      context: lifecycleContext(),
+      snapshot: .current()
+    )
   }
 
   public func embed(inputs: [String]) async throws -> [[Float]] {
     guard let runtime else {
       throw NVEmbeddingRuntimeError.modelNotLoaded
     }
+    BackendTrace.debug(
+      phase: TracePhase.Embedding.requestPreTokenize.rawValue,
+      context: requestContext(),
+      snapshot: .current(),
+      extras: ["input_count": "\(inputs.count)"]
+    )
     let batch = tokenize(inputs: inputs, tokenizer: runtime.tokenizer)
+    BackendTrace.debug(
+      phase: TracePhase.Embedding.requestPostTokenize.rawValue,
+      context: requestContext(),
+      snapshot: .current(),
+      extras: [
+        "batch_size": "\(batch.stats.batchSize)",
+        "max_seq_len": "\(batch.stats.maxSeqLen)",
+        "total_tokens": "\(batch.stats.totalTokens)",
+        "padding_ratio": String(format: "%.4f", batch.stats.paddingRatio),
+      ]
+    )
+    BackendTrace.debug(
+      phase: TracePhase.Embedding.requestPreForward.rawValue,
+      context: requestContext(),
+      snapshot: .current()
+    )
     let hiddenStates = runtime.model(batch.inputIDs, attentionMask: batch.attentionMask)
+    BackendTrace.debug(
+      phase: TracePhase.Embedding.requestPostForward.rawValue,
+      context: requestContext(),
+      snapshot: .current()
+    )
     let pooled = Self.poolHiddenStates(
       hiddenStates: hiddenStates,
       attentionMask: batch.attentionMask,
       metadata: metadata
     )
+    BackendTrace.debug(
+      phase: TracePhase.Embedding.requestPostPool.rawValue,
+      context: requestContext(),
+      snapshot: .current()
+    )
     pooled.eval()
+    BackendTrace.debug(
+      phase: TracePhase.Embedding.requestPostEval.rawValue,
+      context: requestContext(),
+      snapshot: .current()
+    )
 
     let batchCount = pooled.shape[0]
     var rows: [[Float]] = []
@@ -130,6 +236,12 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
     for i in 0..<batchCount {
       rows.append(pooled[i].asArray(Float.self))
     }
+    BackendTrace.debug(
+      phase: TracePhase.Embedding.requestPreReturn.rawValue,
+      context: requestContext(),
+      snapshot: .current(),
+      extras: ["row_count": "\(rows.count)"]
+    )
     return rows
   }
 
@@ -166,9 +278,20 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
         maskRows.append(contentsOf: Array(repeating: 0, count: padCount))
       }
     }
+    let batchSize = encodedInputs.count
+    let totalTokens = encodedInputs.reduce(0) { $0 + $1.count }
+    let totalSlots = batchSize * maxLength
+    let paddingRatio = totalSlots > 0 ? Double(totalSlots - totalTokens) / Double(totalSlots) : 0.0
+    let stats = NVEmbeddingBatchStats(
+      batchSize: batchSize,
+      maxSeqLen: maxLength,
+      totalTokens: totalTokens,
+      paddingRatio: paddingRatio
+    )
     return NVEmbeddingBatch(
       inputIDs: MLXArray(tokenRows).reshaped(encodedInputs.count, maxLength),
-      attentionMask: MLXArray(maskRows).reshaped(encodedInputs.count, maxLength)
+      attentionMask: MLXArray(maskRows).reshaped(encodedInputs.count, maxLength),
+      stats: stats
     )
   }
 
@@ -195,6 +318,14 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
 struct NVEmbeddingBatch {
   let inputIDs: MLXArray
   let attentionMask: MLXArray
+  let stats: NVEmbeddingBatchStats
+}
+
+struct NVEmbeddingBatchStats: Sendable {
+  let batchSize: Int
+  let maxSeqLen: Int
+  let totalTokens: Int
+  let paddingRatio: Double
 }
 
 private struct NVEmbeddingRuntime {

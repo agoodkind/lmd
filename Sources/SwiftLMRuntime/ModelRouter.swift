@@ -10,6 +10,7 @@ import AppLogger
 import Foundation
 import SwiftLMBackend
 import SwiftLMCore
+import SwiftLMTrace
 
 private let log = AppLogger.logger(category: "ModelRouter")
 
@@ -34,10 +35,14 @@ public typealias EmbeddingSpawner = @Sendable (_ model: ModelDescriptor) async t
 
 private struct LoadedEntry: Sendable {
   let backend: SwiftLMBackendProtocol
+  let loadID: UUID
+  let backendObjectID: String
   var lastUsed: Date
   var inFlight: Int
   init(backend: SwiftLMBackendProtocol) {
     self.backend = backend
+    self.loadID = UUID()
+    self.backendObjectID = TraceContext.backendObjectID(of: backend)
     self.lastUsed = Date()
     self.inFlight = 0
   }
@@ -45,10 +50,14 @@ private struct LoadedEntry: Sendable {
 
 private struct EmbeddingLoadedEntry: Sendable {
   let backend: EmbeddingBackendProtocol
+  let loadID: UUID
+  let backendObjectID: String
   var lastUsed: Date
   var inFlight: Int
-  init(backend: EmbeddingBackendProtocol) {
+  init(backend: EmbeddingBackendProtocol, loadID: UUID) {
     self.backend = backend
+    self.loadID = loadID
+    self.backendObjectID = TraceContext.backendObjectID(of: backend)
     self.lastUsed = Date()
     self.inFlight = 0
   }
@@ -154,6 +163,72 @@ public actor ModelRouter {
     return Snapshot(loaded: cands, allocatedBytes: total)
   }
 
+  // MARK: - Trace identity
+
+  /// Identity record for a single loaded backend (chat or embedding). Used by
+  /// the broker layer to attach `load_id` and `backend_obj` fields to its
+  /// per-request trace lines, and by the background sampler to enumerate
+  /// currently resident backends.
+  public struct LoadedModelInfo: Sendable {
+    public let modelID: String
+    public let kind: BackendKind
+    public let loadID: UUID
+    public let backendObjectID: String
+
+    public init(modelID: String, kind: BackendKind, loadID: UUID, backendObjectID: String) {
+      self.modelID = modelID
+      self.kind = kind
+      self.loadID = loadID
+      self.backendObjectID = backendObjectID
+    }
+  }
+
+  /// Return `(loadID, backendObjectID)` for a loaded chat backend, or `nil`.
+  public func chatLoadInfo(modelID: String) -> (loadID: UUID, backendObjectID: String)? {
+    guard let entry = loaded[modelID] else {
+      return nil
+    }
+    return (entry.loadID, entry.backendObjectID)
+  }
+
+  /// Return `(loadID, backendObjectID)` for a loaded embedding backend, or `nil`.
+  ///
+  /// Returns `nil` for an embedding still in the `.loading` state because no
+  /// backend instance exists yet to identify.
+  public func embeddingLoadInfo(modelID: String) -> (loadID: UUID, backendObjectID: String)? {
+    guard let state = embeddingRoutes[modelID], case .loaded(let entry) = state else {
+      return nil
+    }
+    return (entry.loadID, entry.backendObjectID)
+  }
+
+  /// Enumerate every currently resident backend.
+  public func loadedModelInfos() -> [LoadedModelInfo] {
+    var infos: [LoadedModelInfo] = []
+    for entry in loaded.values {
+      infos.append(
+        LoadedModelInfo(
+          modelID: entry.backend.modelID,
+          kind: .chat,
+          loadID: entry.loadID,
+          backendObjectID: entry.backendObjectID
+        ))
+    }
+    for state in embeddingRoutes.values {
+      guard case .loaded(let entry) = state else {
+        continue
+      }
+      infos.append(
+        LoadedModelInfo(
+          modelID: entry.backend.modelID,
+          kind: .embedding,
+          loadID: entry.loadID,
+          backendObjectID: entry.backendObjectID
+        ))
+    }
+    return infos
+  }
+
   // MARK: - Routing chat
 
   public enum RouteError: Error, Equatable {
@@ -167,6 +242,25 @@ public actor ModelRouter {
   }
 
   public func routeAndBegin(_ model: ModelDescriptor) throws -> SwiftLMBackendProtocol {
+    BackendTrace.notice(
+      phase: TracePhase.Router.routeBegin.rawValue,
+      context: TraceContext(modelID: model.id, modelKind: .chat),
+      snapshot: .current()
+    )
+    var resultLoadID: UUID? = nil
+    var resultBackendObj: String? = nil
+    defer {
+      BackendTrace.notice(
+        phase: TracePhase.Router.routeEnd.rawValue,
+        context: TraceContext(
+          modelID: model.id,
+          modelKind: .chat,
+          loadID: resultLoadID,
+          backendObjectID: resultBackendObj
+        ),
+        snapshot: .current()
+      )
+    }
     guard model.kind != .embedding else {
       throw RouteError.wrongKindForChat(modelID: model.id)
     }
@@ -174,6 +268,8 @@ public actor ModelRouter {
       entry.lastUsed = Date()
       entry.inFlight += 1
       loaded[model.id] = entry
+      resultLoadID = entry.loadID
+      resultBackendObj = entry.backendObjectID
       return entry.backend
     }
 
@@ -211,7 +307,20 @@ public actor ModelRouter {
     var entry = LoadedEntry(backend: backend)
     entry.inFlight = 1
     loaded[model.id] = entry
+    resultLoadID = entry.loadID
+    resultBackendObj = entry.backendObjectID
     log.notice("router.model_spawned model=\(model.id, privacy: .public) port=\(port, privacy: .public)")
+    BackendTrace.notice(
+      phase: TracePhase.Router.modelSpawned.rawValue,
+      context: TraceContext(
+        modelID: model.id,
+        modelKind: .chat,
+        loadID: entry.loadID,
+        backendObjectID: entry.backendObjectID
+      ),
+      snapshot: .current(),
+      extras: ["port": "\(port)"]
+    )
     eventSink(.modelSpawned(modelID: model.id, port: port))
     return backend
   }
@@ -219,6 +328,25 @@ public actor ModelRouter {
   // MARK: - Routing embeddings
 
   public func routeEmbeddingAndBegin(_ model: ModelDescriptor) async throws -> EmbeddingBackendProtocol {
+    BackendTrace.notice(
+      phase: TracePhase.Router.routeBegin.rawValue,
+      context: TraceContext(modelID: model.id, modelKind: .embedding),
+      snapshot: .current()
+    )
+    var resultLoadID: UUID? = nil
+    var resultBackendObj: String? = nil
+    defer {
+      BackendTrace.notice(
+        phase: TracePhase.Router.routeEnd.rawValue,
+        context: TraceContext(
+          modelID: model.id,
+          modelKind: .embedding,
+          loadID: resultLoadID,
+          backendObjectID: resultBackendObj
+        ),
+        snapshot: .current()
+      )
+    }
     guard model.kind == .embedding else {
       throw RouteError.wrongKindForEmbedding(modelID: model.id)
     }
@@ -232,10 +360,17 @@ public actor ModelRouter {
         entry.lastUsed = Date()
         entry.inFlight += 1
         embeddingRoutes[model.id] = .loaded(entry)
+        resultLoadID = entry.loadID
+        resultBackendObj = entry.backendObjectID
         return entry.backend
       case .loading(let loading):
         log.debug("router.embedding_load_wait model=\(model.id, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)")
-        return try await finishEmbeddingLoad(model: model, loading: loading)
+        let backend = try await finishEmbeddingLoad(model: model, loading: loading)
+        if let info = embeddingLoadInfo(modelID: model.id) {
+          resultLoadID = info.loadID
+          resultBackendObj = info.backendObjectID
+        }
+        return backend
       }
     }
 
@@ -258,7 +393,12 @@ public actor ModelRouter {
     }
     let loading = EmbeddingLoadingEntry(task: loadTask)
     embeddingRoutes[model.id] = .loading(loading)
-    return try await finishEmbeddingLoad(model: model, loading: loading)
+    let backend = try await finishEmbeddingLoad(model: model, loading: loading)
+    if let info = embeddingLoadInfo(modelID: model.id) {
+      resultLoadID = info.loadID
+      resultBackendObj = info.backendObjectID
+    }
+    return backend
   }
 
   public func requestDone(modelID: String) {
@@ -270,6 +410,17 @@ public actor ModelRouter {
     entry.lastUsed = Date()
     loaded[modelID] = entry
     log.debug("router.request_done model=\(modelID, privacy: .public) in_flight=\(entry.inFlight, privacy: .public)")
+    BackendTrace.debug(
+      phase: TracePhase.Router.requestDone.rawValue,
+      context: TraceContext(
+        modelID: modelID,
+        modelKind: .chat,
+        loadID: entry.loadID,
+        backendObjectID: entry.backendObjectID
+      ),
+      snapshot: .current(),
+      extras: ["inflight": "\(entry.inFlight)"]
+    )
   }
 
   public func embeddingRequestDone(modelID: String) {
@@ -287,6 +438,17 @@ public actor ModelRouter {
     entry.lastUsed = Date()
     embeddingRoutes[modelID] = .loaded(entry)
     log.debug("router.embedding_request_done model=\(modelID, privacy: .public) in_flight=\(entry.inFlight, privacy: .public)")
+    BackendTrace.debug(
+      phase: TracePhase.Router.embeddingRequestDone.rawValue,
+      context: TraceContext(
+        modelID: modelID,
+        modelKind: .embedding,
+        loadID: entry.loadID,
+        backendObjectID: entry.backendObjectID
+      ),
+      snapshot: .current(),
+      extras: ["inflight": "\(entry.inFlight)"]
+    )
   }
 
   public func unload(modelID: String) {
@@ -302,12 +464,30 @@ public actor ModelRouter {
       let port = entry.backend.port
       allocatedPorts.remove(port)
       entry.backend.shutdown()
+      let traceCtx = TraceContext(
+        modelID: modelID,
+        modelKind: .chat,
+        loadID: entry.loadID,
+        backendObjectID: entry.backendObjectID
+      )
       switch disposition {
       case .unloaded:
         log.notice("router.model_unloaded model=\(modelID, privacy: .public) port=\(port, privacy: .public)")
+        BackendTrace.notice(
+          phase: TracePhase.Router.modelUnloaded.rawValue,
+          context: traceCtx,
+          snapshot: .current(),
+          extras: ["port": "\(port)", "reason": "unloaded"]
+        )
         eventSink(.modelUnloaded(modelID: modelID, port: port))
       case .evicted:
         log.notice("router.model_evicted model=\(modelID, privacy: .public) port=\(port, privacy: .public)")
+        BackendTrace.notice(
+          phase: TracePhase.Router.modelEvicted.rawValue,
+          context: traceCtx,
+          snapshot: .current(),
+          extras: ["port": "\(port)", "reason": "evicted"]
+        )
         eventSink(.modelEvicted(modelID: modelID, port: port))
       }
       return
@@ -316,12 +496,30 @@ public actor ModelRouter {
       switch state {
       case .loaded(let entry):
         entry.backend.shutdown()
+        let traceCtx = TraceContext(
+          modelID: modelID,
+          modelKind: .embedding,
+          loadID: entry.loadID,
+          backendObjectID: entry.backendObjectID
+        )
         switch disposition {
         case .unloaded:
           log.notice("router.embedding_unloaded model=\(modelID, privacy: .public)")
+          BackendTrace.notice(
+            phase: TracePhase.Router.embeddingUnloaded.rawValue,
+            context: traceCtx,
+            snapshot: .current(),
+            extras: ["reason": "unloaded"]
+          )
           eventSink(.embeddingUnloaded(modelID: modelID))
         case .evicted:
           log.notice("router.embedding_evicted model=\(modelID, privacy: .public)")
+          BackendTrace.notice(
+            phase: TracePhase.Router.embeddingEvicted.rawValue,
+            context: traceCtx,
+            snapshot: .current(),
+            extras: ["reason": "evicted"]
+          )
           eventSink(.embeddingEvicted(modelID: modelID))
         }
       case .loading(let loading):
@@ -378,10 +576,20 @@ public actor ModelRouter {
       embeddingRoutes[model.id] = .loaded(entry)
       return entry.backend
     case .loading(let current) where current.id == loading.id:
-      var entry = EmbeddingLoadedEntry(backend: backend)
+      var entry = EmbeddingLoadedEntry(backend: backend, loadID: loading.id)
       entry.inFlight = 1
       embeddingRoutes[model.id] = .loaded(entry)
       log.notice("router.embedding_spawned model=\(model.id, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)")
+      BackendTrace.notice(
+        phase: TracePhase.Router.embeddingSpawned.rawValue,
+        context: TraceContext(
+          modelID: model.id,
+          modelKind: .embedding,
+          loadID: entry.loadID,
+          backendObjectID: entry.backendObjectID
+        ),
+        snapshot: .current()
+      )
       eventSink(.embeddingSpawned(modelID: model.id))
       return backend
     case .loading:
