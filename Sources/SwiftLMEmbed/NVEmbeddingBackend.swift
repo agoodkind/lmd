@@ -174,7 +174,7 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
   /// indexing traffic; with the cap, it holds in a `2.09 GB - 2.18 GB`
   /// band. Silently lowering the value risks throughput; silently
   /// removing the call site reintroduces the leak.
-  static let cacheLimitBytes: Int = 2 * 1024 * 1024 * 1024
+  static var cacheLimitBytes: Int { configuredEmbeddingCacheLimitBytes() }
 
   public func shutdown() {
     guard runtime != nil else {

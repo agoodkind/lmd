@@ -128,11 +128,15 @@ public final class BrokerClient: @unchecked Sendable {
     }
   }
 
-  public func preload(model: String) async throws {
-    let reply = try await sendForReply(.preload(model: model))
+  public func preload(model: String) async throws -> ModelLoadResponse {
+    try await preload(request: ModelLoadRequest(model: model))
+  }
+
+  public func preload(request: ModelLoadRequest) async throws -> ModelLoadResponse {
+    let reply = try await sendForReply(.preload(request: request))
     switch reply {
-    case .preloaded:
-      return
+    case .preloaded(let response):
+      return response
     case .error(let err):
       throw err
     default:
@@ -140,11 +144,15 @@ public final class BrokerClient: @unchecked Sendable {
     }
   }
 
-  public func unload(model: String) async throws {
-    let reply = try await sendForReply(.unload(model: model))
+  public func unload(model: String) async throws -> ModelUnloadResponse {
+    try await unload(request: ModelUnloadRequest(model: model))
+  }
+
+  public func unload(request: ModelUnloadRequest) async throws -> ModelUnloadResponse {
+    let reply = try await sendForReply(.unload(request: request))
     switch reply {
-    case .unloaded:
-      return
+    case .unloaded(let response):
+      return response
     case .error(let err):
       throw err
     default:

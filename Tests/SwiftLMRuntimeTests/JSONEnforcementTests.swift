@@ -37,16 +37,35 @@ final class JSONEnforcementTests: XCTestCase {
     XCTAssertNil(injectJSONInstructionIfNeeded(&json))
   }
 
-  func testSystemAlreadyMentionsJSONIsNoOp() {
+  func testSystemMentioningJSONStillGetsJSONSchemaInstruction() {
+    let schemaBody: [String: Any] = [
+      "type": "object",
+      "properties": ["name": ["type": "string"]],
+      "required": ["name"],
+    ]
     var json = body([
       "model": "x",
       "messages": [
         ["role": "system", "content": "You are helpful. Return JSON only."],
         ["role": "user", "content": "hi"],
       ],
-      "response_format": ["type": "json_object"],
+      "response_format": [
+        "type": "json_schema",
+        "json_schema": [
+          "name": "Person",
+          "schema": schemaBody,
+        ],
+      ],
     ])
-    XCTAssertNil(injectJSONInstructionIfNeeded(&json))
+    let out = injectJSONInstructionIfNeeded(&json)
+    XCTAssertNotNil(out)
+
+    let parsed = decode(out)
+    let messages = parsed?["messages"] as? [[String: Any]] ?? []
+    let sysContent = (messages.first?["content"] as? String) ?? ""
+    XCTAssertTrue(sysContent.contains("Return JSON only."))
+    XCTAssertTrue(sysContent.contains("You MUST respond with a single valid JSON value."))
+    XCTAssertTrue(sysContent.contains("conform to this JSON schema"))
   }
 
   // MARK: - Injection paths
@@ -134,5 +153,33 @@ final class JSONEnforcementTests: XCTestCase {
     let sysContent = (messages.first?["content"] as? String) ?? ""
     XCTAssertTrue(sysContent.contains("JSON"))
     XCTAssertFalse(sysContent.contains("conform to this JSON schema"))
+  }
+
+  func testExactExistingJSONSchemaInstructionIsNoOp() {
+    let schemaBody: [String: Any] = [
+      "type": "object",
+      "properties": ["name": ["type": "string"]],
+      "required": ["name"],
+    ]
+    var json = body([
+      "model": "x",
+      "messages": [["role": "user", "content": "hi"]],
+      "response_format": [
+        "type": "json_schema",
+        "json_schema": [
+          "name": "Person",
+          "schema": schemaBody,
+        ],
+      ],
+    ])
+    let first = injectJSONInstructionIfNeeded(&json)
+    let parsed = decode(first)
+    XCTAssertNotNil(parsed)
+
+    guard var rewritten = parsed else {
+      XCTFail("expected rewritten payload")
+      return
+    }
+    XCTAssertNil(injectJSONInstructionIfNeeded(&rewritten))
   }
 }

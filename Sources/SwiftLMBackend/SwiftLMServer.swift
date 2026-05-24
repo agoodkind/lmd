@@ -7,6 +7,7 @@
 //
 
 import AppLogger
+import Darwin
 import Foundation
 
 private let log = AppLogger.logger(category: "SwiftLMServer")
@@ -119,7 +120,8 @@ public final class SwiftLMServer {
     let p = Process()
     p.launchPath = config.binaryPath
     // MLX looks for default.metallib relative to cwd, so cd into the binary's dir.
-    p.currentDirectoryURL = URL(fileURLWithPath: (config.binaryPath as NSString).deletingLastPathComponent)
+    p.currentDirectoryURL = URL(
+      fileURLWithPath: (config.binaryPath as NSString).deletingLastPathComponent)
 
     var args = ["--model", model, "--port", "\(config.port)", "--host", config.host]
     if thinking {
@@ -140,26 +142,14 @@ public final class SwiftLMServer {
 
     // Mirror stdout/stderr to the configured log file, in append mode.
     if let logPath = config.logFilePath {
-      if !FileManager.default.fileExists(atPath: logPath) {
-        FileManager.default.createFile(atPath: logPath, contents: nil)
-      }
-      let fd = open(logPath, O_WRONLY | O_APPEND | O_CREAT, 0o644)
-      if fd >= 0 {
-        let logFH = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        so.fileHandleForReading.readabilityHandler = { h in
-          let d = h.availableData
-          if !d.isEmpty { logFH.write(d) }
-        }
-        se.fileHandleForReading.readabilityHandler = { h in
-          let d = h.availableData
-          if !d.isEmpty { logFH.write(d) }
-        }
-      }
+      attachLogFile(path: logPath, stdout: so, stderr: se)
     }
 
     try p.run()
     self.process = p
-    log.notice("server.spawned pid=\(p.processIdentifier, privacy: .public) model=\(self.model, privacy: .public) port=\(self.config.port, privacy: .public)")
+    log.notice(
+      "server.spawned pid=\(p.processIdentifier, privacy: .public) model=\(self.model, privacy: .public) port=\(self.config.port, privacy: .public)"
+    )
     logSink("swiftlm-server pid=\(p.processIdentifier) model=\(model) port=\(config.port)")
   }
 
@@ -218,6 +208,42 @@ public final class SwiftLMServer {
   /// True while the underlying process is alive.
   public var isRunning: Bool {
     process?.isRunning ?? false
+  }
+
+  private func attachLogFile(path: String, stdout: Pipe, stderr: Pipe) {
+    let logURL = URL(fileURLWithPath: path)
+    let directoryURL = logURL.deletingLastPathComponent()
+    do {
+      try FileManager.default.createDirectory(
+        at: directoryURL,
+        withIntermediateDirectories: true
+      )
+    } catch {
+      log.error(
+        "server.log_file_prepare_failed path=\(path, privacy: .public) err=\(String(describing: error), privacy: .public)"
+      )
+      return
+    }
+
+    let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+    guard fd >= 0 else {
+      let errorNumber = errno
+      log.error(
+        "server.log_file_open_failed path=\(path, privacy: .public) errno=\(errorNumber, privacy: .public)"
+      )
+      return
+    }
+
+    let logFileHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+    stdout.fileHandleForReading.readabilityHandler = { handle in
+      let data = handle.availableData
+      if !data.isEmpty { logFileHandle.write(data) }
+    }
+    stderr.fileHandleForReading.readabilityHandler = { handle in
+      let data = handle.availableData
+      if !data.isEmpty { logFileHandle.write(data) }
+    }
+    log.notice("server.log_file_attached path=\(path, privacy: .public)")
   }
 }
 

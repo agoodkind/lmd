@@ -10,6 +10,8 @@ import AppLogger
 import Foundation
 
 private let log = AppLogger.logger(category: "JSONEnforcement")
+private let jsonInstructionPrefix =
+  "You MUST respond with a single valid JSON value."
 
 // MARK: - JSON enforcement middleware
 
@@ -33,7 +35,7 @@ public func injectJSONInstructionIfNeeded(_ json: inout [String: Any]) -> Data? 
   else { return nil }
 
   var instruction = """
-You MUST respond with a single valid JSON value. Do not include prose, \
+\(jsonInstructionPrefix) Do not include prose, \
 preamble, apology, or markdown code fences. The entire response must \
 parse with a standard JSON parser on the first try.
 """
@@ -50,12 +52,11 @@ parse with a standard JSON parser on the first try.
   if let idx = messages.firstIndex(where: { ($0["role"] as? String) == "system" }) {
     var msg = messages[idx]
     let existing = (msg["content"] as? String) ?? ""
-    if !existing.lowercased().contains("json") {
-      msg["content"] = existing + "\n\n" + instruction
-      messages[idx] = msg
-    } else {
-      return nil  // caller already covered it; don't double-inject
+    if existing.contains(instruction) {
+      return nil
     }
+    msg["content"] = existing.isEmpty ? instruction : existing + "\n\n" + instruction
+    messages[idx] = msg
   } else {
     messages.insert(["role": "system", "content": instruction], at: 0)
   }

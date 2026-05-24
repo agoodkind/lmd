@@ -18,6 +18,8 @@ private final class FakeBackend: SwiftLMBackendProtocol, @unchecked Sendable {
   let sizeBytes: Int64
   var launched = false
   var stopped = false
+  var running = false
+  var isRunning: Bool { running && !stopped }
 
   init(modelID: String, port: Int, sizeBytes: Int64) {
     self.modelID = modelID
@@ -25,8 +27,14 @@ private final class FakeBackend: SwiftLMBackendProtocol, @unchecked Sendable {
     self.sizeBytes = sizeBytes
   }
 
-  func launch() throws { launched = true }
-  func shutdown() { stopped = true }
+  func launch() throws {
+    launched = true
+    running = true
+  }
+  func shutdown() {
+    stopped = true
+    running = false
+  }
 }
 
 private final class FakeEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sendable {
@@ -59,7 +67,7 @@ final class ModelRouterTests: XCTestCase {
     eventSink: @escaping @Sendable (RouterLifecycleEvent) -> Void = { _ in }
   ) -> (ModelRouter, () -> [FakeBackend]) {
     let created = FakesBox()
-    let spawner: BackendSpawner = { model, port in
+    let spawner: BackendSpawner = { model, port, _ in
       let fake = FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
       created.append(fake)
       return fake
@@ -107,6 +115,19 @@ final class ModelRouterTests: XCTestCase {
     _ = try await router.routeAndBegin(desc("A", 20))
     _ = try await router.routeAndBegin(desc("A", 20))
     XCTAssertEqual(created().count, 1, "should only spawn once for the same model id")
+  }
+
+  func testRepeatedRoutePrunesStoppedBackend() async throws {
+    let (router, created) = makeRouter()
+    let first = try await router.routeAndBegin(desc("A", 20))
+    await router.requestDone(modelID: "A")
+    created()[0].running = false
+
+    let second = try await router.routeAndBegin(desc("A", 20))
+
+    XCTAssertEqual(first.port, 5500)
+    XCTAssertEqual(second.port, 5500)
+    XCTAssertEqual(created().count, 2, "stopped backend should be replaced")
   }
 
   func testSecondModelAllocatesSecondPort() async throws {
@@ -218,10 +239,10 @@ final class ModelRouterTests: XCTestCase {
     let router = ModelRouter(
       budget: MemoryBudget(ceilingBytes: 80 * gb),
       portRange: 5500...5502,
-      spawner: { model, port in
+      spawner: { model, port, _ in
         FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
       },
-      embeddingSpawner: { _ in embeddingBackend },
+      embeddingSpawner: { _, _ in embeddingBackend },
       eventSink: { event in
         events.append(event)
       }
@@ -260,7 +281,7 @@ final class ModelRouterTests: XCTestCase {
     let delayedSpawner = DelayedEmbeddingSpawner(backend: embeddingBackend)
     let router = ModelRouter(
       budget: MemoryBudget(ceilingBytes: 80 * gb),
-      spawner: { model, port in
+      spawner: { model, port, _ in
         FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
       },
       embeddingSpawner: delayedSpawner.makeSpawner()
@@ -288,7 +309,7 @@ final class ModelRouterTests: XCTestCase {
     let retrySpawner = RetryEmbeddingSpawner(backend: embeddingBackend)
     let router = ModelRouter(
       budget: MemoryBudget(ceilingBytes: 80 * gb),
-      spawner: { model, port in
+      spawner: { model, port, _ in
         FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
       },
       embeddingSpawner: retrySpawner.makeSpawner()
@@ -323,7 +344,7 @@ private actor DelayedEmbeddingSpawner {
   }
 
   nonisolated func makeSpawner() -> EmbeddingSpawner {
-    { model in
+    { model, _ in
       try await self.spawn(model: model)
     }
   }
@@ -367,7 +388,7 @@ private actor RetryEmbeddingSpawner {
   }
 
   nonisolated func makeSpawner() -> EmbeddingSpawner {
-    { model in
+    { model, _ in
       try await self.spawn(model: model)
     }
   }

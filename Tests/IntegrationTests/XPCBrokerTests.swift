@@ -48,7 +48,7 @@ final class XPCBrokerTests: XCTestCase {
     let client = try BrokerClient()
     try await client.health()
 
-    try await client.preload(model: model.id)
+    _ = try await client.preload(model: model.id)
 
     let loaded = try await waitForModelPresence(
       modelID: model.id,
@@ -61,7 +61,7 @@ final class XPCBrokerTests: XCTestCase {
     XCTAssertEqual(vectors.count, 1)
     XCTAssertFalse(vectors[0].isEmpty)
 
-    try await client.unload(model: model.id)
+    _ = try await client.unload(model: model.id)
     let unloaded = try await waitForModelPresence(
       modelID: model.id,
       expected: false,
@@ -187,4 +187,3 @@ private func waitForProcessExit(_ proc: Process, timeout: TimeInterval) -> Bool 
   }
   return true
 }
-

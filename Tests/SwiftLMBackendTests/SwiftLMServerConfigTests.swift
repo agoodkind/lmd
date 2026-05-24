@@ -6,7 +6,9 @@
 //  Copyright © 2026
 //
 
+import Foundation
 import XCTest
+
 @testable import SwiftLMBackend
 
 final class SwiftLMServerConfigTests: XCTestCase {
@@ -46,5 +48,30 @@ final class SwiftLMServerConfigTests: XCTestCase {
       }
     }
     XCTAssertFalse(server.isRunning)
+  }
+
+  func testStartCreatesMissingLogDirectory() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("lmd-swiftlm-server-tests-\(UUID().uuidString)")
+    defer {
+      try? FileManager.default.removeItem(at: directory)
+    }
+    let logPath =
+      directory
+      .appendingPathComponent("nested")
+      .appendingPathComponent("swiftlm.log")
+      .path
+    let server = SwiftLMServer(
+      model: "/tmp/model",
+      config: SwiftLMServerConfig(
+        binaryPath: "/usr/bin/true",
+        logFilePath: logPath
+      )
+    )
+
+    try server.start()
+    server.stop()
+
+    XCTAssertTrue(FileManager.default.fileExists(atPath: logPath))
   }
 }

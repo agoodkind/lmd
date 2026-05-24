@@ -55,19 +55,22 @@ public struct EvictionCandidate: Sendable, Equatable {
   public let inFlightRequests: Int
   /// When true, eviction planning deprioritizes this model (chat evicts first).
   public let isEmbedding: Bool
+  public let loadConfig: ModelLoadConfig
 
   public init(
     modelID: String,
     sizeBytes: Int64,
     lastUsed: Date,
     inFlightRequests: Int,
-    isEmbedding: Bool = false
+    isEmbedding: Bool = false,
+    loadConfig: ModelLoadConfig = .default
   ) {
     self.modelID = modelID
     self.sizeBytes = sizeBytes
     self.lastUsed = lastUsed
     self.inFlightRequests = inFlightRequests
     self.isEmbedding = isEmbedding
+    self.loadConfig = loadConfig
   }
 
   public var isIdle: Bool { inFlightRequests == 0 }

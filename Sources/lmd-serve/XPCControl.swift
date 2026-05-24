@@ -130,11 +130,11 @@ private final class SessionHandler: @unchecked Sendable {
     case .loaded:
       return runBlockingResponse { try await self.loaded() }
 
-    case .preload(let model):
-      return runBlockingResponse { try await self.preload(model: model) }
+    case .preload(let request):
+      return runBlockingResponse { try await self.preload(request: request) }
 
-    case .unload(let model):
-      return runBlockingResponse { try await self.unload(model: model) }
+    case .unload(let request):
+      return runBlockingResponse { try await self.unload(request: request) }
 
     case .embed(let model, let inputs):
       return runBlockingResponse { try await self.embed(model: model, inputs: inputs) }
@@ -163,47 +163,28 @@ private final class SessionHandler: @unchecked Sendable {
 
   private func loaded() async throws -> BrokerResponse {
     let snap = await state.router.snapshot()
-    let bytesPerGB = 1_073_741_824.0
-    let entries = snap.loaded.map { c -> LoadedSnapshot.LoadedModel in
-      let kind = state.modelsByID[c.modelID]?.kind.rawValue ?? "chat"
-      return LoadedSnapshot.LoadedModel(
-        modelID: c.modelID,
-        sizeGB: Double(c.sizeBytes) / bytesPerGB,
-        lastUsed: c.lastUsed,
-        inFlightRequests: c.inFlightRequests,
-        kind: kind,
-        capabilities: state.modelsByID[c.modelID]?.capabilities ?? .textOnly
-      )
-    }
-    let allocatedGB = Double(snap.allocatedBytes) / bytesPerGB
-    return .loaded(LoadedSnapshot(allocatedGB: allocatedGB, models: entries))
+    return .loaded(brokerLoadedSnapshot(state: state, snap: snap))
   }
 
-  private func preload(model: String) async throws -> BrokerResponse {
-    guard let descriptor = state.resolve(id: model) else {
-      return .error(BrokerError(kind: .modelNotFound, message: "unknown model \(model)"))
-    }
+  private func preload(request: ModelLoadRequest) async throws -> BrokerResponse {
     do {
-      if descriptor.kind == .embedding {
-        _ = try await state.router.routeEmbeddingAndBegin(descriptor)
-        await state.router.embeddingRequestDone(modelID: descriptor.id)
-      } else {
-        _ = try await state.router.routeAndBegin(descriptor)
-        await state.router.requestDone(modelID: descriptor.id)
-      }
-      return .preloaded(modelID: descriptor.id)
+      return .preloaded(try await performModelLoad(state: state, request: request))
+    } catch let error as BrokerError {
+      return .error(error)
     } catch {
-      log.error("xpc.preload_failed model=\(descriptor.id, privacy: .public) err=\(String(describing: error), privacy: .public)")
+      log.error(
+        "xpc.preload_failed model=\(request.model, privacy: .public) err=\(String(describing: error), privacy: .public)"
+      )
       return .error(BrokerError(kind: .launchFailed, message: "\(error)"))
     }
   }
 
-  private func unload(model: String) async throws -> BrokerResponse {
-    guard let descriptor = state.resolve(id: model) else {
-      return .error(BrokerError(kind: .modelNotFound, message: "unknown model \(model)"))
+  private func unload(request: ModelUnloadRequest) async throws -> BrokerResponse {
+    do {
+      return .unloaded(try await performModelUnload(state: state, request: request))
+    } catch let error as BrokerError {
+      return .error(error)
     }
-    await state.router.unload(modelID: descriptor.id)
-    return .unloaded(modelID: descriptor.id)
   }
 
   private func embed(model: String, inputs: [String]) async throws -> BrokerResponse {

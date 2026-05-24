@@ -77,7 +77,7 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
 
   /// Mirrors `NVEmbeddingBackend.cacheLimitBytes`. See the rationale on
   /// that constant for why this value is the contract.
-  static let cacheLimitBytes: Int = 2 * 1024 * 1024 * 1024
+  static var cacheLimitBytes: Int { configuredEmbeddingCacheLimitBytes() }
 
   public func shutdown() {
     guard container != nil else {

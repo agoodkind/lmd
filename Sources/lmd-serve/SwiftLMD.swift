@@ -16,8 +16,10 @@
 import AppLogger
 import Foundation
 import Hummingbird
+import HTTPTypes
 import LMDServeSupport
 import SwiftLMBackend
+import SwiftLMControl
 import SwiftLMCore
 import SwiftLMEmbed
 import SwiftLMMonitor
@@ -29,6 +31,7 @@ import SwiftLMTrace
 // The `log` handle itself is a constant and is safe to create at file
 // scope; it will be usable immediately after bootstrap runs at startup.
 private let log = AppLogger.logger(category: "Broker")
+private let signposter = AppLogger.signposter()
 
 // MARK: - Defaults
 
@@ -135,14 +138,22 @@ final class LiveBackend: SwiftLMBackendProtocol, @unchecked Sendable {
   let modelID: String
   let port: Int
   let sizeBytes: Int64
+  var isRunning: Bool { server.isRunning }
   private let server: SwiftLMServer
 
-  init(model: ModelDescriptor, port: Int, binaryPath: String, logPath: String?) {
+  init(
+    model: ModelDescriptor,
+    port: Int,
+    binaryPath: String,
+    logPath: String?,
+    loadConfig: ModelLoadConfig
+  ) {
     self.modelID = model.id
     self.port = port
     self.sizeBytes = model.sizeBytes
     self.server = SwiftLMServer(
       model: model.path,
+      contextSize: loadConfig.contextLength,
       config: SwiftLMServerConfig(
         binaryPath: binaryPath,
         port: port,
@@ -167,6 +178,34 @@ final class LiveBackend: SwiftLMBackendProtocol, @unchecked Sendable {
 
 // MARK: - App state
 
+final class LoadedAliasStore: @unchecked Sendable {
+  private let lock = NSLock()
+  private var aliases: [String: ModelDescriptor] = [:]
+
+  func resolve(_ id: String) -> ModelDescriptor? {
+    lock.lock()
+    defer {
+      lock.unlock()
+    }
+    return aliases[id]
+  }
+
+  func set(_ identifier: String?, descriptor: ModelDescriptor) {
+    guard let identifier else {
+      return
+    }
+    lock.lock()
+    aliases[identifier] = descriptor
+    lock.unlock()
+  }
+
+  func clear(modelID: String) {
+    lock.lock()
+    aliases = aliases.filter { $0.value.id != modelID }
+    lock.unlock()
+  }
+}
+
 /// Everything the HTTP handlers need. The router is a `ModelRouter` actor.
 final class BrokerState: @unchecked Sendable {
   let catalog: ModelCatalog
@@ -174,17 +213,20 @@ final class BrokerState: @unchecked Sendable {
   let videoChatBackend: VideoChatBackend
   let modelsByID: [String: ModelDescriptor]
   let downloadCoordinator: HubDownloadCoordinator
+  let aliasStore: LoadedAliasStore
 
   init(
     catalog: ModelCatalog,
     router: ModelRouter,
     models: [ModelDescriptor],
+    aliasStore: LoadedAliasStore,
     videoChatBackend: VideoChatBackend = NotConfiguredVideoChatBackend()
   ) {
     self.catalog = catalog
     self.router = router
     self.videoChatBackend = videoChatBackend
     self.downloadCoordinator = HubDownloadCoordinator()
+    self.aliasStore = aliasStore
     var map: [String: ModelDescriptor] = [:]
     for m in models {
       map[m.id] = m
@@ -196,7 +238,10 @@ final class BrokerState: @unchecked Sendable {
   }
 
   func resolve(id: String) -> ModelDescriptor? {
-    modelsByID[id]
+    if let descriptor = modelsByID[id] {
+      return descriptor
+    }
+    return aliasStore.resolve(id)
   }
 }
 
@@ -234,6 +279,136 @@ func openAIModelId(_ m: ModelDescriptor) -> String {
   m.slug ?? m.id
 }
 
+private let bytesPerGigabyte = 1_073_741_824.0
+
+func idleCutoff(
+  for candidate: EvictionCandidate,
+  defaultChat: TimeInterval,
+  defaultEmbedding: TimeInterval
+) -> TimeInterval {
+  if let ttlSeconds = candidate.loadConfig.ttlSeconds {
+    return TimeInterval(ttlSeconds)
+  }
+  return candidate.isEmbedding ? defaultEmbedding : defaultChat
+}
+
+func brokerLoadedSnapshot(state: BrokerState, snap: ModelRouter.Snapshot) -> LoadedSnapshot {
+  let entries = snap.loaded.map { candidate -> LoadedSnapshot.LoadedModel in
+    let descriptor = state.modelsByID[candidate.modelID]
+    return LoadedSnapshot.LoadedModel(
+      modelID: candidate.modelID,
+      sizeGB: Double(candidate.sizeBytes) / bytesPerGigabyte,
+      lastUsed: candidate.lastUsed,
+      inFlightRequests: candidate.inFlightRequests,
+      kind: descriptor?.kind.rawValue ?? (candidate.isEmbedding ? "embedding" : "chat"),
+      identifier: candidate.loadConfig.identifier,
+      contextLength: candidate.loadConfig.contextLength,
+      ttlSeconds: candidate.loadConfig.ttlSeconds,
+      loadConfig: candidate.loadConfig,
+      capabilities: descriptor?.capabilities ?? .textOnly
+    )
+  }
+  return LoadedSnapshot(
+    allocatedGB: Double(snap.allocatedBytes) / bytesPerGigabyte,
+    models: entries
+  )
+}
+
+func modelLoadConfig(for request: ModelLoadRequest, descriptor: ModelDescriptor) -> ModelLoadConfig {
+  ModelLoadConfig(
+    identifier: request.identifier,
+    contextLength: request.contextLength,
+    evalBatchSize: request.evalBatchSize,
+    flashAttention: request.flashAttention,
+    offloadKVCacheToGPU: request.offloadKVCacheToGPU,
+    gpu: request.gpu,
+    ttlSeconds: request.ttlSeconds
+  ).normalized(for: descriptor.kind)
+}
+
+func estimatedModelMemoryGB(descriptor: ModelDescriptor, loadConfig _: ModelLoadConfig) -> Double {
+  Double(descriptor.sizeBytes) / bytesPerGigabyte
+}
+
+func canLoadModel(
+  state: BrokerState,
+  descriptor: ModelDescriptor
+) async -> Bool {
+  let snap = await state.router.snapshot()
+  if snap.loaded.contains(where: { $0.modelID == descriptor.id }) {
+    return true
+  }
+  return await state.router.canLoad(needing: descriptor.sizeBytes)
+}
+
+func performModelLoad(
+  state: BrokerState,
+  request: ModelLoadRequest
+) async throws -> ModelLoadResponse {
+  guard let descriptor = state.resolve(id: request.model) else {
+    throw BrokerError(kind: .modelNotFound, message: "unknown model \(request.model)")
+  }
+  let loadConfig = modelLoadConfig(for: request, descriptor: descriptor)
+  let estimateGB = estimatedModelMemoryGB(descriptor: descriptor, loadConfig: loadConfig)
+  let canLoad = await canLoadModel(state: state, descriptor: descriptor)
+  let instanceID = loadConfig.identifier ?? openAIModelId(descriptor)
+
+  if request.estimateOnly {
+    return ModelLoadResponse(
+      type: descriptor.kind == .embedding ? "embedding" : "llm",
+      instanceID: instanceID,
+      loadTimeSeconds: 0,
+      status: "estimated",
+      canLoad: canLoad,
+      estimatedTotalMemoryGB: estimateGB,
+      estimatedGPUMemoryGB: estimateGB,
+      loadConfig: request.echoLoadConfig ? loadConfig : nil
+    )
+  }
+
+  let startedAt = Date()
+  if descriptor.kind == .embedding {
+    _ = try await state.router.routeEmbeddingAndBegin(descriptor, loadConfig: loadConfig)
+    await state.router.embeddingRequestDone(modelID: descriptor.id)
+  } else {
+    _ = try await state.router.routeAndBegin(descriptor, loadConfig: loadConfig)
+    await state.router.requestDone(modelID: descriptor.id)
+  }
+  state.aliasStore.set(loadConfig.identifier, descriptor: descriptor)
+  return ModelLoadResponse(
+    type: descriptor.kind == .embedding ? "embedding" : "llm",
+    instanceID: instanceID,
+    loadTimeSeconds: Date().timeIntervalSince(startedAt),
+    status: "loaded",
+    loadConfig: request.echoLoadConfig ? loadConfig : nil
+  )
+}
+
+func performModelUnload(
+  state: BrokerState,
+  request: ModelUnloadRequest
+) async throws -> ModelUnloadResponse {
+  if request.all {
+    let loaded = await state.router.loadedModelInfos()
+    let modelIDs = Array(Set(loaded.map(\.modelID))).sorted()
+    for modelID in modelIDs {
+      await state.router.unload(modelID: modelID)
+      state.aliasStore.clear(modelID: modelID)
+    }
+    return ModelUnloadResponse(status: "unloaded", modelIDs: modelIDs)
+  }
+
+  guard let key = request.model ?? request.identifier, !key.isEmpty else {
+    throw BrokerError(kind: .invalidRequest, message: "missing `model`, `identifier`, or `all`")
+  }
+  guard let descriptor = state.resolve(id: key) else {
+    throw BrokerError(kind: .modelNotFound, message: "unknown model \(key)")
+  }
+  await state.router.unload(modelID: descriptor.id)
+  state.aliasStore.clear(modelID: descriptor.id)
+  return ModelUnloadResponse(status: "unloaded", modelIDs: [descriptor.id])
+}
+
 // MARK: - Boot
 
 @main
@@ -265,17 +440,39 @@ struct SwiftLMD {
     // The typed lifecycle hook only feeds the shared `EventBus` so
     // subscribers (`/swiftlmd/events`, future EventsTab) see state
     // transitions without a duplicate broker log line.
+    let aliasStore = LoadedAliasStore()
+    let chatMaxConcurrency =
+      Int(ProcessInfo.processInfo.environment["LMD_CHAT_MAX_CONCURRENCY"] ?? "")
+    let embeddingMaxConcurrency =
+      Int(ProcessInfo.processInfo.environment["LMD_EMBEDDING_MAX_CONCURRENCY"] ?? "")
     let router = ModelRouter(
       budget: budget,
-      spawner: { model, port in
-        LiveBackend(model: model, port: port, binaryPath: binary, logPath: defaultLogPath)
+      spawner: { model, port, loadConfig in
+        LiveBackend(
+          model: model,
+          port: port,
+          binaryPath: binary,
+          logPath: defaultLogPath,
+          loadConfig: loadConfig
+        )
       },
-      embeddingSpawner: { model in
+      embeddingSpawner: { model, _ in
         let backend = try EmbeddingBackendFactory.makeBackend(descriptor: model)
         try await backend.launch()
         return backend
       },
+      chatMaxConcurrency: chatMaxConcurrency,
+      embeddingMaxConcurrency: embeddingMaxConcurrency,
       eventSink: { event in
+        switch event {
+        case .modelUnloaded(let modelID, _),
+          .modelEvicted(let modelID, _),
+          .embeddingUnloaded(let modelID),
+          .embeddingEvicted(let modelID):
+          aliasStore.clear(modelID: modelID)
+        default:
+          break
+        }
         publishRouterEvent(event)
       }
     )
@@ -284,6 +481,7 @@ struct SwiftLMD {
       catalog: catalog,
       router: router,
       models: models,
+      aliasStore: aliasStore,
       videoChatBackend: InProcessVLMVideoChatBackend()
     )
 
@@ -312,21 +510,38 @@ struct SwiftLMD {
     // than LMD_IDLE_MINUTES (default 15). Saves memory when idle.
     let idleMinutes = Int(ProcessInfo.processInfo.environment["LMD_IDLE_MINUTES"] ?? "") ?? 15
     let chatIdleCutoff = TimeInterval(idleMinutes * 60)
-    let embedIdleMinutes = Int(ProcessInfo.processInfo.environment["LMD_EMBEDDING_IDLE_MINUTES"] ?? "") ?? 60
+    let embedIdleMinutes =
+      Int(ProcessInfo.processInfo.environment["LMD_EMBEDDING_IDLE_MINUTES"] ?? "") ?? 60
     let embedIdleCutoff = TimeInterval(embedIdleMinutes * 60)
     Task {
       while !Task.isCancelled {
         try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
         let snap = await router.snapshot()
         let now = Date()
-        for c in snap.loaded where c.isIdle && !c.isEmbedding
-          && now.timeIntervalSince(c.lastUsed) >= chatIdleCutoff {
-          slog("idle-unload: \(c.modelID) (chat, last used \(Int(now.timeIntervalSince(c.lastUsed)))s ago)")
+        for c in snap.loaded
+        where c.isIdle && !c.isEmbedding
+          && now.timeIntervalSince(c.lastUsed) >= idleCutoff(
+            for: c,
+            defaultChat: chatIdleCutoff,
+            defaultEmbedding: embedIdleCutoff
+          )
+        {
+          slog(
+            "idle-unload: \(c.modelID) (chat, last used \(Int(now.timeIntervalSince(c.lastUsed)))s ago)"
+          )
           await router.unload(modelID: c.modelID)
         }
-        for c in snap.loaded where c.isIdle && c.isEmbedding
-          && now.timeIntervalSince(c.lastUsed) >= embedIdleCutoff {
-          slog("idle-unload: \(c.modelID) (embedding, last used \(Int(now.timeIntervalSince(c.lastUsed)))s ago)")
+        for c in snap.loaded
+        where c.isIdle && c.isEmbedding
+          && now.timeIntervalSince(c.lastUsed) >= idleCutoff(
+            for: c,
+            defaultChat: chatIdleCutoff,
+            defaultEmbedding: embedIdleCutoff
+          )
+        {
+          slog(
+            "idle-unload: \(c.modelID) (embedding, last used \(Int(now.timeIntervalSince(c.lastUsed)))s ago)"
+          )
           await router.unload(modelID: c.modelID)
         }
       }
@@ -335,13 +550,16 @@ struct SwiftLMD {
     // Sensor sampler: replaces the standalone swiftmon daemon. Runs as
     // a background Task inside the broker and writes a JSONL record
     // every `LMD_SAMPLE_INTERVAL` seconds under `LMD_DATA_DIR`.
-    let dataDir = ProcessInfo.processInfo.environment["LMD_DATA_DIR"]
+    let dataDir =
+      ProcessInfo.processInfo.environment["LMD_DATA_DIR"]
       ?? "\(NSHomeDirectory())/Library/Application Support/io.goodkind.lmd"
-    let sampleInterval = Double(ProcessInfo.processInfo.environment["LMD_SAMPLE_INTERVAL"] ?? "") ?? 15
-    let sampler = SensorSampler(config: .init(
-      baseDir: dataDir,
-      intervalSeconds: sampleInterval
-    ))
+    let sampleInterval =
+      Double(ProcessInfo.processInfo.environment["LMD_SAMPLE_INTERVAL"] ?? "") ?? 15
+    let sampler = SensorSampler(
+      config: .init(
+        baseDir: dataDir,
+        intervalSeconds: sampleInterval
+      ))
     sampler.start()
 
     // BackendTrace background ticker. Emits `phase=tick` lines once per
@@ -408,41 +626,74 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
 
   router.get("/swiftlmd/loaded") { _, _ async throws -> Response in
     let snap = await state.router.snapshot()
-    struct Loaded: Codable {
-      let models: [Entry]
-      let allocated_gb: Double  // swiftlint:disable:this identifier_name
-      struct Entry: Codable {
-        let model_id: String           // swiftlint:disable:this identifier_name
-        let size_gb: Double            // swiftlint:disable:this identifier_name
-        let last_used: String          // swiftlint:disable:this identifier_name
-        let in_flight_requests: Int    // swiftlint:disable:this identifier_name
-        let kind: String
-        let capabilities: ModelCapabilities
-      }
-    }
-    let entries = snap.loaded.map { c in
-      let descriptor = state.modelsByID[c.modelID]
-      let kind = descriptor?.kind.rawValue ?? "chat"
-      let capabilities = descriptor?.capabilities ?? .textOnly
-      return Loaded.Entry(
-        model_id: c.modelID,
-        size_gb: Double(c.sizeBytes) / 1_073_741_824,
-        last_used: isoFormatter.string(from: c.lastUsed),
-        in_flight_requests: c.inFlightRequests,
-        kind: kind,
-        capabilities: capabilities
-      )
-    }
-    let body = Loaded(
-      models: entries,
-      allocated_gb: Double(snap.allocatedBytes) / 1_073_741_824
-    )
-    let data = try JSONEncoder().encode(body)
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let data = try encoder.encode(brokerLoadedSnapshot(state: state, snap: snap))
     return Response(
       status: .ok,
       headers: [.contentType: "application/json"],
       body: .init(byteBuffer: ByteBuffer(data: data))
     )
+  }
+
+  router.post("/api/v1/models/load") { req, _ async throws -> Response in
+    let bodyBuffer = try await req.body.collect(upTo: 1024 * 1024)
+    let bodyData = Data(buffer: bodyBuffer)
+    let request: ModelLoadRequest
+    do {
+      request = try JSONDecoder().decode(ModelLoadRequest.self, from: bodyData)
+    } catch {
+      return errorResponse(
+        status: .badRequest,
+        message: "invalid load request",
+        type: "invalid_request_error"
+      )
+    }
+    do {
+      let response = try await performModelLoad(state: state, request: request)
+      let data = try JSONEncoder().encode(response)
+      return Response(
+        status: request.estimateOnly ? .ok : .accepted,
+        headers: [.contentType: "application/json"],
+        body: .init(byteBuffer: ByteBuffer(data: data))
+      )
+    } catch let error as BrokerError {
+      let status: HTTPResponse.Status = error.kind == .modelNotFound ? .notFound : .badRequest
+      return errorResponse(status: status, message: error.message, type: error.kind.rawValue)
+    } catch {
+      return errorResponse(
+        status: .serviceUnavailable,
+        message: "load failed: \(error)",
+        type: "load_failed"
+      )
+    }
+  }
+
+  router.post("/api/v1/models/unload") { req, _ async throws -> Response in
+    let bodyBuffer = try await req.body.collect(upTo: 1024 * 1024)
+    let bodyData = Data(buffer: bodyBuffer)
+    let request: ModelUnloadRequest
+    do {
+      request = try JSONDecoder().decode(ModelUnloadRequest.self, from: bodyData)
+    } catch {
+      return errorResponse(
+        status: .badRequest,
+        message: "invalid unload request",
+        type: "invalid_request_error"
+      )
+    }
+    do {
+      let response = try await performModelUnload(state: state, request: request)
+      let data = try JSONEncoder().encode(response)
+      return Response(
+        status: .ok,
+        headers: [.contentType: "application/json"],
+        body: .init(byteBuffer: ByteBuffer(data: data))
+      )
+    } catch let error as BrokerError {
+      let status: HTTPResponse.Status = error.kind == .modelNotFound ? .notFound : .badRequest
+      return errorResponse(status: status, message: error.message, type: error.kind.rawValue)
+    }
   }
 
   router.post("/v1/embeddings") { req, _ async throws -> Response in
@@ -480,22 +731,24 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
   router.post("/swiftlmd/preload") { req, _ async throws -> Response in
     let bodyBuffer = try await req.body.collect(upTo: 1024 * 1024)
     let bodyData = Data(buffer: bodyBuffer)
-    guard let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
-          let modelID = json["model"] as? String
-    else {
-      return errorResponse(status: .badRequest, message: "missing `model`", type: "invalid_request_error")
-    }
-    guard let descriptor = state.resolve(id: modelID) else {
-      return errorResponse(status: .notFound, message: "unknown model \(modelID)", type: "model_not_found")
+    let request: ModelLoadRequest
+    do {
+      request = try JSONDecoder().decode(ModelLoadRequest.self, from: bodyData)
+    } catch {
+      return errorResponse(
+        status: .badRequest, message: "missing `model`", type: "invalid_request_error")
     }
     do {
-      if descriptor.kind == .embedding {
-        _ = try await state.router.routeEmbeddingAndBegin(descriptor)
-        await state.router.embeddingRequestDone(modelID: descriptor.id)
-      } else {
-        _ = try await state.router.routeAndBegin(descriptor)
-        await state.router.requestDone(modelID: descriptor.id)
-      }
+      let response = try await performModelLoad(state: state, request: request)
+      let data = try JSONEncoder().encode(response)
+      return Response(
+        status: request.estimateOnly ? .ok : .accepted,
+        headers: [.contentType: "application/json"],
+        body: .init(byteBuffer: ByteBuffer(data: data))
+      )
+    } catch let error as BrokerError {
+      let status: HTTPResponse.Status = error.kind == .modelNotFound ? .notFound : .badRequest
+      return errorResponse(status: status, message: error.message, type: error.kind.rawValue)
     } catch {
       return errorResponse(
         status: .serviceUnavailable,
@@ -503,12 +756,6 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
         type: "preload_failed"
       )
     }
-    let body = ByteBuffer(string: #"{"status":"ready","model":"\#(openAIModelId(descriptor))"}"#)
-    return Response(
-      status: .accepted,
-      headers: [.contentType: "application/json"],
-      body: .init(byteBuffer: body)
-    )
   }
 
   // POST /swiftlmd/unload  body {"model": "<id>"}
@@ -516,18 +763,25 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
   router.post("/swiftlmd/unload") { req, _ async throws -> Response in
     let bodyBuffer = try await req.body.collect(upTo: 1024 * 1024)
     let bodyData = Data(buffer: bodyBuffer)
-    guard let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
-          let modelID = json["model"] as? String
-    else {
-      return errorResponse(status: .badRequest, message: "missing `model`", type: "invalid_request_error")
+    let request: ModelUnloadRequest
+    do {
+      request = try JSONDecoder().decode(ModelUnloadRequest.self, from: bodyData)
+    } catch {
+      return errorResponse(
+        status: .badRequest, message: "missing `model`", type: "invalid_request_error")
     }
-    await state.router.unload(modelID: modelID)
-    let body = ByteBuffer(string: #"{"status":"unloaded","model":"\#(modelID)"}"#)
-    return Response(
-      status: .ok,
-      headers: [.contentType: "application/json"],
-      body: .init(byteBuffer: body)
-    )
+    do {
+      let response = try await performModelUnload(state: state, request: request)
+      let data = try JSONEncoder().encode(response)
+      return Response(
+        status: .ok,
+        headers: [.contentType: "application/json"],
+        body: .init(byteBuffer: ByteBuffer(data: data))
+      )
+    } catch let error as BrokerError {
+      let status: HTTPResponse.Status = error.kind == .modelNotFound ? .notFound : .badRequest
+      return errorResponse(status: status, message: error.message, type: error.kind.rawValue)
+    }
   }
 }
 
@@ -537,9 +791,10 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
   let bodyBuffer = try await req.body.collect(upTo: 32 * 1024 * 1024)
   let bodyData = Data(buffer: bodyBuffer)
   guard let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
-        let modelField = json["model"] as? String
+    let modelField = json["model"] as? String
   else {
-    return errorResponse(status: .badRequest, message: "missing `model` field", type: "invalid_request_error")
+    return errorResponse(
+      status: .badRequest, message: "missing `model` field", type: "invalid_request_error")
   }
   if (json["stream"] as? Bool) == true {
     return errorResponse(
@@ -598,7 +853,9 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
     snapshot: .current(),
     extras: ["transport": "http", "input_count": "\(inputs.count)"]
   )
-  log.notice("embedding.request_started request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public)")
+  log.notice(
+    "embedding.request_started request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public)"
+  )
   BackendTrace.notice(
     phase: TracePhase.Broker.requestStarted.rawValue,
     context: receivedContext,
@@ -610,7 +867,9 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
   do {
     backend = try await state.router.routeEmbeddingAndBegin(descriptor)
   } catch let err as ModelRouter.RouteError {
-    log.error("embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=route err=\(String(describing: err), privacy: .public)")
+    log.error(
+      "embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=route err=\(String(describing: err), privacy: .public)"
+    )
     BackendTrace.notice(
       phase: TracePhase.Broker.requestFailed.rawValue,
       context: receivedContext,
@@ -633,6 +892,18 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
         status: .serviceUnavailable,
         message: "failed to load embedding model",
         type: "launch_failed"
+      )
+    case .concurrencyLimitExceeded(_, let limit):
+      return errorResponse(
+        status: .tooManyRequests,
+        message: "embedding concurrency limit reached (\(limit))",
+        type: "capacity_exceeded"
+      )
+    case .loadConfigConflict:
+      return errorResponse(
+        status: .conflict,
+        message: "embedding model is busy with a different load configuration",
+        type: "load_config_conflict"
       )
     case .unsupportedEmbeddingBackend(_, let reason):
       return errorResponse(
@@ -681,6 +952,9 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
     snapshot: .current(),
     extras: ["transport": "http"]
   )
+  let requestDoneToken = BackendLifetimeToken {
+    await state.router.embeddingRequestDone(modelID: descriptor.id)
+  }
 
   let vectors: [[Float]]
   do {
@@ -692,8 +966,10 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
       }
     }
   } catch {
-    await state.router.embeddingRequestDone(modelID: descriptor.id)
-    log.error("embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=embed err=\(String(describing: error), privacy: .public)")
+    await requestDoneToken.finish()
+    log.error(
+      "embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=embed err=\(String(describing: error), privacy: .public)"
+    )
     BackendTrace.notice(
       phase: TracePhase.Broker.requestFailed.rawValue,
       context: routedContext,
@@ -710,14 +986,16 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
       type: "embedding_failed"
     )
   }
-  await state.router.embeddingRequestDone(modelID: descriptor.id)
+  await requestDoneToken.finish()
   BackendTrace.notice(
     phase: TracePhase.Broker.requestDoneAck.rawValue,
     context: routedContext,
     snapshot: .current(),
     extras: ["transport": "http", "vectors": "\(vectors.count)"]
   )
-  log.notice("embedding.request_completed request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) vectors=\(vectors.count, privacy: .public)")
+  log.notice(
+    "embedding.request_completed request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) vectors=\(vectors.count, privacy: .public)"
+  )
   BackendTrace.notice(
     phase: TracePhase.Broker.requestCompleted.rawValue,
     context: routedContext,
@@ -765,11 +1043,278 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
 
 // MARK: - Chat ingress
 
+private struct ChatProxyLogContext: Sendable {
+  let requestID: UUID
+  let clientRequestID: String?
+  let startedAt: Date
+  let endpointPath: String
+  let wantsStream: Bool
+  let requestBodyBytes: Int
+  let modelID: String
+  let modelPath: String
+
+  var requestIDString: String {
+    clientRequestID ?? requestID.uuidString
+  }
+}
+
+private struct SafeErrorFields: Sendable {
+  let type: String
+  let message: String
+}
+
+private func safeErrorFields(_ error: Error) -> SafeErrorFields {
+  if let urlError = error as? URLError {
+    return SafeErrorFields(
+      type: "URLError.\(urlError.code.rawValue)",
+      message: urlError.localizedDescription
+    )
+  }
+  return SafeErrorFields(
+    type: String(reflecting: Swift.type(of: error)),
+    message: String(describing: error)
+  )
+}
+
+private func estimatedPromptCharacters(in value: Any) -> Int {
+  switch value {
+  case let string as String:
+    return string.count
+  case let array as [Any]:
+    return array.reduce(0) { partial, item in
+      partial + estimatedPromptCharacters(in: item)
+    }
+  case let dictionary as [String: Any]:
+    if let type = dictionary["type"] as? String,
+      type == "image_url" || type == "input_audio"
+    {
+      return 0
+    }
+    return dictionary.reduce(0) { partial, item in
+      partial + estimatedPromptCharacters(in: item.value)
+    }
+  default:
+    return 0
+  }
+}
+
+private func estimatedPromptTokens(for request: PreparedChatRequest) -> Int {
+  let characters: Int
+  switch request.endpoint {
+  case .chatCompletions:
+    characters = estimatedPromptCharacters(in: request.json["messages"] ?? [])
+  case .completions:
+    characters = estimatedPromptCharacters(in: request.json["prompt"] ?? "")
+  }
+  return max(1, (characters / 4) + 32)
+}
+
+private func promptCacheMaxTokens() -> Int? {
+  guard let value = Int(ProcessInfo.processInfo.environment["LMD_PROMPT_CACHE_MAX_TOKENS"] ?? ""),
+    value > 0
+  else {
+    if !promptCacheEnabled() {
+      return 8192
+    }
+    return nil
+  }
+  return value
+}
+
+private func promptCacheEnabled() -> Bool {
+  switch (ProcessInfo.processInfo.environment["LMD_PROMPT_CACHE_ENABLED"] ?? "").lowercased() {
+  case "0", "false", "no", "off":
+    return false
+  default:
+    return true
+  }
+}
+
+private func chatRequestBudgetError(
+  prepared: PreparedChatRequest,
+  loadConfig: ModelLoadConfig
+) -> String? {
+  let estimatedTokens = estimatedPromptTokens(for: prepared)
+  if let contextLength = loadConfig.contextLength, estimatedTokens > contextLength {
+    return "estimated prompt tokens \(estimatedTokens) exceed context_length \(contextLength)"
+  }
+  if let promptCacheLimit = promptCacheMaxTokens(), estimatedTokens > promptCacheLimit {
+    return "estimated prompt tokens \(estimatedTokens) exceed prompt cache limit \(promptCacheLimit)"
+  }
+  return nil
+}
+
+private func elapsedMilliseconds(since start: Date) -> Int {
+  max(0, Int((Date().timeIntervalSince(start) * 1000).rounded()))
+}
+
+private func lmReviewRequestID(from req: Request) -> String? {
+  guard let fieldName = HTTPField.Name("X-LM-Review-Request-ID") else {
+    return nil
+  }
+  guard let rawValue = req.headers[fieldName]?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+    return nil
+  }
+  guard !rawValue.isEmpty else {
+    return nil
+  }
+  return String(rawValue.prefix(128))
+}
+
+private func chatTraceExtras(
+  for context: ChatProxyLogContext,
+  additional: [String: String] = [:]
+) -> [String: String] {
+  var extras = [
+    "transport": "http",
+    "endpoint": context.endpointPath,
+    "stream": "\(context.wantsStream)",
+    "request_bytes": "\(context.requestBodyBytes)",
+    "model_path": context.modelPath,
+    "client_request_id": context.clientRequestID ?? "none",
+  ]
+  for (key, value) in additional {
+    extras[key] = value
+  }
+  return extras
+}
+
+private func logChatParseFailure(
+  requestID: UUID,
+  clientRequestID: String?,
+  startedAt: Date,
+  endpoint: OpenAIChatEndpoint,
+  requestBodyBytes: Int,
+  errorType: String,
+  errorMessage: String
+) {
+  log.error(
+    """
+    chat.request_failed request_id=\(clientRequestID ?? requestID.uuidString, privacy: .public) \
+    client_request_id=\(clientRequestID ?? "none", privacy: .public) \
+    endpoint=\(endpoint.path, privacy: .public) stream=unknown model=unknown \
+    model_path=unknown upstream_port=none upstream_path=\(endpoint.path, privacy: .public) \
+    request_bytes=\(requestBodyBytes, privacy: .public) status_code=400 \
+    duration_ms=\(elapsedMilliseconds(since: startedAt), privacy: .public) \
+    stage=parse error_type=\(errorType, privacy: .public) error_message=\(errorMessage, privacy: .public)
+    """
+  )
+}
+
+private func logChatRequestReceived(_ context: ChatProxyLogContext) {
+  log.notice(
+    """
+    chat.request_received request_id=\(context.requestIDString, privacy: .public) \
+    client_request_id=\(context.clientRequestID ?? "none", privacy: .public) \
+    endpoint=\(context.endpointPath, privacy: .public) stream=\(context.wantsStream, privacy: .public) \
+    model=\(context.modelID, privacy: .public) model_path=\(context.modelPath, privacy: .public) \
+    request_bytes=\(context.requestBodyBytes, privacy: .public)
+    """
+  )
+}
+
+private func logChatRequestStarted(_ context: ChatProxyLogContext) {
+  log.notice(
+    """
+    chat.request_started request_id=\(context.requestIDString, privacy: .public) \
+    client_request_id=\(context.clientRequestID ?? "none", privacy: .public) \
+    endpoint=\(context.endpointPath, privacy: .public) stream=\(context.wantsStream, privacy: .public) \
+    model=\(context.modelID, privacy: .public) model_path=\(context.modelPath, privacy: .public) \
+    request_bytes=\(context.requestBodyBytes, privacy: .public)
+    """
+  )
+}
+
+private func logChatRequestRouted(
+  _ context: ChatProxyLogContext,
+  upstreamPort: Int,
+  upstreamPath: String
+) {
+  log.notice(
+    """
+    chat.request_routed request_id=\(context.requestIDString, privacy: .public) \
+    client_request_id=\(context.clientRequestID ?? "none", privacy: .public) \
+    endpoint=\(context.endpointPath, privacy: .public) stream=\(context.wantsStream, privacy: .public) \
+    model=\(context.modelID, privacy: .public) model_path=\(context.modelPath, privacy: .public) \
+    upstream_port=\(upstreamPort, privacy: .public) upstream_path=\(upstreamPath, privacy: .public) \
+    request_bytes=\(context.requestBodyBytes, privacy: .public)
+    """
+  )
+}
+
+private func logChatRequestDoneAck(
+  _ context: ChatProxyLogContext,
+  upstreamPort: Int,
+  upstreamPath: String
+) {
+  log.notice(
+    """
+    chat.request_done_ack request_id=\(context.requestIDString, privacy: .public) \
+    client_request_id=\(context.clientRequestID ?? "none", privacy: .public) \
+    endpoint=\(context.endpointPath, privacy: .public) stream=\(context.wantsStream, privacy: .public) \
+    model=\(context.modelID, privacy: .public) model_path=\(context.modelPath, privacy: .public) \
+    upstream_port=\(upstreamPort, privacy: .public) upstream_path=\(upstreamPath, privacy: .public) \
+    duration_ms=\(elapsedMilliseconds(since: context.startedAt), privacy: .public)
+    """
+  )
+}
+
+private func logChatRequestCompleted(
+  _ context: ChatProxyLogContext,
+  upstreamPort: Int,
+  upstreamPath: String,
+  statusCode: Int,
+  responseBodyBytes: Int?
+) {
+  let responseBytes = responseBodyBytes.map(String.init) ?? "stream"
+  log.notice(
+    """
+    chat.request_completed request_id=\(context.requestIDString, privacy: .public) \
+    client_request_id=\(context.clientRequestID ?? "none", privacy: .public) \
+    endpoint=\(context.endpointPath, privacy: .public) stream=\(context.wantsStream, privacy: .public) \
+    model=\(context.modelID, privacy: .public) model_path=\(context.modelPath, privacy: .public) \
+    upstream_port=\(upstreamPort, privacy: .public) upstream_path=\(upstreamPath, privacy: .public) \
+    status_code=\(statusCode, privacy: .public) request_bytes=\(context.requestBodyBytes, privacy: .public) \
+    response_bytes=\(responseBytes, privacy: .public) \
+    duration_ms=\(elapsedMilliseconds(since: context.startedAt), privacy: .public)
+    """
+  )
+}
+
+private func logChatRequestFailed(
+  _ context: ChatProxyLogContext,
+  upstreamPort: Int?,
+  upstreamPath: String,
+  statusCode: Int?,
+  stage: String,
+  errorType: String,
+  errorMessage: String
+) {
+  log.error(
+    """
+    chat.request_failed request_id=\(context.requestIDString, privacy: .public) \
+    client_request_id=\(context.clientRequestID ?? "none", privacy: .public) \
+    endpoint=\(context.endpointPath, privacy: .public) stream=\(context.wantsStream, privacy: .public) \
+    model=\(context.modelID, privacy: .public) model_path=\(context.modelPath, privacy: .public) \
+    upstream_port=\(upstreamPort.map(String.init) ?? "none", privacy: .public) \
+    upstream_path=\(upstreamPath, privacy: .public) \
+    status_code=\(statusCode.map(String.init) ?? "none", privacy: .public) \
+    request_bytes=\(context.requestBodyBytes, privacy: .public) \
+    duration_ms=\(elapsedMilliseconds(since: context.startedAt), privacy: .public) \
+    stage=\(stage, privacy: .public) error_type=\(errorType, privacy: .public) \
+    error_message=\(errorMessage, privacy: .public)
+    """
+  )
+}
+
 func handleChat(
   endpoint: OpenAIChatEndpoint,
   req: Request,
   state: BrokerState
 ) async throws -> Response {
+  let requestID = UUID()
+  let clientRequestID = lmReviewRequestID(from: req)
+  let startedAt = Date()
   let bodyBuffer = try await req.body.collect(upTo: 100 * 1024 * 1024)
   var bodyData = Data(buffer: bodyBuffer)
 
@@ -777,17 +1322,37 @@ func handleChat(
   do {
     ingress = try parseChatIngress(endpoint: endpoint, bodyData: bodyData)
   } catch let error as ChatIngressError {
-    return renderBackendChatResult(backendErrorResult(
-      statusCode: 400,
-      message: error.description,
-      type: "invalid_request_error"
-    ))
+    logChatParseFailure(
+      requestID: requestID,
+      clientRequestID: clientRequestID,
+      startedAt: startedAt,
+      endpoint: endpoint,
+      requestBodyBytes: bodyData.count,
+      errorType: "invalid_request_error",
+      errorMessage: error.description
+    )
+    return renderBackendChatResult(
+      backendErrorResult(
+        statusCode: 400,
+        message: error.description,
+        type: "invalid_request_error"
+      ))
   } catch {
-    return renderBackendChatResult(backendErrorResult(
-      statusCode: 400,
-      message: "missing `model` field",
-      type: "invalid_request_error"
-    ))
+    logChatParseFailure(
+      requestID: requestID,
+      clientRequestID: clientRequestID,
+      startedAt: startedAt,
+      endpoint: endpoint,
+      requestBodyBytes: bodyData.count,
+      errorType: "invalid_request_error",
+      errorMessage: "missing `model` field"
+    )
+    return renderBackendChatResult(
+      backendErrorResult(
+        statusCode: 400,
+        message: "missing `model` field",
+        type: "invalid_request_error"
+      ))
   }
 
   // JSON enforcement middleware. Local SwiftLM does not implement
@@ -801,13 +1366,57 @@ func handleChat(
   }
 
   guard let descriptor = state.resolve(id: ingress.modelID) else {
-    return renderBackendChatResult(backendErrorResult(
+    let missingContext = ChatProxyLogContext(
+      requestID: requestID,
+      clientRequestID: clientRequestID,
+      startedAt: startedAt,
+      endpointPath: endpoint.path,
+      wantsStream: ingress.wantsStream,
+      requestBodyBytes: bodyData.count,
+      modelID: ingress.modelID,
+      modelPath: "unknown"
+    )
+    logChatRequestReceived(missingContext)
+    logChatRequestFailed(
+      missingContext,
+      upstreamPort: nil,
+      upstreamPath: endpoint.path,
       statusCode: 404,
-      message: "model not found: \(ingress.modelID). try GET /v1/models",
-      type: "model_not_found",
-      code: "model_not_found"
-    ))
+      stage: "resolve",
+      errorType: "model_not_found",
+      errorMessage: "model not found"
+    )
+    return renderBackendChatResult(
+      backendErrorResult(
+        statusCode: 404,
+        message: "model not found: \(ingress.modelID). try GET /v1/models",
+        type: "model_not_found",
+        code: "model_not_found"
+      ))
   }
+
+  let logContext = ChatProxyLogContext(
+    requestID: requestID,
+    clientRequestID: clientRequestID,
+    startedAt: startedAt,
+    endpointPath: endpoint.path,
+    wantsStream: ingress.wantsStream,
+    requestBodyBytes: bodyData.count,
+    modelID: descriptor.id,
+    modelPath: descriptor.path
+  )
+  let receivedTraceContext = TraceContext(
+    modelID: descriptor.id,
+    modelKind: .chat,
+    requestID: requestID
+  )
+  logChatRequestReceived(logContext)
+  BackendTrace.notice(
+    phase: TracePhase.Broker.requestReceived.rawValue,
+    context: receivedTraceContext,
+    snapshot: .current(),
+    extras: chatTraceExtras(for: logContext)
+  )
 
   let prepared = prepareChatRequest(
     ingress: ingress,
@@ -818,7 +1427,7 @@ func handleChat(
   let result: BackendChatResult
   switch dispatchChatRequest(prepared) {
   case .swiftLMProxy:
-    result = try await swiftLMProxyResult(request: prepared, state: state)
+    result = try await swiftLMProxyResult(request: prepared, state: state, logContext: logContext)
   case .videoBackend(let videoRequest):
     do {
       result = try await state.videoChatBackend.complete(videoRequest)
@@ -859,6 +1468,27 @@ func handleChat(
       )
     }
   case .failure(let failure):
+    logChatRequestFailed(
+      logContext,
+      upstreamPort: nil,
+      upstreamPath: endpoint.path,
+      statusCode: 400,
+      stage: "dispatch",
+      errorType: "invalid_request_error",
+      errorMessage: failure.description
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestFailed.rawValue,
+      context: receivedTraceContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "stage": "dispatch",
+          "status_code": "400",
+          "error_type": "invalid_request_error",
+        ])
+    )
     result = backendErrorResult(
       statusCode: 400,
       message: failure.description,
@@ -868,82 +1498,322 @@ func handleChat(
   return renderBackendChatResult(result)
 }
 
-func swiftLMProxyResult(
+private func swiftLMProxyResult(
   request prepared: PreparedChatRequest,
-  state: BrokerState
+  state: BrokerState,
+  logContext: ChatProxyLogContext
 ) async throws -> BackendChatResult {
+  let signpostState = signposter.beginInterval(
+    "chat.proxy",
+    id: signposter.makeSignpostID(),
+    "request_id=\(logContext.requestIDString, privacy: .public) model=\(logContext.modelID, privacy: .public)"
+  )
+  defer { signposter.endInterval("chat.proxy", signpostState) }
+  let receivedContext = TraceContext(
+    modelID: prepared.model.id,
+    modelKind: .chat,
+    requestID: logContext.requestID
+  )
+  logChatRequestStarted(logContext)
+  BackendTrace.notice(
+    phase: TracePhase.Broker.requestStarted.rawValue,
+    context: receivedContext,
+    snapshot: .current(),
+    extras: chatTraceExtras(for: logContext)
+  )
+
   let backend: SwiftLMBackendProtocol
   do {
-    backend = try await state.router.routeAndBegin(prepared.model)
+    backend = try await state.router.routeAndBegin(prepared.model, requestID: logContext.requestID)
   } catch let err as ModelRouter.RouteError {
+    let statusCode: Int
+    let errorType: String
+    let errorMessage: String
+    let result: BackendChatResult
     switch err {
     case .cannotFitInBudget:
-      return backendErrorResult(
+      statusCode = 503
+      errorType = "capacity_exceeded"
+      errorMessage = "cannot fit \(prepared.model.displayName) in memory budget"
+      result = backendErrorResult(
         statusCode: 503,
-        message: "cannot fit \(prepared.model.displayName) in memory budget",
+        message: errorMessage,
         type: "capacity_exceeded"
       )
     case .noFreePort:
-      return backendErrorResult(
+      statusCode = 503
+      errorType = "capacity_exceeded"
+      errorMessage = "no free port in pool"
+      result = backendErrorResult(
         statusCode: 503,
-        message: "no free port in pool",
+        message: errorMessage,
         type: "capacity_exceeded"
       )
     case .backendLaunchFailed:
-      return backendErrorResult(
+      statusCode = 503
+      errorType = "launch_failed"
+      errorMessage = "failed to launch model \(prepared.model.displayName)"
+      result = backendErrorResult(
         statusCode: 503,
-        message: "failed to launch model \(prepared.model.displayName)",
+        message: errorMessage,
         type: "launch_failed"
       )
+    case .concurrencyLimitExceeded(_, let limit):
+      statusCode = 429
+      errorType = "capacity_exceeded"
+      errorMessage = "chat concurrency limit reached (\(limit))"
+      result = backendErrorResult(
+        statusCode: statusCode,
+        message: errorMessage,
+        type: errorType
+      )
+    case .loadConfigConflict:
+      statusCode = 409
+      errorType = "load_config_conflict"
+      errorMessage = "model is busy with a different load configuration"
+      result = backendErrorResult(
+        statusCode: statusCode,
+        message: errorMessage,
+        type: errorType
+      )
     case .unsupportedEmbeddingBackend:
-      return backendErrorResult(
+      statusCode = 500
+      errorType = "internal_error"
+      errorMessage = "router configuration error"
+      result = backendErrorResult(
         statusCode: 500,
-        message: "router configuration error",
+        message: errorMessage,
         type: "internal_error"
       )
     case .wrongKindForChat:
-      return backendErrorResult(
+      statusCode = 400
+      errorType = "invalid_request_error"
+      errorMessage = "model is an embedding model; use POST /v1/embeddings"
+      result = backendErrorResult(
         statusCode: 400,
-        message: "model is an embedding model; use POST /v1/embeddings",
+        message: errorMessage,
         type: "invalid_request_error"
       )
     case .wrongKindForEmbedding, .embeddingSpawnerMissing:
-      return backendErrorResult(
+      statusCode = 500
+      errorType = "internal_error"
+      errorMessage = "router configuration error"
+      result = backendErrorResult(
         statusCode: 500,
-        message: "router configuration error",
+        message: errorMessage,
         type: "internal_error"
       )
     }
+    logChatRequestFailed(
+      logContext,
+      upstreamPort: nil,
+      upstreamPath: prepared.endpoint.path,
+      statusCode: statusCode,
+      stage: "route",
+      errorType: errorType,
+      errorMessage: "\(errorMessage): \(err)"
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestFailed.rawValue,
+      context: receivedContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "stage": "route",
+          "status_code": "\(statusCode)",
+          "error_type": errorType,
+        ])
+    )
+    return result
   }
 
   let upstreamURL = URL(string: "http://localhost:\(backend.port)\(prepared.endpoint.path)")!
+  let routerInfo = await state.router.chatLoadInfo(modelID: prepared.model.id)
+  let routedContext = TraceContext(
+    modelID: prepared.model.id,
+    modelKind: .chat,
+    loadID: routerInfo?.loadID,
+    backendObjectID: routerInfo?.backendObjectID,
+    requestID: logContext.requestID
+  )
+  let requestDoneToken = BackendLifetimeToken {
+    await state.router.requestDone(modelID: prepared.model.id, requestID: logContext.requestID)
+    logChatRequestDoneAck(
+      logContext, upstreamPort: backend.port, upstreamPath: prepared.endpoint.path)
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestDoneAck.rawValue,
+      context: routedContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "upstream_port": "\(backend.port)",
+          "upstream_path": prepared.endpoint.path,
+        ])
+    )
+  }
+  let loadedInfo = await state.router.loadedModelInfos().first {
+    $0.modelID == prepared.model.id && $0.kind == .chat
+  }
+  let effectiveLoadConfig = loadedInfo?.loadConfig ?? .default
+  if let budgetError = chatRequestBudgetError(prepared: prepared, loadConfig: effectiveLoadConfig) {
+    await requestDoneToken.finish()
+    logChatRequestFailed(
+      logContext,
+      upstreamPort: backend.port,
+      upstreamPath: prepared.endpoint.path,
+      statusCode: 413,
+      stage: "budget",
+      errorType: "context_length_exceeded",
+      errorMessage: budgetError
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestFailed.rawValue,
+      context: routedContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "upstream_port": "\(backend.port)",
+          "upstream_path": prepared.endpoint.path,
+          "stage": "budget",
+          "status_code": "413",
+          "error_type": "context_length_exceeded",
+        ])
+    )
+    return backendErrorResult(
+      statusCode: 413,
+      message: budgetError,
+      type: "context_length_exceeded"
+    )
+  }
+  logChatRequestRouted(logContext, upstreamPort: backend.port, upstreamPath: prepared.endpoint.path)
+  BackendTrace.notice(
+    phase: TracePhase.Broker.requestRouted.rawValue,
+    context: routedContext,
+    snapshot: .current(),
+    extras: chatTraceExtras(
+      for: logContext,
+      additional: [
+        "upstream_port": "\(backend.port)",
+        "upstream_path": prepared.endpoint.path,
+      ])
+  )
   var request = URLRequest(url: upstreamURL, timeoutInterval: 600)
   request.httpMethod = "POST"
   request.httpBody = prepared.bodyData
   request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+  request.setValue(logContext.requestID.uuidString, forHTTPHeaderField: "X-LMD-Request-ID")
+  if let clientRequestID = logContext.clientRequestID {
+    request.setValue(clientRequestID, forHTTPHeaderField: "X-LM-Review-Request-ID")
+  }
   if prepared.wantsStream {
     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
   }
 
   if prepared.wantsStream {
-    let modelID = prepared.model.id
-    let lifetimeToken = BackendLifetimeToken {
-      await state.router.requestDone(modelID: modelID)
-    }
     do {
       let (bytes, resp) = try await URLSession.shared.bytes(for: request)
       let status = (resp as? HTTPURLResponse)?.statusCode ?? 502
-      let contentType = (resp as? HTTPURLResponse)?
+      let contentType =
+        (resp as? HTTPURLResponse)?
         .value(forHTTPHeaderField: "Content-Type") ?? "text/event-stream"
+      BackendTrace.notice(
+        phase: TracePhase.Broker.requestResponseSent.rawValue,
+        context: routedContext,
+        snapshot: .current(),
+        extras: chatTraceExtras(
+          for: logContext,
+          additional: [
+            "upstream_port": "\(backend.port)",
+            "upstream_path": prepared.endpoint.path,
+            "status_code": "\(status)",
+            "content_type": contentType,
+          ])
+      )
       return .streaming(
         statusCode: status,
         contentType: contentType,
-        events: rawBackendStream(bytes: bytes, lifetimeToken: lifetimeToken),
+        events: rawBackendStream(
+          bytes: bytes,
+          lifetimeToken: requestDoneToken,
+          onCompleted: {
+            logChatRequestCompleted(
+              logContext,
+              upstreamPort: backend.port,
+              upstreamPath: prepared.endpoint.path,
+              statusCode: status,
+              responseBodyBytes: nil
+            )
+            BackendTrace.notice(
+              phase: TracePhase.Broker.requestCompleted.rawValue,
+              context: routedContext,
+              snapshot: .current(),
+              extras: chatTraceExtras(
+                for: logContext,
+                additional: [
+                  "upstream_port": "\(backend.port)",
+                  "upstream_path": prepared.endpoint.path,
+                  "status_code": "\(status)",
+                ])
+            )
+          },
+          onFailed: { error in
+            let fields = safeErrorFields(error)
+            logChatRequestFailed(
+              logContext,
+              upstreamPort: backend.port,
+              upstreamPath: prepared.endpoint.path,
+              statusCode: status,
+              stage: "stream",
+              errorType: fields.type,
+              errorMessage: fields.message
+            )
+            BackendTrace.notice(
+              phase: TracePhase.Broker.requestFailed.rawValue,
+              context: routedContext,
+              snapshot: .current(),
+              extras: chatTraceExtras(
+                for: logContext,
+                additional: [
+                  "upstream_port": "\(backend.port)",
+                  "upstream_path": prepared.endpoint.path,
+                  "status_code": "\(status)",
+                  "stage": "stream",
+                  "error_type": fields.type,
+                ])
+            )
+          }
+        ),
         appendDoneFrame: false,
-        lifetimeToken: lifetimeToken
+        lifetimeToken: requestDoneToken
       )
     } catch {
-      await lifetimeToken.finish()
+      await requestDoneToken.finish()
+      let fields = safeErrorFields(error)
+      logChatRequestFailed(
+        logContext,
+        upstreamPort: backend.port,
+        upstreamPath: prepared.endpoint.path,
+        statusCode: nil,
+        stage: "upstream",
+        errorType: fields.type,
+        errorMessage: fields.message
+      )
+      BackendTrace.notice(
+        phase: TracePhase.Broker.requestFailed.rawValue,
+        context: routedContext,
+        snapshot: .current(),
+        extras: chatTraceExtras(
+          for: logContext,
+          additional: [
+            "upstream_port": "\(backend.port)",
+            "upstream_path": prepared.endpoint.path,
+            "stage": "upstream",
+            "error_type": fields.type,
+          ])
+      )
       throw error
     }
   }
@@ -952,31 +1822,91 @@ func swiftLMProxyResult(
   do {
     let (data, resp) = try await URLSession.shared.data(for: request)
     let status = (resp as? HTTPURLResponse)?.statusCode ?? 502
-    await state.router.requestDone(modelID: prepared.model.id)
+    await requestDoneToken.finish()
+    logChatRequestCompleted(
+      logContext,
+      upstreamPort: backend.port,
+      upstreamPath: prepared.endpoint.path,
+      statusCode: status,
+      responseBodyBytes: data.count
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestCompleted.rawValue,
+      context: routedContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "upstream_port": "\(backend.port)",
+          "upstream_path": prepared.endpoint.path,
+          "status_code": "\(status)",
+          "response_bytes": "\(data.count)",
+        ])
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestResponseSent.rawValue,
+      context: routedContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "upstream_port": "\(backend.port)",
+          "upstream_path": prepared.endpoint.path,
+          "status_code": "\(status)",
+          "response_bytes": "\(data.count)",
+        ])
+    )
     return .buffered(
       statusCode: status,
       contentType: "application/json",
       body: data
     )
   } catch {
-    await state.router.requestDone(modelID: prepared.model.id)
+    await requestDoneToken.finish()
+    let fields = safeErrorFields(error)
+    logChatRequestFailed(
+      logContext,
+      upstreamPort: backend.port,
+      upstreamPath: prepared.endpoint.path,
+      statusCode: nil,
+      stage: "upstream",
+      errorType: fields.type,
+      errorMessage: fields.message
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestFailed.rawValue,
+      context: routedContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "upstream_port": "\(backend.port)",
+          "upstream_path": prepared.endpoint.path,
+          "stage": "upstream",
+          "error_type": fields.type,
+        ])
+    )
     throw error
   }
 }
 
-func rawBackendStream(
+private func rawBackendStream(
   bytes: URLSession.AsyncBytes,
-  lifetimeToken: BackendLifetimeToken
+  lifetimeToken: BackendLifetimeToken,
+  onCompleted: @escaping @Sendable () async -> Void = {},
+  onFailed: @escaping @Sendable (Error) async -> Void = { _ in }
 ) -> AsyncThrowingStream<BackendStreamEvent, Error> {
   AsyncThrowingStream<BackendStreamEvent, Error> { continuation in
     let task = Task {
       var iterator = bytes.makeAsyncIterator()
       let chunkSize = 4096
       do {
-        while !Task.isCancelled {
+        while true {
+          try Task.checkCancellation()
           var rawBytes: [UInt8] = []
           rawBytes.reserveCapacity(chunkSize)
           while rawBytes.count < chunkSize {
+            try Task.checkCancellation()
             guard let byte = try await iterator.next() else {
               break
             }
@@ -984,15 +1914,15 @@ func rawBackendStream(
           }
           if rawBytes.isEmpty {
             await lifetimeToken.finish()
+            await onCompleted()
             continuation.finish()
             return
           }
           continuation.yield(.rawBytes(Data(rawBytes)))
         }
-        await lifetimeToken.finish()
-        continuation.finish()
       } catch {
         await lifetimeToken.finish()
+        await onFailed(error)
         continuation.finish(throwing: error)
       }
     }

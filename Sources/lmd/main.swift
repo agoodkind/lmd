@@ -66,10 +66,14 @@ private func statusCommand() {
     for model in snapshot.models {
       let mark = model.inFlightRequests > 0 ? "busy" : "idle"
       let lastUsed = formatter.string(from: model.lastUsed)
+      let contextText = model.contextLength.map { " context_length=\($0)" } ?? ""
+      let ttlText = model.ttlSeconds.map { " ttl=\($0)" } ?? ""
+      let identifierText = model.identifier.map { " identifier=\($0)" } ?? ""
       say(
         String(
-          format: "  [%@] %@ kind=%@  %.1f GB  last_used=%@",
-          mark, model.modelID, model.kind, model.sizeGB, lastUsed
+          format: "  [%@] %@ kind=%@  %.1f GB  last_used=%@%@%@%@",
+          mark, model.modelID, model.kind, model.sizeGB, lastUsed, identifierText, contextText,
+          ttlText
         )
       )
     }
@@ -80,31 +84,39 @@ private func statusCommand() {
   }
 }
 
-private func loadCommand(model: String) {
+private func loadCommand(request: ModelLoadRequest) {
   let client = openBroker()
   defer { client.close() }
-  let result = runBlocking { try await client.preload(model: model) }
+  let result = runBlocking { try await client.preload(request: request) }
   switch result {
-  case .success:
-    log.notice("load.completed model=\(model, privacy: .public)")
-    say("loaded: \(model)")
+  case .success(let response):
+    log.notice("load.completed model=\(request.model, privacy: .public) status=\(response.status, privacy: .public)")
+    say("status: \(response.status)")
+    say("instance_id: \(response.instanceID)")
+    if let canLoad = response.canLoad {
+      say("can_load: \(canLoad)")
+    }
+    if let estimated = response.estimatedTotalMemoryGB {
+      say("estimated_total_memory_gb: \(String(format: "%.1f", estimated))")
+    }
   case .failure(let error):
-    log.error("load.failed model=\(model, privacy: .public) err=\(String(describing: error), privacy: .public)")
+    log.error("load.failed model=\(request.model, privacy: .public) err=\(String(describing: error), privacy: .public)")
     sayErr("lmd load: \(error)")
     exit(1)
   }
 }
 
-private func unloadCommand(model: String) {
+private func unloadCommand(request: ModelUnloadRequest) {
   let client = openBroker()
   defer { client.close() }
-  let result = runBlocking { try await client.unload(model: model) }
+  let result = runBlocking { try await client.unload(request: request) }
   switch result {
-  case .success:
-    log.notice("unload.completed model=\(model, privacy: .public)")
-    say("unloaded: \(model)")
+  case .success(let response):
+    log.notice("unload.completed models=\(response.modelIDs.joined(separator: ","), privacy: .public)")
+    say("status: \(response.status)")
+    say("models: \(response.modelIDs.joined(separator: ", "))")
   case .failure(let error):
-    log.error("unload.failed model=\(model, privacy: .public) err=\(String(describing: error), privacy: .public)")
+    log.error("unload.failed err=\(String(describing: error), privacy: .public)")
     sayErr("lmd unload: \(error)")
     exit(1)
   }
@@ -488,8 +500,32 @@ struct LMDLoadCommand: ParsableCommand {
   @Argument(help: "Model identifier to preload.")
   var model: String
 
+  @Option(name: .long, help: "Optional stable identifier to assign to the loaded instance.")
+  var identifier: String?
+
+  @Option(name: .long, help: "Optional context length for the loaded model.")
+  var contextLength: Int?
+
+  @Option(name: .long, help: "Optional TTL in seconds for idle unload.")
+  var ttl: Int?
+
+  @Flag(name: .long, help: "Return only an estimate without loading the model.")
+  var estimateOnly = false
+
+  @Flag(name: .long, help: "Include the effective load config in the response.")
+  var echoLoadConfig = false
+
   mutating func run() throws {
-    loadCommand(model: model)
+    loadCommand(
+      request: ModelLoadRequest(
+        model: model,
+        identifier: identifier,
+        contextLength: contextLength,
+        ttlSeconds: ttl,
+        estimateOnly: estimateOnly,
+        echoLoadConfig: echoLoadConfig
+      )
+    )
   }
 }
 
@@ -500,10 +536,16 @@ struct LMDUnloadCommand: ParsableCommand {
   )
 
   @Argument(help: "Model identifier to unload.")
-  var model: String
+  var model: String?
+
+  @Option(name: .long, help: "Unload by custom identifier.")
+  var identifier: String?
+
+  @Flag(name: .long, help: "Unload every currently loaded model.")
+  var all = false
 
   mutating func run() throws {
-    unloadCommand(model: model)
+    unloadCommand(request: ModelUnloadRequest(model: model, identifier: identifier, all: all))
   }
 }
 

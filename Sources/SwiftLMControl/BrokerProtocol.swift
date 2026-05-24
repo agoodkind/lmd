@@ -33,8 +33,8 @@ public let brokerXPCServiceName = "io.goodkind.lmd.control"
 public enum BrokerRequest: Codable, Sendable {
   case health
   case loaded
-  case preload(model: String)
-  case unload(model: String)
+  case preload(request: ModelLoadRequest)
+  case unload(request: ModelUnloadRequest)
   case pullStart(slug: String)
   case embed(model: String, inputs: [String])
   case events
@@ -50,8 +50,8 @@ public enum BrokerRequest: Codable, Sendable {
 public enum BrokerResponse: Codable, Sendable {
   case ok
   case loaded(LoadedSnapshot)
-  case preloaded(modelID: String)
-  case unloaded(modelID: String)
+  case preloaded(ModelLoadResponse)
+  case unloaded(ModelUnloadResponse)
   case event(BrokerEvent)
   case pullEvent(PullEvent)
   case pullCompleted(slug: String, destination: String)
@@ -60,6 +60,125 @@ public enum BrokerResponse: Codable, Sendable {
 }
 
 // MARK: - Payload types
+
+public struct ModelLoadRequest: Codable, Sendable, Equatable {
+  public let model: String
+  public let identifier: String?
+  public let contextLength: Int?
+  public let evalBatchSize: Int?
+  public let flashAttention: Bool?
+  public let offloadKVCacheToGPU: Bool?
+  public let gpu: String?
+  public let ttlSeconds: Int?
+  public let estimateOnly: Bool
+  public let echoLoadConfig: Bool
+
+  public init(
+    model: String,
+    identifier: String? = nil,
+    contextLength: Int? = nil,
+    evalBatchSize: Int? = nil,
+    flashAttention: Bool? = nil,
+    offloadKVCacheToGPU: Bool? = nil,
+    gpu: String? = nil,
+    ttlSeconds: Int? = nil,
+    estimateOnly: Bool = false,
+    echoLoadConfig: Bool = false
+  ) {
+    self.model = model
+    self.identifier = identifier
+    self.contextLength = contextLength
+    self.evalBatchSize = evalBatchSize
+    self.flashAttention = flashAttention
+    self.offloadKVCacheToGPU = offloadKVCacheToGPU
+    self.gpu = gpu
+    self.ttlSeconds = ttlSeconds
+    self.estimateOnly = estimateOnly
+    self.echoLoadConfig = echoLoadConfig
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case model
+    case identifier
+    case contextLength = "context_length"
+    case evalBatchSize = "eval_batch_size"
+    case flashAttention = "flash_attention"
+    case offloadKVCacheToGPU = "offload_kv_cache_to_gpu"
+    case gpu
+    case ttlSeconds = "ttl"
+    case estimateOnly = "estimate_only"
+    case echoLoadConfig = "echo_load_config"
+  }
+}
+
+public struct ModelUnloadRequest: Codable, Sendable, Equatable {
+  public let model: String?
+  public let identifier: String?
+  public let all: Bool
+
+  public init(model: String? = nil, identifier: String? = nil, all: Bool = false) {
+    self.model = model
+    self.identifier = identifier
+    self.all = all
+  }
+}
+
+public struct ModelLoadResponse: Codable, Sendable, Equatable {
+  public let type: String
+  public let instanceID: String
+  public let loadTimeSeconds: Double
+  public let status: String
+  public let canLoad: Bool?
+  public let estimatedTotalMemoryGB: Double?
+  public let estimatedGPUMemoryGB: Double?
+  public let loadConfig: ModelLoadConfig?
+
+  public init(
+    type: String,
+    instanceID: String,
+    loadTimeSeconds: Double,
+    status: String,
+    canLoad: Bool? = nil,
+    estimatedTotalMemoryGB: Double? = nil,
+    estimatedGPUMemoryGB: Double? = nil,
+    loadConfig: ModelLoadConfig? = nil
+  ) {
+    self.type = type
+    self.instanceID = instanceID
+    self.loadTimeSeconds = loadTimeSeconds
+    self.status = status
+    self.canLoad = canLoad
+    self.estimatedTotalMemoryGB = estimatedTotalMemoryGB
+    self.estimatedGPUMemoryGB = estimatedGPUMemoryGB
+    self.loadConfig = loadConfig
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case type
+    case instanceID = "instance_id"
+    case loadTimeSeconds = "load_time_seconds"
+    case status
+    case canLoad = "can_load"
+    case estimatedTotalMemoryGB = "estimated_total_memory_gb"
+    case estimatedGPUMemoryGB = "estimated_gpu_memory_gb"
+    case loadConfig = "load_config"
+  }
+}
+
+public struct ModelUnloadResponse: Codable, Sendable, Equatable {
+  public let status: String
+  public let modelIDs: [String]
+
+  public init(status: String, modelIDs: [String]) {
+    self.status = status
+    self.modelIDs = modelIDs
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case status
+    case modelIDs = "model_ids"
+  }
+}
 
 /// Snapshot of every model currently loaded into the router. Mirrors
 /// the JSON shape the Hummingbird `/swiftlmd/loaded` route serves so
@@ -73,12 +192,21 @@ public struct LoadedSnapshot: Codable, Sendable {
     self.models = models
   }
 
+  enum CodingKeys: String, CodingKey {
+    case allocatedGB = "allocated_gb"
+    case models
+  }
+
   public struct LoadedModel: Codable, Sendable {
     public let modelID: String
     public let sizeGB: Double
     public let lastUsed: Date
     public let inFlightRequests: Int
     public let kind: String
+    public let identifier: String?
+    public let contextLength: Int?
+    public let ttlSeconds: Int?
+    public let loadConfig: ModelLoadConfig?
     public let capabilities: ModelCapabilities
 
     public init(
@@ -87,6 +215,10 @@ public struct LoadedSnapshot: Codable, Sendable {
       lastUsed: Date,
       inFlightRequests: Int,
       kind: String,
+      identifier: String? = nil,
+      contextLength: Int? = nil,
+      ttlSeconds: Int? = nil,
+      loadConfig: ModelLoadConfig? = nil,
       capabilities: ModelCapabilities = .textOnly
     ) {
       self.modelID = modelID
@@ -94,7 +226,24 @@ public struct LoadedSnapshot: Codable, Sendable {
       self.lastUsed = lastUsed
       self.inFlightRequests = inFlightRequests
       self.kind = kind
+      self.identifier = identifier
+      self.contextLength = contextLength
+      self.ttlSeconds = ttlSeconds
+      self.loadConfig = loadConfig
       self.capabilities = capabilities
+    }
+
+    enum CodingKeys: String, CodingKey {
+      case modelID = "model_id"
+      case sizeGB = "size_gb"
+      case lastUsed = "last_used"
+      case inFlightRequests = "in_flight_requests"
+      case kind
+      case identifier
+      case contextLength = "context_length"
+      case ttlSeconds = "ttl"
+      case loadConfig = "load_config"
+      case capabilities
     }
   }
 }

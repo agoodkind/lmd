@@ -218,7 +218,7 @@ func handleAction(_ action: TabAction) {
       if let m = payload["model"] {
         Task.detached {
           do {
-            try await broker.preload(model: m)
+            _ = try await broker.preload(model: m)
           } catch {
             log.error("tui.preload_failed model=\(m, privacy: .public) err=\(String(describing: error), privacy: .public)")
           }
@@ -228,7 +228,7 @@ func handleAction(_ action: TabAction) {
       if let m = payload["model"] {
         Task.detached {
           do {
-            try await broker.unload(model: m)
+            _ = try await broker.unload(model: m)
           } catch {
             log.error("tui.unload_failed model=\(m, privacy: .public) err=\(String(describing: error), privacy: .public)")
           }
