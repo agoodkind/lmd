@@ -1495,7 +1495,8 @@ func handleChat(
       type: "invalid_request_error"
     )
   }
-  return renderBackendChatResult(result)
+  let canonical = canonicalizeBackendChatResult(result, requestedModelID: ingress.modelID)
+  return renderBackendChatResult(canonical)
 }
 
 private func swiftLMProxyResult(

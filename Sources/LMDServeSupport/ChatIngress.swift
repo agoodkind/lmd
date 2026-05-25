@@ -398,6 +398,174 @@ public func backendErrorResult(
   return .buffered(statusCode: statusCode, contentType: "application/json", body: body)
 }
 
+/// Rewrites a backend chat result so its `model` field echoes the
+/// client-requested model identifier (OpenAI canonical behavior) and so
+/// streaming deltas only carry `role` on the first chunk that announces it.
+///
+/// The SwiftLM proxy passes upstream bytes through verbatim, so the upstream
+/// echoes whatever id it has (typically the on-disk snapshot path) and may
+/// repeat `role: "assistant"` on every chunk. This wrapper normalizes both at
+/// the broker boundary without re-implementing the backend's SSE producer.
+public func canonicalizeBackendChatResult(
+  _ result: BackendChatResult,
+  requestedModelID: String
+) -> BackendChatResult {
+  switch result {
+  case .buffered(let statusCode, let contentType, let body):
+    return .buffered(
+      statusCode: statusCode,
+      contentType: contentType,
+      body: rewriteBufferedChatBody(body, requestedModelID: requestedModelID)
+    )
+  case .streaming(let statusCode, let contentType, let events, let appendDoneFrame, let lifetimeToken):
+    return .streaming(
+      statusCode: statusCode,
+      contentType: contentType,
+      events: canonicalizeChatSSEStream(events: events, requestedModelID: requestedModelID),
+      appendDoneFrame: appendDoneFrame,
+      lifetimeToken: lifetimeToken
+    )
+  }
+}
+
+func rewriteBufferedChatBody(_ body: Data, requestedModelID: String) -> Data {
+  guard var json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+    return body
+  }
+  guard json["model"] != nil else {
+    return body
+  }
+  json["model"] = requestedModelID
+  guard let encoded = try? JSONSerialization.data(withJSONObject: json, options: []) else {
+    return body
+  }
+  return encoded
+}
+
+func canonicalizeChatSSEStream(
+  events: AsyncThrowingStream<BackendStreamEvent, Error>,
+  requestedModelID: String
+) -> AsyncThrowingStream<BackendStreamEvent, Error> {
+  AsyncThrowingStream<BackendStreamEvent, Error> { continuation in
+    let task = Task {
+      var carry = ""
+      var sentFirstRole = false
+      do {
+        for try await event in events {
+          guard case .rawBytes(let bytes) = event else {
+            continuation.yield(event)
+            continue
+          }
+          guard let text = String(data: bytes, encoding: .utf8) else {
+            continuation.yield(event)
+            continue
+          }
+          carry += text
+          while let separator = nextSSESeparator(in: carry) {
+            let frame = String(carry[..<separator.range.lowerBound])
+            carry = String(carry[separator.range.upperBound...])
+            let rewritten = rewriteSSEFrame(
+              frame,
+              requestedModelID: requestedModelID,
+              sentFirstRole: &sentFirstRole
+            )
+            continuation.yield(.rawBytes(Data((rewritten + separator.terminator).utf8)))
+          }
+        }
+        if !carry.isEmpty {
+          continuation.yield(.rawBytes(Data(carry.utf8)))
+        }
+        continuation.finish()
+      } catch {
+        continuation.finish(throwing: error)
+      }
+    }
+    continuation.onTermination = { @Sendable _ in
+      task.cancel()
+    }
+  }
+}
+
+struct SSESeparator {
+  let range: Range<String.Index>
+  let terminator: String
+}
+
+func nextSSESeparator(in text: String) -> SSESeparator? {
+  let crlf = text.range(of: "\r\n\r\n")
+  let lf = text.range(of: "\n\n")
+  switch (crlf, lf) {
+  case (let crlf?, let lf?):
+    if crlf.lowerBound <= lf.lowerBound {
+      return SSESeparator(range: crlf, terminator: "\r\n\r\n")
+    }
+    return SSESeparator(range: lf, terminator: "\n\n")
+  case (let crlf?, nil):
+    return SSESeparator(range: crlf, terminator: "\r\n\r\n")
+  case (nil, let lf?):
+    return SSESeparator(range: lf, terminator: "\n\n")
+  case (nil, nil):
+    return nil
+  }
+}
+
+func rewriteSSEFrame(
+  _ frame: String,
+  requestedModelID: String,
+  sentFirstRole: inout Bool
+) -> String {
+  let trimmed = frame.hasSuffix("\r") ? String(frame.dropLast()) : frame
+  let lines = trimmed.components(separatedBy: .newlines)
+  var rewritten: [String] = []
+  rewritten.reserveCapacity(lines.count)
+  for line in lines {
+    guard line.hasPrefix("data: ") else {
+      rewritten.append(line)
+      continue
+    }
+    let payload = String(line.dropFirst("data: ".count))
+    if payload == "[DONE]" {
+      rewritten.append(line)
+      continue
+    }
+    guard let payloadData = payload.data(using: .utf8),
+      var obj = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any]
+    else {
+      rewritten.append(line)
+      continue
+    }
+    if obj["model"] != nil {
+      obj["model"] = requestedModelID
+    }
+    if var choices = obj["choices"] as? [[String: Any]] {
+      var changed = false
+      for i in choices.indices {
+        guard var delta = choices[i]["delta"] as? [String: Any], delta["role"] != nil else {
+          continue
+        }
+        if sentFirstRole {
+          delta.removeValue(forKey: "role")
+          choices[i]["delta"] = delta
+          changed = true
+        } else {
+          sentFirstRole = true
+        }
+      }
+      if changed {
+        obj["choices"] = choices
+      }
+    }
+    guard let reEncoded = try? JSONSerialization.data(withJSONObject: obj, options: []),
+      let reText = String(data: reEncoded, encoding: .utf8)
+    else {
+      rewritten.append(line)
+      continue
+    }
+    rewritten.append("data: \(reText)")
+  }
+  return rewritten.joined(separator: "\n")
+}
+
 public func renderBackendChatResult(_ result: BackendChatResult) -> Response {
   switch result {
   case .buffered(let statusCode, let contentType, let body):
