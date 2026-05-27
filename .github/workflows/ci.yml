@@ -19,7 +19,9 @@ jobs:
     env:
       # Keep SwiftPM quiet and deterministic.
       SWIFTPM_ENABLE_COMMAND_PLUGINS: "false"
-      LMD_ENABLE_CCACHE: "1"
+      # ccache wrapper sets CC="ccache clang" which SwiftPM/xcrun rejects as
+      # a single executable path. Disable until the wrapper is fixed.
+      LMD_ENABLE_CCACHE: "0"
     steps:
       - uses: actions/checkout@v6
 
