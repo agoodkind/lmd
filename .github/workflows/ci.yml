@@ -21,7 +21,7 @@ jobs:
       SWIFTPM_ENABLE_COMMAND_PLUGINS: "false"
       LMD_ENABLE_CCACHE: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install ccache
         run: brew install ccache
