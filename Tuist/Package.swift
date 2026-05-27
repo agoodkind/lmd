@@ -27,7 +27,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.23.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.12.0"),
     .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
-    .package(name: "mlx-swift-lm", path: "../../mlx-swift-lm"),
+    .package(name: "mlx-swift-lm", url: "https://github.com/john-rocky/mlx-swift-lm.git", branch: "feat/gemma4-video"),
     .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
     .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.3.2"),
     .package(url: "https://github.com/agoodkind/macos-smc-fan.git", branch: "main"),
