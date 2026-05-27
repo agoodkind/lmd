@@ -26,6 +26,9 @@ jobs:
       - name: Install ccache
         run: brew install ccache
 
+      - name: Install Tuist
+        run: brew install tuist
+
       - name: Show toolchain
         run: swift Tools/lmd-dev.swift toolchain
 
