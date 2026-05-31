@@ -2,8 +2,8 @@
 //  AppLogger.swift
 //  AppLogger
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Apple-native unified logging wrapper. Single source of truth for
 //  every `os.Logger` handle in the lmd ecosystem.

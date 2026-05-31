@@ -2,8 +2,8 @@
 //  SwiftLogBridge.swift
 //  AppLogger
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  `swift-log` → `os.Logger` adapter. `AppLogger.bootstrap` installs one
 //  of these per swift-log category so every transitive dependency
