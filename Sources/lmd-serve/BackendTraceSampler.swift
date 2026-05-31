@@ -2,8 +2,8 @@
 //  BackendTraceSampler.swift
 //  lmd-serve
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-05-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-05-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Background ticker that emits BackendTrace `phase=tick` lines while
 //  any backend is loaded. Provides time-series MLX memory data

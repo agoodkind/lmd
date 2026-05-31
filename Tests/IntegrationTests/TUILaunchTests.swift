@@ -2,8 +2,8 @@
 //  TUILaunchTests.swift
 //  IntegrationTests
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Binary-level integration tests for the TUI targets. Spawns each
 //  release binary via `Process()`, verifies it paints its top-bar

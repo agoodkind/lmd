@@ -2,8 +2,8 @@
 //  MonitorTab.swift
 //  SwiftLMTUI
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Minimal MonitorTab that renders a snapshot dict (the kind `swiftmon`
 //  writes to memory.jsonl) as a thermal / power / battery summary. Real

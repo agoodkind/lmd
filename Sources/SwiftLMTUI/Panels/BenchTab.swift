@@ -2,8 +2,8 @@
 //  BenchTab.swift
 //  SwiftLMTUI
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  BenchTab renders a live matrix of (model × variant) benchmark cells.
 //  Rows = models, cols = variant names, each cell shows a status glyph:

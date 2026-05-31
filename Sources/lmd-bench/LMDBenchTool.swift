@@ -2,8 +2,8 @@
 //  LMDBenchTool.swift
 //  lmd-bench
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-19.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-19.
+//  Copyright © 2026, all rights reserved.
 //
 
 // lmd-bench: MLX inference benchmark orchestrator.

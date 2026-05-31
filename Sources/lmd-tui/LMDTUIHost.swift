@@ -2,8 +2,8 @@
 //  main.swift
 //  swiftlmui
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Phase 3 unified TUI. Hosts a TabRouter with monitor and library tabs.
 //  Reads sensor state from memory.jsonl (populated by swiftmon) and

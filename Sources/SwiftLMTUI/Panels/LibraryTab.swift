@@ -2,8 +2,8 @@
 //  LibraryTab.swift
 //  SwiftLMTUI
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright (c) 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  LibraryTab lists every model on disk. It overlays the broker's
 //  currently loaded models state. Rows show a load marker, display name,

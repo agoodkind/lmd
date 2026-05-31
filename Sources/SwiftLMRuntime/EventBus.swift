@@ -2,8 +2,8 @@
 //  EventBus.swift
 //  SwiftLMRuntime
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Tiny in-process pub/sub. Producers publish structured events; the
 //  broker's `/swiftlmd/events` route and the TUI's EventsTab subscribe.

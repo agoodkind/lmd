@@ -2,8 +2,8 @@
 //  BrokerEventsSequence.swift
 //  swiftlmd
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  AsyncSequence adapter that bridges ``EventBus.shared.subscribe()``
 //  into SSE byte frames for the `/swiftlmd/events` response body.

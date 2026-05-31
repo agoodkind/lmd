@@ -2,8 +2,8 @@
 //  EventsTab.swift
 //  SwiftLMTUI
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  EventsTab renders a scrolling feed of broker lifecycle events
 //  (model loaded, unloaded, evicted, request proxied, etc). The host

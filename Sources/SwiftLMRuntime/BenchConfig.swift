@@ -2,8 +2,8 @@
 //  BenchConfig.swift
 //  SwiftLMRuntime
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Declarative configuration for a benchmark run. A `BenchConfig` describes
 //  everything the orchestrator needs: which models to exercise, which

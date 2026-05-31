@@ -2,8 +2,8 @@
 //  TraceContext.swift
 //  SwiftLMTrace
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-05-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-05-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Carrier for the standard identifying fields on every BackendTrace line.
 //

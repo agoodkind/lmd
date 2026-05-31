@@ -2,8 +2,8 @@
 //  Tab.swift
 //  SwiftLMTUI
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Tab protocol for multi-screen TUIs. The plan in plan/GENERALIZATION.md
 //  introduces tabs for monitor / library / chat / bench / events. Each

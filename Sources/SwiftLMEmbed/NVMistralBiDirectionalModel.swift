@@ -2,8 +2,8 @@
 //  NVMistralBiDirectionalModel.swift
 //  SwiftLMEmbed
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-05-17.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-05-17.
+//  Copyright © 2026, all rights reserved.
 //
 
 import AppLogger

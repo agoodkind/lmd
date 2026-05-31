@@ -2,8 +2,8 @@
 //  BrokerProtocol.swift
 //  SwiftLMControl
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-19.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-19.
+//  Copyright © 2026, all rights reserved.
 //
 //  Wire protocol for the broker's XPC control surface. The Codable enums
 //  here are the single source of truth shared by `lmd-serve` (server)

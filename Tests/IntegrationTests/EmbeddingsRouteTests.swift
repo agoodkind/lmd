@@ -2,8 +2,8 @@
 //  EmbeddingsRouteTests.swift
 //  IntegrationTests
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-19.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-19.
+//  Copyright © 2026, all rights reserved.
 //
 //  Spawns a release `lmd-serve`, POSTs `/v1/embeddings` with two inputs, and
 //  checks `/swiftlmd/loaded` lists `kind: embedding`. Skips when no embedding

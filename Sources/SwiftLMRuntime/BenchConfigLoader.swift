@@ -2,8 +2,8 @@
 //  BenchConfigLoader.swift
 //  SwiftLMRuntime
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  JSON-backed loader for `BenchConfig`. Zero dependencies (Foundation
 //  only), so a user can drop `configs-battery.json` in the repo and pipe

@@ -2,8 +2,8 @@
 //  BackendTrace.swift
 //  SwiftLMTrace
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-05-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-05-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Emission layer for the BackendTrace category. Renders the standard
 //  field shape and routes through AppLogger's `os.Logger` so the lines

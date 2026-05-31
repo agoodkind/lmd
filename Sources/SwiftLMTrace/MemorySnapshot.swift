@@ -2,8 +2,8 @@
 //  MemorySnapshot.swift
 //  SwiftLMTrace
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-05-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-05-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Process-global memory snapshot wrapper for MLX's allocator accounting.
 //  Used by every BackendTrace caller so cache vs active memory deltas can

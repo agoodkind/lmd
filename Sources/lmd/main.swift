@@ -2,8 +2,8 @@
 //  main.swift
 //  lmd
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  `lmd` is the unified foreground CLI for the SwiftLM workstation toolkit.
 //  It handles broker commands in process, exposes typed subcommands through

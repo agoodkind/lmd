@@ -2,8 +2,8 @@
 //  BrokerBenchBackend.swift
 //  SwiftLMRuntime
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Concrete `BenchBackend` that drives a running `swiftlmd` broker over
 //  HTTP. Preload, chat, and unload all go through the broker's public

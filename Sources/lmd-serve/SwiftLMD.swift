@@ -2,8 +2,8 @@
 //  SwiftLMD.swift
 //  lmd-serve
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  lmd-serve: persistent broker daemon.
 //

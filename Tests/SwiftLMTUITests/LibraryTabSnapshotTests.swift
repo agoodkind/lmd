@@ -2,8 +2,8 @@
 //  LibraryTabSnapshotTests.swift
 //  SwiftLMTUITests
 //
-//  Created by Alex Goodkind <alex@goodkind.io> on 2026-04-18.
-//  Copyright © 2026
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-18.
+//  Copyright © 2026, all rights reserved.
 //
 //  Golden-file snapshot tests for `LibraryTab`. Drives deterministic
 //  catalog content into the tab and asserts the rendered grid.
