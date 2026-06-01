@@ -10,7 +10,7 @@ import Foundation
 
 /// Namespace for high-level orchestration primitives.
 ///
-/// Holds the model catalog, request router, eviction policy, memory budget,
+/// Holds the model catalog, request router, eviction policy, headroom policy,
 /// and fan coordinator. Does not know about HTTP wire formats or terminal
 /// rendering. Those live in their respective layers.
 public enum SwiftLMRuntime {

@@ -185,15 +185,28 @@ public struct ModelUnloadResponse: Codable, Sendable, Equatable {
 /// HTTP and XPC clients see the same numbers.
 public struct LoadedSnapshot: Codable, Sendable {
   public let allocatedGB: Double
+  /// Live free system memory at snapshot time, in gigabytes.
+  public let availableGB: Double?
+  /// Memory the broker keeps free at all times, in gigabytes.
+  public let reserveGB: Double?
   public let models: [LoadedModel]
 
-  public init(allocatedGB: Double, models: [LoadedModel]) {
+  public init(
+    allocatedGB: Double,
+    availableGB: Double? = nil,
+    reserveGB: Double? = nil,
+    models: [LoadedModel]
+  ) {
     self.allocatedGB = allocatedGB
+    self.availableGB = availableGB
+    self.reserveGB = reserveGB
     self.models = models
   }
 
   enum CodingKeys: String, CodingKey {
     case allocatedGB = "allocated_gb"
+    case availableGB = "available_gb"
+    case reserveGB = "reserve_gb"
     case models
   }
 

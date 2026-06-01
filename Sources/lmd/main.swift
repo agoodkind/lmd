@@ -56,6 +56,12 @@ private func statusCommand() {
   case .success(let snapshot):
     say("broker: io.goodkind.lmd.control (XPC)")
     say("allocated: \(String(format: "%.1f", snapshot.allocatedGB)) GB")
+    if let availableGB = snapshot.availableGB {
+      say("available: \(String(format: "%.1f", availableGB)) GB")
+    }
+    if let reserveGB = snapshot.reserveGB {
+      say("reserve: \(String(format: "%.1f", reserveGB)) GB")
+    }
     if snapshot.models.isEmpty {
       say("no models loaded")
       return

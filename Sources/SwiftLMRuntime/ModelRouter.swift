@@ -109,7 +109,17 @@ public enum RouterLifecycleEvent: Sendable, Equatable {
 
 /// Tracks loaded SwiftLM backends and embedding backends.
 public actor ModelRouter {
-  public let budget: MemoryBudget
+  /// Bytes of system memory the router keeps free at all times. A load is
+  /// admitted only when at least this much remains available afterward.
+  public let reserveBytes: Int64
+  /// Reads live system memory on demand. Injected so admission stays pure and
+  /// testable.
+  public let memoryProbe: MemoryProbe
+  /// How many times the post-eviction re-measure re-reads memory before giving
+  /// up, and how long it waits between reads. Production waits out the brief OS
+  /// page-reclaim lag; tests set both small so they do not actually sleep.
+  public let settleAttempts: Int
+  public let settleIntervalNanos: UInt64
   public let portRange: ClosedRange<Int>
   public let spawner: BackendSpawner
   public let embeddingSpawner: EmbeddingSpawner?
@@ -123,15 +133,21 @@ public actor ModelRouter {
   private var allocatedPorts: Set<Int> = []
 
   public init(
-    budget: MemoryBudget,
+    reserveBytes: Int64,
+    memoryProbe: @escaping MemoryProbe,
     portRange: ClosedRange<Int> = 5500...5599,
     spawner: @escaping BackendSpawner,
     embeddingSpawner: EmbeddingSpawner? = nil,
     chatMaxConcurrency: Int? = nil,
     embeddingMaxConcurrency: Int? = nil,
+    settleAttempts: Int = 6,
+    settleIntervalMillis: UInt64 = 250,
     eventSink: @escaping @Sendable (RouterLifecycleEvent) -> Void = { _ in }
   ) {
-    self.budget = budget
+    self.reserveBytes = max(0, reserveBytes)
+    self.memoryProbe = memoryProbe
+    self.settleAttempts = max(1, settleAttempts)
+    self.settleIntervalNanos = settleIntervalMillis * 1_000_000
     self.portRange = portRange
     self.spawner = spawner
     self.embeddingSpawner = embeddingSpawner
@@ -147,18 +163,115 @@ public actor ModelRouter {
     public let allocatedBytes: Int64
   }
 
+  /// Dry check used by the estimate path. Reports whether a load could be
+  /// admitted, either because memory is already safe or because unloading idle
+  /// models would restore the reserve. Has no side effects.
   public func canLoad(needing newBytes: Int64) -> Bool {
-    let snap = snapshot()
-    if budget.canAccommodate(currentlyAllocated: snap.allocatedBytes, needing: newBytes) {
+    let reading = memoryProbe()
+    let deficit = HeadroomPolicy.bytesToFree(
+      availableBytes: reading.availableBytes, needing: newBytes, reserveBytes: reserveBytes)
+    if deficit == 0 {
       return true
     }
-    let plan = EvictionPolicy.planEviction(
-      candidates: snap.loaded,
-      needing: newBytes,
-      budget: budget,
-      currentlyAllocated: snap.allocatedBytes
-    )
-    return !plan.isEmpty
+    let snap = snapshot()
+    let plan = EvictionPolicy.planEvictionToFree(candidates: snap.loaded, bytesToFree: deficit)
+    if plan.isEmpty {
+      return false
+    }
+    let freed = projectedFreedBytes(plan: plan, in: snap)
+    return reading.availableBytes + freed - newBytes >= reserveBytes
+  }
+
+  /// Current live memory reading. Used by the broker for status reporting.
+  public func memoryReading() -> MemoryReading {
+    memoryProbe()
+  }
+
+  // MARK: - Headroom enforcement
+
+  /// Free idle models until the reserve is restored, then re-measure to confirm.
+  /// Throws ``RouteError/insufficientHeadroom`` when the reserve cannot be met.
+  private func ensureHeadroom(modelID: String, needing: Int64) async throws {
+    var reading = memoryProbe()
+    var deficit = HeadroomPolicy.bytesToFree(
+      availableBytes: reading.availableBytes, needing: needing, reserveBytes: reserveBytes)
+    if deficit == 0 && !reading.underPressure {
+      return
+    }
+
+    let snap = snapshot()
+    // Under pressure with the byte reserve already met, free at least one idle
+    // model to relieve the pressure.
+    let target = deficit > 0 ? deficit : 1
+    let plan = EvictionPolicy.planEvictionToFree(candidates: snap.loaded, bytesToFree: target)
+    if plan.isEmpty {
+      // Nothing idle to free. When the byte reserve already holds and only the
+      // pressure signal is set, there is nothing more to do, so allow the load.
+      if deficit == 0 {
+        return
+      }
+      throw RouteError.insufficientHeadroom(
+        modelID: modelID, needing: needing, availableBytes: reading.availableBytes)
+    }
+
+    for id in plan {
+      log.notice("router.headroom_evict model=\(id, privacy: .public)")
+      evict(modelID: id)
+    }
+
+    reading = await settleAndRead(needing: needing)
+    deficit = HeadroomPolicy.bytesToFree(
+      availableBytes: reading.availableBytes, needing: needing, reserveBytes: reserveBytes)
+    if deficit > 0 {
+      throw RouteError.insufficientHeadroom(
+        modelID: modelID, needing: needing, availableBytes: reading.availableBytes)
+    }
+  }
+
+  /// Re-read memory after eviction, waiting out the brief OS page-reclaim lag.
+  /// Returns as soon as the reserve is restored, or after the last attempt.
+  private func settleAndRead(needing: Int64) async -> MemoryReading {
+    var reading = memoryProbe()
+    var attempt = 0
+    while attempt < settleAttempts {
+      let deficit = HeadroomPolicy.bytesToFree(
+        availableBytes: reading.availableBytes, needing: needing, reserveBytes: reserveBytes)
+      if deficit == 0 {
+        return reading
+      }
+      try? await Task.sleep(nanoseconds: settleIntervalNanos)
+      reading = memoryProbe()
+      attempt += 1
+    }
+    return reading
+  }
+
+  /// Best-effort background pass: free idle models until the reserve is restored
+  /// or no idle model remains. Used by the periodic loop and the memory-pressure
+  /// event handler. Never throws; it frees what it can.
+  public func enforceHeadroom() async {
+    let reading = memoryProbe()
+    let deficit = HeadroomPolicy.bytesToFree(
+      availableBytes: reading.availableBytes, needing: 0, reserveBytes: reserveBytes)
+    if deficit == 0 && !reading.underPressure {
+      return
+    }
+    let snap = snapshot()
+    let target = deficit > 0 ? deficit : 1
+    let plan = EvictionPolicy.planEvictionToFree(candidates: snap.loaded, bytesToFree: target)
+    for id in plan {
+      log.notice("router.headroom_evict model=\(id, privacy: .public) reason=pressure")
+      evict(modelID: id)
+    }
+  }
+
+  private func projectedFreedBytes(plan: [String], in snap: Snapshot) -> Int64 {
+    let ids = Set(plan)
+    var freed: Int64 = 0
+    for candidate in snap.loaded where ids.contains(candidate.modelID) {
+      freed += candidate.sizeBytes
+    }
+    return freed
   }
 
   public func snapshot() -> Snapshot {
@@ -292,7 +405,7 @@ public actor ModelRouter {
 
   public enum RouteError: Error, Equatable {
     case noFreePort
-    case cannotFitInBudget(modelID: String, sizeBytes: Int64)
+    case insufficientHeadroom(modelID: String, needing: Int64, availableBytes: Int64)
     case backendLaunchFailed(modelID: String)
     case concurrencyLimitExceeded(modelID: String, limit: Int)
     case loadConfigConflict(modelID: String)
@@ -306,7 +419,7 @@ public actor ModelRouter {
     _ model: ModelDescriptor,
     loadConfig: ModelLoadConfig? = nil,
     requestID: UUID? = nil
-  ) throws -> SwiftLMBackendProtocol {
+  ) async throws -> SwiftLMBackendProtocol {
     pruneStoppedChatBackends()
     BackendTrace.notice(
       phase: TracePhase.Router.routeBegin.rawValue,
@@ -351,19 +464,7 @@ public actor ModelRouter {
       }
     }
 
-    let snap = snapshot()
-    if !budget.canAccommodate(currentlyAllocated: snap.allocatedBytes, needing: model.sizeBytes) {
-      let plan = EvictionPolicy.planEviction(
-        candidates: snap.loaded,
-        needing: model.sizeBytes,
-        budget: budget,
-        currentlyAllocated: snap.allocatedBytes
-      )
-      if plan.isEmpty {
-        throw RouteError.cannotFitInBudget(modelID: model.id, sizeBytes: model.sizeBytes)
-      }
-      for id in plan { evict(modelID: id) }
-    }
+    try await ensureHeadroom(modelID: model.id, needing: model.sizeBytes)
 
     guard let port = firstFreePort() else {
       throw RouteError.noFreePort
@@ -504,19 +605,7 @@ public actor ModelRouter {
       }
     }
 
-    let snap = snapshot()
-    if !budget.canAccommodate(currentlyAllocated: snap.allocatedBytes, needing: model.sizeBytes) {
-      let plan = EvictionPolicy.planEviction(
-        candidates: snap.loaded,
-        needing: model.sizeBytes,
-        budget: budget,
-        currentlyAllocated: snap.allocatedBytes
-      )
-      if plan.isEmpty {
-        throw RouteError.cannotFitInBudget(modelID: model.id, sizeBytes: model.sizeBytes)
-      }
-      for id in plan { evict(modelID: id) }
-    }
+    try await ensureHeadroom(modelID: model.id, needing: model.sizeBytes)
 
     let loadTask = Task {
       try await embeddingSpawner(model, effectiveLoadConfig)

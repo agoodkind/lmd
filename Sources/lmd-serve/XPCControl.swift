@@ -163,7 +163,11 @@ private final class SessionHandler: @unchecked Sendable {
 
   private func loaded() async throws -> BrokerResponse {
     let snap = await state.router.snapshot()
-    return .loaded(brokerLoadedSnapshot(state: state, snap: snap))
+    let reading = await state.router.memoryReading()
+    let reserveBytes = await state.router.reserveBytes
+    return .loaded(
+      brokerLoadedSnapshot(
+        state: state, snap: snap, reading: reading, reserveBytes: reserveBytes))
   }
 
   private func preload(request: ModelLoadRequest) async throws -> BrokerResponse {

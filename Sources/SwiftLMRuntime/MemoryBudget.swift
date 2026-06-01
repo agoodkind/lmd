@@ -6,41 +6,45 @@
 //  Copyright © 2026, all rights reserved.
 //
 
-import AppLogger
 import Foundation
 
-private let log = AppLogger.logger(category: "MemoryBudget")
+// MARK: - Live memory reading
 
-// MARK: - Memory budget
-
-/// Simple memory budget for the SwiftLM daemon.
+/// A point-in-time view of system memory used for load admission.
 ///
-/// Answers whether more bytes can fit without evicting something. The
-/// budget is fixed at configuration time. The daemon keeps a virtual
-/// accounting of what it has spawned, which is cheaper and deterministic
-/// for routing decisions than querying the live system.
-public struct MemoryBudget: Sendable, Equatable {
-  /// Hard ceiling in bytes we will allocate to SwiftLM instances in total.
-  public let ceilingBytes: Int64
-  /// Bytes reserved for other applications and system overhead.
-  public let reservedBytes: Int64
+/// The router never reads the system directly. It receives one of these
+/// through an injected ``MemoryProbe`` so the admission logic stays pure and
+/// testable. The broker supplies a real probe backed by `host_statistics64`
+/// and the system memory-pressure source.
+public struct MemoryReading: Sendable, Equatable {
+  /// Bytes the system can hand to a new allocation without swapping or
+  /// compressing memory that is in active use.
+  public let availableBytes: Int64
+  /// True when the OS reports memory pressure at warning or critical level.
+  public let underPressure: Bool
 
-  public init(ceilingBytes: Int64, reservedBytes: Int64 = 0) {
-    self.ceilingBytes = ceilingBytes
-    self.reservedBytes = reservedBytes
+  public init(availableBytes: Int64, underPressure: Bool) {
+    self.availableBytes = availableBytes
+    self.underPressure = underPressure
   }
+}
 
-  /// Total bytes the daemon may spend on loaded models.
-  public var usable: Int64 { max(0, ceilingBytes - reservedBytes) }
+/// Pulls the current memory reading on demand. The broker supplies a real
+/// probe backed by the live system; tests supply a controllable fake.
+public typealias MemoryProbe = @Sendable () -> MemoryReading
 
-  /// True when `allocated + newBytes <= usable`.
-  public func canAccommodate(currentlyAllocated: Int64, needing newBytes: Int64) -> Bool {
-    currentlyAllocated + newBytes <= usable
-  }
+// MARK: - Headroom policy
 
-  /// Convenience: how many bytes must be freed to fit `needing`.
-  public func overCommitmentIfAdding(currentlyAllocated: Int64, needing newBytes: Int64) -> Int64 {
-    max(0, (currentlyAllocated + newBytes) - usable)
+/// Pure headroom math. No state, no IO, fully tested.
+public enum HeadroomPolicy {
+  /// Bytes that must be freed so that, after loading `needing`, at least
+  /// `reserveBytes` of memory remains available. Zero when already satisfied.
+  public static func bytesToFree(
+    availableBytes: Int64,
+    needing: Int64,
+    reserveBytes: Int64
+  ) -> Int64 {
+    max(0, reserveBytes + needing - availableBytes)
   }
 }
 
@@ -78,27 +82,28 @@ public struct EvictionCandidate: Sendable, Equatable {
 
 /// Pure functions for eviction decisions. No state, no IO, fully tested.
 public enum EvictionPolicy {
-  /// Pick models to evict until there is room to fit `needing`. Returns an
-  /// empty array if no combination works.
+  /// Pick idle models to unload until their combined size reaches
+  /// `bytesToFree`, returning their ids in unload order.
+  ///
+  /// Busy models (in-flight requests > 0) are never chosen. Chat models are
+  /// chosen before embedding models, and within each group the least recently
+  /// used is chosen first.
+  ///
+  /// When the idle models cannot reach `bytesToFree`, every idle model is
+  /// returned so the caller can unload them all and then re-measure live
+  /// memory to decide whether the load is admitted.
   ///
   /// - Parameters:
-  ///   - candidates: Every currently loaded model. Busy models (in-flight
-  ///     requests > 0) are never evicted.
-  ///   - needing: Bytes the new model needs.
-  ///   - budget: Memory budget.
-  ///   - currentlyAllocated: Bytes currently spent on loaded models.
-  /// - Returns: Model IDs to unload in order. May be empty if no plan fits.
-  public static func planEviction(
+  ///   - candidates: Every currently loaded model.
+  ///   - bytesToFree: Target number of bytes to reclaim.
+  /// - Returns: Model ids to unload in order. Empty when nothing needs freeing.
+  public static func planEvictionToFree(
     candidates: [EvictionCandidate],
-    needing newBytes: Int64,
-    budget: MemoryBudget,
-    currentlyAllocated: Int64
+    bytesToFree: Int64
   ) -> [String] {
-    if budget.canAccommodate(currentlyAllocated: currentlyAllocated, needing: newBytes) {
+    if bytesToFree <= 0 {
       return []
     }
-    // Only consider idle models. Evict chat models before embedding models.
-    // Within each group, evict oldest idle first.
     let idle = candidates.filter { $0.isIdle }.sorted { a, b in
       let pa = a.isEmbedding ? 1 : 0
       let pb = b.isEmbedding ? 1 : 0
@@ -107,16 +112,15 @@ public enum EvictionPolicy {
       }
       return a.lastUsed < b.lastUsed
     }
-    var allocated = currentlyAllocated
+    var freed: Int64 = 0
     var toEvict: [String] = []
     for c in idle {
-      allocated -= c.sizeBytes
+      freed += c.sizeBytes
       toEvict.append(c.modelID)
-      if budget.canAccommodate(currentlyAllocated: allocated, needing: newBytes) {
+      if freed >= bytesToFree {
         return toEvict
       }
     }
-    // Could not free enough.
-    return []
+    return toEvict
   }
 }

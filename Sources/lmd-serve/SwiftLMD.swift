@@ -123,13 +123,16 @@ func slog(_ message: String) {
   log.notice("\(message, privacy: .public)")
 }
 
-// MARK: - Memory budget
+// MARK: - Memory headroom
 
-func defaultMemoryBudget() -> MemoryBudget {
-  let envKey = ProcessInfo.processInfo.environment["LMD_BUDGET_GB"]
-  let budgetGB = Int64(envKey ?? "") ?? 80
+/// Bytes of system memory the broker keeps free at all times. A model load is
+/// admitted only when at least this much remains available afterward. Set with
+/// `LMD_RESERVE_GB`, defaulting to 20 GB.
+func defaultReserveBytes() -> Int64 {
+  let raw = ProcessInfo.processInfo.environment["LMD_RESERVE_GB"]
+  let reserveGB = Int64(raw ?? "") ?? 20
   let gigabyte: Int64 = 1_073_741_824
-  return MemoryBudget(ceilingBytes: budgetGB * gigabyte)
+  return reserveGB * gigabyte
 }
 
 // MARK: - Live backend adapter
@@ -292,7 +295,12 @@ func idleCutoff(
   return candidate.isEmbedding ? defaultEmbedding : defaultChat
 }
 
-func brokerLoadedSnapshot(state: BrokerState, snap: ModelRouter.Snapshot) -> LoadedSnapshot {
+func brokerLoadedSnapshot(
+  state: BrokerState,
+  snap: ModelRouter.Snapshot,
+  reading: MemoryReading,
+  reserveBytes: Int64
+) -> LoadedSnapshot {
   let entries = snap.loaded.map { candidate -> LoadedSnapshot.LoadedModel in
     let descriptor = state.modelsByID[candidate.modelID]
     return LoadedSnapshot.LoadedModel(
@@ -310,6 +318,8 @@ func brokerLoadedSnapshot(state: BrokerState, snap: ModelRouter.Snapshot) -> Loa
   }
   return LoadedSnapshot(
     allocatedGB: Double(snap.allocatedBytes) / bytesPerGigabyte,
+    availableGB: Double(reading.availableBytes) / bytesPerGigabyte,
+    reserveGB: Double(reserveBytes) / bytesPerGigabyte,
     models: entries
   )
 }
@@ -426,9 +436,22 @@ struct SwiftLMD {
       slog("  \(m.displayName) (\(String(format: "%.1f", gb)) GB)")
     }
 
-    // Budget and binary
-    let budget = defaultMemoryBudget()
-    slog("budget: ceiling=\(budget.ceilingBytes / 1_073_741_824) GB")
+    // Memory headroom and binary
+    let reserveBytes = defaultReserveBytes()
+    slog("memory: reserve=\(reserveBytes / 1_073_741_824) GB")
+
+    // Watch system memory pressure. The probe reads the latest level on demand,
+    // and the handler set below evicts idle models the moment memory turns
+    // warning or critical.
+    let pressureMonitor = MemoryPressureMonitor()
+    pressureMonitor.start()
+    let memoryProbe: MemoryProbe = {
+      let mem = AvailableMemory.read()
+      return MemoryReading(
+        availableBytes: mem.availableBytes,
+        underPressure: pressureMonitor.currentLevel() != .normal
+      )
+    }
 
     let binary = ProcessInfo.processInfo.environment["LMD_SWIFTLM_BINARY"] ?? defaultSwiftLMBinary
     guard FileManager.default.isExecutableFile(atPath: binary) else {
@@ -446,7 +469,8 @@ struct SwiftLMD {
     let embeddingMaxConcurrency =
       Int(ProcessInfo.processInfo.environment["LMD_EMBEDDING_MAX_CONCURRENCY"] ?? "")
     let router = ModelRouter(
-      budget: budget,
+      reserveBytes: reserveBytes,
+      memoryProbe: memoryProbe,
       spawner: { model, port, loadConfig in
         LiveBackend(
           model: model,
@@ -484,6 +508,14 @@ struct SwiftLMD {
       aliasStore: aliasStore,
       videoChatBackend: InProcessVLMVideoChatBackend()
     )
+
+    // React to memory pressure the instant the system reports it, ahead of the
+    // periodic sweep below.
+    pressureMonitor.setOnChange { level in
+      if level != .normal {
+        Task { await router.enforceHeadroom() }
+      }
+    }
 
     // XPC control surface for first-party Swift clients (lmd CLI,
     // lmd-tui). Shares `state` with the HTTP routes so both transports
@@ -544,6 +576,10 @@ struct SwiftLMD {
           )
           await router.unload(modelID: c.modelID)
         }
+
+        // Keep the reserve even when nothing has gone idle, so a slow rise in
+        // memory use from other applications still triggers unloading.
+        await router.enforceHeadroom()
       }
     }
 
@@ -626,9 +662,13 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
 
   router.get("/swiftlmd/loaded") { _, _ async throws -> Response in
     let snap = await state.router.snapshot()
+    let reading = await state.router.memoryReading()
+    let reserveBytes = await state.router.reserveBytes
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
-    let data = try encoder.encode(brokerLoadedSnapshot(state: state, snap: snap))
+    let data = try encoder.encode(
+      brokerLoadedSnapshot(
+        state: state, snap: snap, reading: reading, reserveBytes: reserveBytes))
     return Response(
       status: .ok,
       headers: [.contentType: "application/json"],
@@ -881,10 +921,10 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
       ]
     )
     switch err {
-    case .cannotFitInBudget:
+    case .insufficientHeadroom:
       return errorResponse(
         status: .serviceUnavailable,
-        message: "cannot fit embedding model in memory budget",
+        message: "not enough free memory to load embedding model while keeping the reserve",
         type: "capacity_exceeded"
       )
     case .backendLaunchFailed:
@@ -1532,10 +1572,11 @@ private func swiftLMProxyResult(
     let errorMessage: String
     let result: BackendChatResult
     switch err {
-    case .cannotFitInBudget:
+    case .insufficientHeadroom:
       statusCode = 503
       errorType = "capacity_exceeded"
-      errorMessage = "cannot fit \(prepared.model.displayName) in memory budget"
+      errorMessage =
+        "not enough free memory to load \(prepared.model.displayName) while keeping the reserve"
       result = backendErrorResult(
         statusCode: 503,
         message: errorMessage,
