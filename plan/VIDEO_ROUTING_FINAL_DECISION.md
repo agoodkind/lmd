@@ -41,7 +41,7 @@ Text-only requests stay on the text route. A video request routes to the MLX vid
 
 For each accepted `video_url`, `lmd` reads the file with `AVURLAsset`, computes a frame count from the model's declared `videoSamplingFPS` and the asset duration, and walks `AVAssetImageGenerator` with `requestedTimeToleranceBefore` and `requestedTimeToleranceAfter` set to `.positiveInfinity` so that AVFoundation returns the nearest available frame for each requested time rather than failing on an exact PTS mismatch. Each generated `CGImage` is wrapped in `CIImage` with an sRGB colorspace and packed into `UserInput.VideoFrame(frame:timeStamp:)`. The route hands the resulting array to the backend through `UserInput.Video.frames`.
 
-The relevant upstream surfaces are `UserInput.Video.frames([VideoFrame])` in `MLXLMCommon/UserInput.swift` and `MediaProcessing.asProcessedSequence(_ videoFrames: [VideoFrame], ...)` in `MLXVLM/MediaProcessing.swift`, both shipped by mlx-swift-lm PR #64 (merged 2026-01-26). The local checkout pins 2.31.3 revision `25b00d4e22e61ec9c41efda47990cd2084ec87ff` and contains both.
+The relevant upstream surfaces are `UserInput.Video.frames([VideoFrame])` in `MLXLMCommon/UserInput.swift` and `MediaProcessing.asProcessedSequence(_ videoFrames: [VideoFrame], ...)` in `MLXVLM/MediaProcessing.swift`, both shipped by mlx-swift-lm PR #64 (merged 2026-01-26). The local package manifests currently track the `john-rocky/mlx-swift-lm` `feat/gemma4-video` branch while `ml-explore/mlx-swift-lm#256` remains open.
 
 ## Per-model sampling rate
 
