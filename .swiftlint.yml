@@ -1,7 +1,6 @@
 # SwiftLint config, mirrors macos-smc-fan conventions.
 
 only_rules:
-  - explicit_acl
   - unused_import
   - discouraged_direct_init
   - force_cast
