@@ -118,7 +118,8 @@ final class XPCBrokerTests: XCTestCase {
     if FileManager.default.isExecutableFile(atPath: releaseBin.path) {
       return releaseBin
     }
-    let debugBin = baseDir
+    let debugBin =
+      baseDir
       .deletingLastPathComponent()
       .appendingPathComponent("debug", isDirectory: true)
       .appendingPathComponent("lmd-serve")
@@ -146,7 +147,8 @@ final class XPCBrokerTests: XCTestCase {
     )
   }
 
-  private func buildBrokerEnvironment(host: String, port: Int, swiftLM: String) -> [String: String] {
+  private func buildBrokerEnvironment(host: String, port: Int, swiftLM: String) -> [String: String]
+  {
     var env = ProcessInfo.processInfo.environment
     env["LMD_HOST"] = host
     env["LMD_PORT"] = "\(port)"

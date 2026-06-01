@@ -90,7 +90,8 @@ public final class EventsTab: Tab {
       }
     }
 
-    let header = "\(Theme.head)EVENTS\(Ansi.reset)  "
+    let header =
+      "\(Theme.head)EVENTS\(Ansi.reset)  "
       + "\(Theme.dim)\(entries.count) buffered · j/k scrolls · c clears\(Ansi.reset)"
     write(header)
     write("")
@@ -109,7 +110,8 @@ public final class EventsTab: Tab {
     for entry in entries[tailStart..<tailEnd] {
       let ts = timestampFormatter.string(from: entry.timestamp)
       let kindColor = color(for: entry.kind)
-      var line = "\(Theme.dim)\(ts)\(Ansi.reset)  "
+      var line =
+        "\(Theme.dim)\(ts)\(Ansi.reset)  "
         + "\(kindColor)\(Self.pad(entry.kind, 22))\(Ansi.reset)  "
       if let m = entry.model { line += "\(Theme.label)\(Self.pad(m, 32))\(Ansi.reset)  " }
       line += "\(Theme.text)\(entry.message)\(Ansi.reset)"
@@ -128,9 +130,11 @@ public final class EventsTab: Tab {
       log.debug("events.scrolled direction=down offset=\(self.scrollOffset, privacy: .public)")
       return .none
     case .key(.top):
-      scrollOffset = max(0, entries.count - 1); return .none
+      scrollOffset = max(0, entries.count - 1)
+      return .none
     case .key(.bottom):
-      scrollOffset = 0; return .none
+      scrollOffset = 0
+      return .none
     case .key(.quit):
       return .quit
     default:
@@ -139,7 +143,10 @@ public final class EventsTab: Tab {
   }
 
   public func handleChar(_ char: Character) -> TabAction {
-    if char == "c" { clear(); return .none }
+    if char == "c" {
+      clear()
+      return .none
+    }
     return .none
   }
 

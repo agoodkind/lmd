@@ -168,7 +168,8 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
     // value. Frame sampling honours `max_frames` as an upper cap regardless of
     // the chosen FPS, so a runaway frame count is bounded by the request.
     let effectiveFPS = effectiveSamplingFPS(modelFPS: modelFPS, requestFPS: completionRequest.fps)
-    let allVideoURLs = completionRequest.videoURLs
+    let allVideoURLs =
+      completionRequest.videoURLs
       + completionRequest.messages.flatMap(\.videoURLs)
     var preSampledVideos: [UserInput.Video] = []
     preSampledVideos.reserveCapacity(allVideoURLs.count)
@@ -300,7 +301,9 @@ public enum VideoChatRequestBuildError: Error, Equatable, CustomStringConvertibl
   }
 }
 
-public func makeMLXVLMVideoCompletionRequest(from bodyData: Data) throws -> MLXVLMVideoCompletionRequest {
+public func makeMLXVLMVideoCompletionRequest(from bodyData: Data) throws
+  -> MLXVLMVideoCompletionRequest
+{
   guard let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] else {
     throw VideoChatRequestBuildError.invalidJSON
   }

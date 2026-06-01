@@ -550,13 +550,29 @@ private actor RetryEmbeddingSpawner {
 private final class FakesBox: @unchecked Sendable {
   private var items: [FakeBackend] = []
   private let lock = NSLock()
-  func append(_ item: FakeBackend) { lock.lock(); items.append(item); lock.unlock() }
-  func getAll() -> [FakeBackend] { lock.lock(); defer { lock.unlock() }; return items }
+  func append(_ item: FakeBackend) {
+    lock.lock()
+    items.append(item)
+    lock.unlock()
+  }
+  func getAll() -> [FakeBackend] {
+    lock.lock()
+    defer { lock.unlock() }
+    return items
+  }
 }
 
 private final class RouterEventsBox: @unchecked Sendable {
   private var items: [RouterLifecycleEvent] = []
   private let lock = NSLock()
-  func append(_ item: RouterLifecycleEvent) { lock.lock(); items.append(item); lock.unlock() }
-  func getAll() -> [RouterLifecycleEvent] { lock.lock(); defer { lock.unlock() }; return items }
+  func append(_ item: RouterLifecycleEvent) {
+    lock.lock()
+    items.append(item)
+    lock.unlock()
+  }
+  func getAll() -> [RouterLifecycleEvent] {
+    lock.lock()
+    defer { lock.unlock() }
+    return items
+  }
 }

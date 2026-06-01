@@ -93,7 +93,9 @@ public final class BenchOrchestrator {
   public func run() async -> (completed: Int, failed: Int) {
     var matrix = config.expandMatrix(fileManager: fileManager)
     if config.skipExisting {
-      matrix = matrix.filter { !fileManager.fileExists(atPath: $0.resultPath(under: config.resultsDir)) }
+      matrix = matrix.filter {
+        !fileManager.fileExists(atPath: $0.resultPath(under: config.resultsDir))
+      }
     }
 
     events(.runStarted(totalCells: matrix.count))
@@ -191,7 +193,9 @@ public final class BenchOrchestrator {
     for case let rel as String in enumerator {
       let full = "\(repo)/\(rel)"
       var isDir: ObjCBool = false
-      guard fileManager.fileExists(atPath: full, isDirectory: &isDir), !isDir.boolValue else { continue }
+      guard fileManager.fileExists(atPath: full, isDirectory: &isDir), !isDir.boolValue else {
+        continue
+      }
       if rel.contains(".git/") || rel.contains("node_modules/") { continue }
       guard let content = try? String(contentsOfFile: full, encoding: .utf8) else { continue }
       let header = "=== \(rel) ===\n"

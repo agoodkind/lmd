@@ -9,6 +9,7 @@
 import MLX
 import SwiftLMCore
 import XCTest
+
 @testable import SwiftLMEmbed
 
 final class NVEmbeddingBackendTests: XCTestCase {
@@ -198,7 +199,8 @@ final class NVEmbeddingBackendTests: XCTestCase {
     try writeJSON([TestModuleConfig](), to: root.appendingPathComponent("modules.json"))
     if let pooling {
       let poolingDirectory = root.appendingPathComponent("1_Pooling", isDirectory: true)
-      try FileManager.default.createDirectory(at: poolingDirectory, withIntermediateDirectories: true)
+      try FileManager.default.createDirectory(
+        at: poolingDirectory, withIntermediateDirectories: true)
       try writeJSON(pooling, to: poolingDirectory.appendingPathComponent("config.json"))
     }
     if let sentence {

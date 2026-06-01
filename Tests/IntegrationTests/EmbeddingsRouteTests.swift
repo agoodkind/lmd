@@ -18,7 +18,8 @@ import XCTest
 
 final class EmbeddingsRouteTests: XCTestCase {
   func testEmbeddingsBatchAgainstRunningBroker() async throws {
-    let swiftLM = ProcessInfo.processInfo.environment["LMD_SWIFTLM_BINARY"]
+    let swiftLM =
+      ProcessInfo.processInfo.environment["LMD_SWIFTLM_BINARY"]
       ?? "\(NSHomeDirectory())/Sites/SwiftLM/.build/arm64-apple-macosx/release/SwiftLM"
     if !FileManager.default.isExecutableFile(atPath: swiftLM) {
       throw XCTSkip("SwiftLM binary not executable at \(swiftLM); set LMD_SWIFTLM_BINARY")
@@ -32,7 +33,9 @@ final class EmbeddingsRouteTests: XCTestCase {
 
     let embeddingModel = findEmbeddingModel(under: catalogRoot)
     guard let embModel = embeddingModel else {
-      throw XCTSkip("no embedding model found under \(catalogRoot); add one (for example Snowflake snowflake-arctic-embed-l)")
+      throw XCTSkip(
+        "no embedding model found under \(catalogRoot); add one (for example Snowflake snowflake-arctic-embed-l)"
+      )
     }
 
     let slug = embModel.slug ?? embModel.displayName
@@ -69,12 +72,13 @@ final class EmbeddingsRouteTests: XCTestCase {
     let embText = String(data: embBody, encoding: .utf8) ?? ""
     if embStatus != 200 {
       if embText.isEmpty || embText.contains("Failed to load the default metallib") {
-        throw XCTSkip("embeddings endpoint unavailable in environment: status=\(embStatus), body=\(embText)")
+        throw XCTSkip(
+          "embeddings endpoint unavailable in environment: status=\(embStatus), body=\(embText)")
       }
       XCTAssertEqual(embStatus, 200, "embeddings body: \(embText)")
     }
     guard let embJson = try? JSONSerialization.jsonObject(with: embBody) as? [String: Any],
-          let rows = embJson["data"] as? [[String: Any]]
+      let rows = embJson["data"] as? [[String: Any]]
     else {
       if embText.contains("Failed to load the default metallib") {
         throw XCTSkip("MLX metallib unavailable in environment: \(embText)")
@@ -94,7 +98,7 @@ final class EmbeddingsRouteTests: XCTestCase {
     let (loadedStatus, loadedBody) = await httpGet(url: "\(base)/swiftlmd/loaded")
     XCTAssertEqual(loadedStatus, 200)
     guard let loaded = try? JSONSerialization.jsonObject(with: loadedBody) as? [String: Any],
-          let models = loaded["models"] as? [[String: Any]]
+      let models = loaded["models"] as? [[String: Any]]
     else {
       XCTFail("invalid loaded JSON")
       return
@@ -134,7 +138,8 @@ final class EmbeddingsRouteTests: XCTestCase {
   private func brokerWorkingDirectory(for brokerBinary: URL) throws -> URL {
     let root = try repoRoot()
     let configuration = brokerBinary.path.contains("/release/") ? "Release" : "Debug"
-    let productsDirectory = root
+    let productsDirectory =
+      root
       .appendingPathComponent("Products", isDirectory: true)
       .appendingPathComponent("Build", isDirectory: true)
       .appendingPathComponent(configuration, isDirectory: true)
@@ -158,7 +163,8 @@ final class EmbeddingsRouteTests: XCTestCase {
     throw XCTSkip("could not locate Package.swift above \(#filePath)")
   }
 
-  private func buildBrokerEnvironment(host: String, port: Int, swiftLM: String) -> [String: String] {
+  private func buildBrokerEnvironment(host: String, port: Int, swiftLM: String) -> [String: String]
+  {
     var env = ProcessInfo.processInfo.environment
     env["LMD_HOST"] = host
     env["LMD_PORT"] = "\(port)"

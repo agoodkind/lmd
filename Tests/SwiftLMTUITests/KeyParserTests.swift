@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMTUI
 
 final class KeyParserTests: XCTestCase {
@@ -50,7 +51,8 @@ final class KeyParserTests: XCTestCase {
   func testIncompleteCSIDoesNotCrash() {
     let bytes: [UInt8] = [0x1B, 0x5B]  // missing third byte
     let ev = KeyParser.parse(bytes, start: 0, length: bytes.count)
-    if case .unknown = ev {} else {
+    if case .unknown = ev {
+    } else {
       XCTFail("incomplete CSI should map to .unknown, got \(ev)")
     }
   }

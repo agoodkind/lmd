@@ -196,10 +196,11 @@ private final class SessionHandler: @unchecked Sendable {
       return .error(BrokerError(kind: .modelNotFound, message: "unknown model \(model)"))
     }
     guard descriptor.kind == .embedding else {
-      return .error(BrokerError(
-        kind: .wrongKindForEmbedding,
-        message: "model \(model) is not an embedding model"
-      ))
+      return .error(
+        BrokerError(
+          kind: .wrongKindForEmbedding,
+          message: "model \(model) is not an embedding model"
+        ))
     }
     let intervalState = signposter.beginInterval(
       "xpc.embed",
@@ -220,7 +221,9 @@ private final class SessionHandler: @unchecked Sendable {
       snapshot: .current(),
       extras: ["transport": "xpc", "input_count": "\(inputs.count)"]
     )
-    log.notice("embedding.request_started request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public)")
+    log.notice(
+      "embedding.request_started request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public)"
+    )
     BackendTrace.notice(
       phase: TracePhase.Broker.requestStarted.rawValue,
       context: receivedContext,
@@ -232,7 +235,9 @@ private final class SessionHandler: @unchecked Sendable {
     do {
       backend = try await state.router.routeEmbeddingAndBegin(descriptor)
     } catch {
-      log.error("embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=route err=\(String(describing: error), privacy: .public)")
+      log.error(
+        "embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=route err=\(String(describing: error), privacy: .public)"
+      )
       BackendTrace.notice(
         phase: TracePhase.Broker.requestFailed.rawValue,
         context: receivedContext,
@@ -276,7 +281,9 @@ private final class SessionHandler: @unchecked Sendable {
         snapshot: .current(),
         extras: ["transport": "xpc", "vectors": "\(vectors.count)"]
       )
-      log.notice("embedding.request_completed request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) vectors=\(vectors.count, privacy: .public)")
+      log.notice(
+        "embedding.request_completed request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) vectors=\(vectors.count, privacy: .public)"
+      )
       BackendTrace.notice(
         phase: TracePhase.Broker.requestCompleted.rawValue,
         context: routedContext,
@@ -292,7 +299,9 @@ private final class SessionHandler: @unchecked Sendable {
       return .embeddings(vectors)
     } catch {
       await state.router.embeddingRequestDone(modelID: descriptor.id)
-      log.error("embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=embed err=\(String(describing: error), privacy: .public)")
+      log.error(
+        "embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=embed err=\(String(describing: error), privacy: .public)"
+      )
       BackendTrace.notice(
         phase: TracePhase.Broker.requestFailed.rawValue,
         context: routedContext,
@@ -334,12 +343,16 @@ private final class SessionHandler: @unchecked Sendable {
               "xpc.pull_event_started slug=\(eventSlug, privacy: .public) destination=\(eventDestination, privacy: .public)"
             )
           case .progress(let line):
-            log.debug("xpc.pull_event_progress slug=\(slug, privacy: .public) line=\(line, privacy: .public)")
+            log.debug(
+              "xpc.pull_event_progress slug=\(slug, privacy: .public) line=\(line, privacy: .public)"
+            )
           }
           do {
             try session.send(BrokerResponse.pullEvent(event))
           } catch {
-            log.error("xpc.pull_send_failed slug=\(slug, privacy: .public) err=\(String(describing: error), privacy: .public)")
+            log.error(
+              "xpc.pull_send_failed slug=\(slug, privacy: .public) err=\(String(describing: error), privacy: .public)"
+            )
             return
           }
         }
@@ -351,14 +364,18 @@ private final class SessionHandler: @unchecked Sendable {
           try session.send(BrokerResponse.error(payload))
           return
         }
-        log.notice("xpc.pull_completed slug=\(slug, privacy: .public) destination=\(destination, privacy: .public)")
+        log.notice(
+          "xpc.pull_completed slug=\(slug, privacy: .public) destination=\(destination, privacy: .public)"
+        )
         try session.send(BrokerResponse.pullCompleted(slug: slug, destination: destination))
       } catch {
         let payload = BrokerError(kind: .pullFailed, message: "\(error)")
         do {
           try session.send(BrokerResponse.error(payload))
         } catch {
-          log.error("xpc.pull_send_failed slug=\(slug, privacy: .public) err=\(String(describing: error), privacy: .public)")
+          log.error(
+            "xpc.pull_send_failed slug=\(slug, privacy: .public) err=\(String(describing: error), privacy: .public)"
+          )
         }
       }
     }
@@ -394,7 +411,9 @@ private final class SessionHandler: @unchecked Sendable {
   /// `XPCListener` calls `incomingMessageHandler` from a serial queue
   /// owned by libxpc; blocking it briefly is the documented pattern
   /// for typed reply-bearing requests.
-  private func runBlockingResponse(_ work: @Sendable @escaping () async throws -> BrokerResponse) -> BrokerResponse {
+  private func runBlockingResponse(_ work: @Sendable @escaping () async throws -> BrokerResponse)
+    -> BrokerResponse
+  {
     switch runBlocking(work) {
     case .success(let response):
       return response

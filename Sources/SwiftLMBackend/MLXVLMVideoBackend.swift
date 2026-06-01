@@ -274,7 +274,8 @@ public struct MLXVLMVideoCompletionRequest: @unchecked Sendable {
 
   func makeUserInput() -> UserInput {
     var preSampledQueue = preSampledVideos ?? []
-    var requestQueue: [UserInput.Video] = preSampledVideos == nil
+    var requestQueue: [UserInput.Video] =
+      preSampledVideos == nil
       ? videoURLs.map(UserInput.Video.url) : []
     var chatMessages: [Chat.Message] = []
     chatMessages.reserveCapacity(messages.count)

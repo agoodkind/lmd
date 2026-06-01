@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMCore
 
 final class SwiftLMCoreTests: XCTestCase {

@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMTUI
 
 final class EventsTabTests: XCTestCase {
@@ -68,9 +69,16 @@ final class EventsTabTests: XCTestCase {
     fmt.timeZone = TimeZone(identifier: "UTC")
     tab.timestampFormatter = fmt
     let base = Date(timeIntervalSince1970: 1_700_000_000)
-    tab.append(EventEntry(kind: "model.loaded", model: "qwen3-30b", message: "port=5501", timestamp: base))
-    tab.append(EventEntry(kind: "request.completed", model: "qwen3-30b", message: "200 OK", timestamp: base.addingTimeInterval(1)))
-    tab.append(EventEntry(kind: "model.evicted", model: "qwen3-4b", message: "lru", timestamp: base.addingTimeInterval(2)))
+    tab.append(
+      EventEntry(kind: "model.loaded", model: "qwen3-30b", message: "port=5501", timestamp: base))
+    tab.append(
+      EventEntry(
+        kind: "request.completed", model: "qwen3-30b", message: "200 OK",
+        timestamp: base.addingTimeInterval(1)))
+    tab.append(
+      EventEntry(
+        kind: "model.evicted", model: "qwen3-4b", message: "lru",
+        timestamp: base.addingTimeInterval(2)))
     let buffer = BufferedScreen(rows: 30, cols: 120)
     tab.render(into: buffer, contentRows: 3...28)
     try Snapshot.assertMatches(Snapshot.compose(buffer), name: "events_three")

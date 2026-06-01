@@ -98,7 +98,9 @@ public final class BrokerBenchBackend: BenchBackend, @unchecked Sendable {
   }
 
   public func unload(_ model: BenchModelSpec) {
-    guard let body = try? JSONSerialization.data(withJSONObject: ["model": model.id]) else { return }
+    guard let body = try? JSONSerialization.data(withJSONObject: ["model": model.id]) else {
+      return
+    }
     _ = postSync(path: "/swiftlmd/unload", body: body, timeout: 30)
     lock.lock()
     loadedModels.remove(model.id)
@@ -143,7 +145,9 @@ public final class BrokerBenchBackend: BenchBackend, @unchecked Sendable {
     return box.value
   }
 
-  private func postAsync(path: String, body: Data, timeout: TimeInterval) async throws -> (Int, Data) {
+  private func postAsync(path: String, body: Data, timeout: TimeInterval) async throws -> (
+    Int, Data
+  ) {
     guard let url = URL(string: "\(brokerBase)\(path)") else { throw BrokerError.badURL }
     var req = URLRequest(url: url, timeoutInterval: timeout)
     req.httpMethod = "POST"

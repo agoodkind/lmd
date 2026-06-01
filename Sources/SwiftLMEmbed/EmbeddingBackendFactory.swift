@@ -40,7 +40,8 @@ public enum EmbeddingBackendSelectionError: Equatable, Sendable, UnsupportedEmbe
     case .unsupportedEmbeddingBackend(let modelID, let modelType, let architectures):
       let typeText = modelType ?? "unknown"
       let architectureText = architectures.isEmpty ? "none" : architectures.joined(separator: ",")
-      return "unsupported embedding backend for \(modelID): model_type=\(typeText) architectures=\(architectureText)"
+      return
+        "unsupported embedding backend for \(modelID): model_type=\(typeText) architectures=\(architectureText)"
     case .unsupportedNVPooling(let modelID, let poolingMode):
       return "unsupported NVIDIA embedding pooling for \(modelID): \(poolingMode.rawValue)"
     }
@@ -55,7 +56,9 @@ public enum EmbeddingBackendFactory {
       log.info("embedding.backend_selected model=\(descriptor.id, privacy: .public) backend=mlx")
       return MLXEmbeddingBackend(descriptor: descriptor)
     case .nvidiaMistralBidirectional(let metadata):
-      log.info("embedding.backend_selected model=\(descriptor.id, privacy: .public) backend=nvidia_mistral_bidirectional")
+      log.info(
+        "embedding.backend_selected model=\(descriptor.id, privacy: .public) backend=nvidia_mistral_bidirectional"
+      )
       return NVEmbeddingBackend(descriptor: descriptor, metadata: metadata)
     }
   }

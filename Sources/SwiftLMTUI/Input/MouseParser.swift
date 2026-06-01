@@ -43,8 +43,8 @@ public enum MouseParser {
     guard start + 3 < length else { return nil }
     guard
       buffer[start] == 0x1B,
-      buffer[start + 1] == 0x5B,    // [
-      buffer[start + 2] == 0x3C     // <
+      buffer[start + 1] == 0x5B,  // [
+      buffer[start + 2] == 0x3C  // <
     else { return nil }
 
     var i = start + 3

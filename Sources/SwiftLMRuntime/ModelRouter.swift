@@ -30,11 +30,11 @@ public protocol SwiftLMBackendProtocol: AnyObject, Sendable {
 
 public typealias BackendSpawner =
   @Sendable (_ model: ModelDescriptor, _ port: Int, _ loadConfig: ModelLoadConfig) throws
-    -> SwiftLMBackendProtocol
+  -> SwiftLMBackendProtocol
 
 public typealias EmbeddingSpawner =
   @Sendable (_ model: ModelDescriptor, _ loadConfig: ModelLoadConfig) async throws
-    -> EmbeddingBackendProtocol
+  -> EmbeddingBackendProtocol
 
 // MARK: - Router state
 

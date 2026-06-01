@@ -9,8 +9,8 @@
 import AppLogger
 import Foundation
 import HuggingFace
-import SwiftLMCore
 import SwiftLMControl
+import SwiftLMCore
 
 private let log = AppLogger.logger(category: "HubDownload")
 private let signposter = AppLogger.signposter(category: "Performance")

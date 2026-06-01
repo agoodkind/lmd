@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMRuntime
 
 final class BenchConfigTOMLTests: XCTestCase {
@@ -78,11 +79,11 @@ final class BenchConfigTOMLTests: XCTestCase {
       prompt_glob = "*"
       """
     let cfg = try loadBenchConfig(fromTOMLText: toml)
-    XCTAssertTrue(cfg.skipExisting)          // default true
+    XCTAssertTrue(cfg.skipExisting)  // default true
     XCTAssertEqual(cfg.testTimeoutSeconds, 900)  // default 900
-    XCTAssertEqual(cfg.parallelismPerModel, 1)   // default 1
-    XCTAssertEqual(cfg.variants[0].maxInputBytes, 300_000) // default
-    XCTAssertEqual(cfg.variants[0].maxTokens, 8192)        // default
+    XCTAssertEqual(cfg.parallelismPerModel, 1)  // default 1
+    XCTAssertEqual(cfg.variants[0].maxInputBytes, 300_000)  // default
+    XCTAssertEqual(cfg.variants[0].maxTokens, 8192)  // default
   }
 
   // MARK: - Error cases

@@ -135,13 +135,17 @@ public enum ChatRoutingDecision: Sendable {
 }
 
 public let defaultChatDispatchRules: [ChatDispatchRule] = [
-  ChatDispatchRule(name: "embeddingModelsRejectChat", target: .failure(.embeddingModel)) { request in
+  ChatDispatchRule(name: "embeddingModelsRejectChat", target: .failure(.embeddingModel)) {
+    request in
     request.model.kind == .embedding
   },
-  ChatDispatchRule(name: "videoRequiresChatCompletions", target: .failure(.unsupportedVideoEndpoint)) { request in
+  ChatDispatchRule(
+    name: "videoRequiresChatCompletions", target: .failure(.unsupportedVideoEndpoint)
+  ) { request in
     request.mediaInspection.containsVideo && request.endpoint != .chatCompletions
   },
-  ChatDispatchRule(name: "videoRequiresCapability", target: .failure(.unsupportedVideoInput)) { request in
+  ChatDispatchRule(name: "videoRequiresCapability", target: .failure(.unsupportedVideoInput)) {
+    request in
     request.mediaInspection.containsVideo && !request.model.capabilities.video
   },
   ChatDispatchRule(name: "mlxVideo", target: .mlxVideo) { request in
@@ -417,7 +421,8 @@ public func canonicalizeBackendChatResult(
       contentType: contentType,
       body: rewriteBufferedChatBody(body, requestedModelID: requestedModelID)
     )
-  case .streaming(let statusCode, let contentType, let events, let appendDoneFrame, let lifetimeToken):
+  case .streaming(
+    let statusCode, let contentType, let events, let appendDoneFrame, let lifetimeToken):
     return .streaming(
       statusCode: statusCode,
       contentType: contentType,
@@ -574,7 +579,8 @@ public func renderBackendChatResult(_ result: BackendChatResult) -> Response {
       headers: [.contentType: contentType],
       body: .init(byteBuffer: ByteBuffer(data: body))
     )
-  case .streaming(let statusCode, let contentType, let events, let appendDoneFrame, let lifetimeToken):
+  case .streaming(
+    let statusCode, let contentType, let events, let appendDoneFrame, let lifetimeToken):
     let body = ResponseBody(
       asyncSequence: BackendStreamingBodySequence(
         events: events,

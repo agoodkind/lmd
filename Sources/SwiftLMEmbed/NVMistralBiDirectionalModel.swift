@@ -71,13 +71,16 @@ final class NVMistralBiDirectionalAttention: Module {
     var keys = keyProjection(hiddenStates)
     var values = valueProjection(hiddenStates)
 
-    queries = queries
+    queries =
+      queries
       .reshaped(batchSize, sequenceLength, attentionHeads, headDimension)
       .transposed(0, 2, 1, 3)
-    keys = keys
+    keys =
+      keys
       .reshaped(batchSize, sequenceLength, keyValueHeads, headDimension)
       .transposed(0, 2, 1, 3)
-    values = values
+    values =
+      values
       .reshaped(batchSize, sequenceLength, keyValueHeads, headDimension)
       .transposed(0, 2, 1, 3)
 
@@ -91,7 +94,8 @@ final class NVMistralBiDirectionalAttention: Module {
       scale: scale,
       mask: mask
     )
-    let output = attended
+    let output =
+      attended
       .transposed(0, 2, 1, 3)
       .reshaped(batchSize, sequenceLength, -1)
     return outputProjection(output)
@@ -191,7 +195,8 @@ final class NVMistralBiDirectionalModelInner: Module {
     attentionMask: MLXArray,
     dtype: DType
   ) -> MLXFast.ScaledDotProductAttentionMaskMode {
-    let keyPaddingMask = (attentionMask .== MLXArray(Int32(0)))
+    let keyPaddingMask =
+      (attentionMask .== MLXArray(Int32(0)))
       .asType(dtype)
       .expandedDimensions(axes: [1, 2])
       * MLXArray(Float(-1e9)).asType(dtype)

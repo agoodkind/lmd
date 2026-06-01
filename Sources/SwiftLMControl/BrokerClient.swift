@@ -78,7 +78,9 @@ public final class BrokerClient: @unchecked Sendable {
         }
       )
     } catch {
-      log.error("client.session_unavailable service=\(serviceName, privacy: .public) err=\(String(describing: error), privacy: .public)")
+      log.error(
+        "client.session_unavailable service=\(serviceName, privacy: .public) err=\(String(describing: error), privacy: .public)"
+      )
       throw BrokerClientError.sessionUnavailable(message: "\(error)")
     }
     log.info("client.session_opened service=\(serviceName, privacy: .public)")
@@ -180,7 +182,8 @@ public final class BrokerClient: @unchecked Sendable {
   public func events() -> AsyncThrowingStream<BrokerEvent, Error> {
     let stream = eventDelegate.makeStream()
     do {
-      try session.send(BrokerRequest.events) { [weak self] (result: Result<BrokerResponse, Error>) in
+      try session.send(BrokerRequest.events) {
+        [weak self] (result: Result<BrokerResponse, Error>) in
         guard let self else { return }
         switch result {
         case .success(let response):
@@ -217,7 +220,8 @@ public final class BrokerClient: @unchecked Sendable {
     let stream = pullDelegate.makeStream()
     log.notice("client.pull_started slug=\(slug, privacy: .public)")
     do {
-      try session.send(BrokerRequest.pullStart(slug: slug)) { [weak self] (result: Result<BrokerResponse, Error>) in
+      try session.send(BrokerRequest.pullStart(slug: slug)) {
+        [weak self] (result: Result<BrokerResponse, Error>) in
         switch result {
         case .success(let response):
           if case .error(let err) = response {
@@ -228,7 +232,9 @@ public final class BrokerClient: @unchecked Sendable {
         }
       }
     } catch {
-      log.error("client.pull_send_failed slug=\(slug, privacy: .public) err=\(String(describing: error), privacy: .public)")
+      log.error(
+        "client.pull_send_failed slug=\(slug, privacy: .public) err=\(String(describing: error), privacy: .public)"
+      )
       pullDelegate.fail(BrokerError(kind: .pullFailed, message: "\(error)"))
     }
     return stream
@@ -304,7 +310,9 @@ private final class PullEventDelegate: @unchecked Sendable {
         // Reply-handler RPCs (loaded/embeddings/etc.) are delivered
         // through the per-message reply continuation, not here. Anything
         // that lands in this branch is a server bug or a stale stream.
-        log.fault("client.unexpected_streamed_response type=\(String(describing: response), privacy: .public)")
+        log.fault(
+          "client.unexpected_streamed_response type=\(String(describing: response), privacy: .public)"
+        )
       }
     }
   }
@@ -318,7 +326,8 @@ private final class PullEventDelegate: @unchecked Sendable {
 
   func cancel(reason: String) {
     queue.sync {
-      continuation?.finish(throwing: BrokerError(kind: .internalError, message: "session canceled: \(reason)"))
+      continuation?.finish(
+        throwing: BrokerError(kind: .internalError, message: "session canceled: \(reason)"))
       continuation = nil
     }
   }
@@ -361,7 +370,8 @@ private final class BrokerEventDelegate: @unchecked Sendable {
 
   func cancel(reason: String) {
     queue.sync {
-      continuation?.finish(throwing: BrokerError(kind: .internalError, message: "session canceled: \(reason)"))
+      continuation?.finish(
+        throwing: BrokerError(kind: .internalError, message: "session canceled: \(reason)"))
       continuation = nil
     }
   }

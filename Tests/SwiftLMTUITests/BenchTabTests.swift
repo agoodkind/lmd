@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMTUI
 
 final class BenchTabTests: XCTestCase {
@@ -36,7 +37,7 @@ final class BenchTabTests: XCTestCase {
   func testQuitInputProducesQuitAction() {
     let t = BenchTab()
     let result = t.handle(.key(.quit))
-    if case .quit = result { /* ok */ } else { XCTFail("expected .quit, got \(result)") }
+    if case .quit = result { /* ok */  } else { XCTFail("expected .quit, got \(result)") }
   }
 
   // MARK: - Snapshots

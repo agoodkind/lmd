@@ -81,16 +81,16 @@ enum TuiqaKey {
   // Used by PTY and iTerm drivers.
   static func bytes(for key: String) -> [UInt8] {
     switch key {
-    case "Enter":  return [0x0D]
-    case "Tab":    return [0x09]
+    case "Enter": return [0x0D]
+    case "Tab": return [0x09]
     case "BSpace": return [0x7F]
     case "Escape": return [0x1B]
-    case "Space":  return [0x20]
-    case "Up":     return [0x1B, 0x5B, 0x41]
-    case "Down":   return [0x1B, 0x5B, 0x42]
-    case "Right":  return [0x1B, 0x5B, 0x43]
-    case "Left":   return [0x1B, 0x5B, 0x44]
-    case "PageUp":   return [0x1B, 0x5B, 0x35, 0x7E]
+    case "Space": return [0x20]
+    case "Up": return [0x1B, 0x5B, 0x41]
+    case "Down": return [0x1B, 0x5B, 0x42]
+    case "Right": return [0x1B, 0x5B, 0x43]
+    case "Left": return [0x1B, 0x5B, 0x44]
+    case "PageUp": return [0x1B, 0x5B, 0x35, 0x7E]
     case "PageDown": return [0x1B, 0x5B, 0x36, 0x7E]
     default:
       return Array(key.utf8)
@@ -310,7 +310,8 @@ final class ITermDriver: TUIDriver {
     var literal = ""
     func flushLiteral() {
       if !literal.isEmpty {
-        let esc = literal
+        let esc =
+          literal
           .replacingOccurrences(of: "\\", with: "\\\\")
           .replacingOccurrences(of: "\"", with: "\\\"")
         parts.append("\"\(esc)\"")
@@ -318,13 +319,25 @@ final class ITermDriver: TUIDriver {
       }
     }
     for b in bytes {
-      if b == 0x1B { flushLiteral(); parts.append("(ASCII character 27)") }
-      else if b == 0x0D { flushLiteral(); parts.append("(ASCII character 13)") }
-      else if b == 0x0A { flushLiteral(); parts.append("(ASCII character 10)") }
-      else if b == 0x09 { flushLiteral(); parts.append("(ASCII character 9)") }
-      else if b == 0x7F { flushLiteral(); parts.append("(ASCII character 127)") }
-      else if b == 0x08 { flushLiteral(); parts.append("(ASCII character 8)") }
-      else if b >= 0x20 && b < 0x7F {
+      if b == 0x1B {
+        flushLiteral()
+        parts.append("(ASCII character 27)")
+      } else if b == 0x0D {
+        flushLiteral()
+        parts.append("(ASCII character 13)")
+      } else if b == 0x0A {
+        flushLiteral()
+        parts.append("(ASCII character 10)")
+      } else if b == 0x09 {
+        flushLiteral()
+        parts.append("(ASCII character 9)")
+      } else if b == 0x7F {
+        flushLiteral()
+        parts.append("(ASCII character 127)")
+      } else if b == 0x08 {
+        flushLiteral()
+        parts.append("(ASCII character 8)")
+      } else if b >= 0x20 && b < 0x7F {
         literal.append(Character(UnicodeScalar(b)))
       } else {
         flushLiteral()
@@ -345,27 +358,29 @@ final class ITermDriver: TUIDriver {
     // Resolve to an absolute path so it does not depend on the iTerm
     // window's default working directory.
     let abs = NSString(string: binary).expandingTildeInPath
-    let absolute = (abs as NSString).isAbsolutePath
+    let absolute =
+      (abs as NSString).isAbsolutePath
       ? abs
       : (FileManager.default.currentDirectoryPath as NSString).appendingPathComponent(abs)
     let safePath = absolute.replacingOccurrences(of: "\\", with: "\\\\")
-                           .replacingOccurrences(of: "\"", with: "\\\"")
+      .replacingOccurrences(of: "\"", with: "\\\"")
     // Create window and run the binary as the session command directly.
     // Bypassing the shell avoids interference from shell plugins like
     // zsh-autosuggestions that fight with `write text` and insert phantom
     // characters. The session dies cleanly when the binary exits, so
     // sessionExists() gets a reliable signal for the quit assertion.
-    sessionID = osa("""
-      tell application "iTerm"
-        activate
-        set newWindow to (create window with default profile command "\(safePath)")
-        set theSession to current session of newWindow
-        tell theSession
-          set name to "\(sessionTag)"
+    sessionID = osa(
+      """
+        tell application "iTerm"
+          activate
+          set newWindow to (create window with default profile command "\(safePath)")
+          set theSession to current session of newWindow
+          tell theSession
+            set name to "\(sessionTag)"
+          end tell
+          return id of theSession
         end tell
-        return id of theSession
-      end tell
-    """)
+      """)
     started = true
     // Give iTerm a moment to spawn and for the binary to take over the pty.
     settle(0.8)
@@ -390,31 +405,32 @@ final class ITermDriver: TUIDriver {
   // inside the session, so a real interactive session is always
   // processing and will not be swept.
   private func cleanupAllTuiqaWindows() {
-    _ = osa("""
-      tell application "iTerm"
-        try
-          set toClose to {}
-          repeat with w in windows
-            try
-              set sess to current session of w
-              set shouldClose to false
+    _ = osa(
+      """
+        tell application "iTerm"
+          try
+            set toClose to {}
+            repeat with w in windows
               try
-                if name of sess starts with "tuiqa-" then set shouldClose to true
+                set sess to current session of w
+                set shouldClose to false
+                try
+                  if name of sess starts with "tuiqa-" then set shouldClose to true
+                end try
+                try
+                  if is processing of sess is false then set shouldClose to true
+                end try
+                if shouldClose then copy w to end of toClose
               end try
+            end repeat
+            repeat with w in toClose
               try
-                if is processing of sess is false then set shouldClose to true
+                close w
               end try
-              if shouldClose then copy w to end of toClose
-            end try
-          end repeat
-          repeat with w in toClose
-            try
-              close w
-            end try
-          end repeat
-        end try
-      end tell
-    """)
+            end repeat
+          end try
+        end tell
+      """)
   }
 
   func kill() {
@@ -424,23 +440,24 @@ final class ITermDriver: TUIDriver {
     // has open. The broad sweep below is a safety net for crashed
     // sessions from previous runs.
     if !sessionID.isEmpty {
-      _ = osa("""
-        tell application "iTerm"
-          try
-            repeat with w in windows
-              repeat with t in tabs of w
-                repeat with s in sessions of t
-                  try
-                    if (id of s as string) is "\(sessionID)" then
-                      close w
-                      exit repeat
-                    end if
-                  end try
+      _ = osa(
+        """
+          tell application "iTerm"
+            try
+              repeat with w in windows
+                repeat with t in tabs of w
+                  repeat with s in sessions of t
+                    try
+                      if (id of s as string) is "\(sessionID)" then
+                        close w
+                        exit repeat
+                      end if
+                    end try
+                  end repeat
                 end repeat
-              end repeat
-            end try
-          end tell
-      """)
+              end try
+            end tell
+        """)
     }
     cleanupAllTuiqaWindows()
     started = false
@@ -454,11 +471,13 @@ final class ITermDriver: TUIDriver {
   func pasteRaw(_ bytes: [UInt8]) {
     guard !sessionID.isEmpty else { return }
     let payload = escapeForWriteText(bytes)
-    _ = osa(scriptTargetingSession(body: """
-      tell s
-        write text \(payload) newline NO
-      end tell
-    """))
+    _ = osa(
+      scriptTargetingSession(
+        body: """
+            tell s
+              write text \(payload) newline NO
+            end tell
+          """))
   }
 
   // Iterate every session across every tab across every window and pick the
@@ -466,23 +485,23 @@ final class ITermDriver: TUIDriver {
   // filter which has quirks in older AppleScript versions.
   private func scriptTargetingSession(body: String) -> String {
     return """
-      tell application "iTerm"
-        try
-          repeat with w in windows
-            repeat with t in tabs of w
-              repeat with s in sessions of t
-                try
-                  if (id of s as string) is "\(sessionID)" then
-                    \(body)
-                  end if
-                end try
+        tell application "iTerm"
+          try
+            repeat with w in windows
+              repeat with t in tabs of w
+                repeat with s in sessions of t
+                  try
+                    if (id of s as string) is "\(sessionID)" then
+                      \(body)
+                    end if
+                  end try
+                end repeat
               end repeat
             end repeat
-          end repeat
-        end try
-        return ""
-      end tell
-    """
+          end try
+          return ""
+        end tell
+      """
   }
 
   func capture() -> String {
@@ -532,7 +551,8 @@ final class ITermDriver: TUIDriver {
     // One osascript round-trip that selects the window, activates iTerm,
     // and returns the window's screen-coord bounds. Doing this in one
     // call avoids race conditions between activation and bounds read.
-    let boundsRaw = osa("""
+    let boundsRaw = osa(
+      """
       tell application "iTerm"
         activate
         repeat with w in windows
@@ -551,7 +571,9 @@ final class ITermDriver: TUIDriver {
         return ""
       end tell
       """)
-    let parts = boundsRaw.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+    let parts = boundsRaw.split(separator: ",").compactMap {
+      Int($0.trimmingCharacters(in: .whitespaces))
+    }
     guard parts.count == 4 else { return false }
     let (x1, y1, x2, y2) = (parts[0], parts[1], parts[2], parts[3])
     let width = x2 - x1
@@ -663,23 +685,27 @@ func qaLmdTui(driver: TUIDriver, binDir: String) {
   settle(1.5)
   var screen = driver.capture()
   printScreen("launch", screen)
-  assertContains("lmd-tui:launch:topbar",   "lmd", in: screen)
-  assertContains("lmd-tui:launch:tab-list", "monitor",   in: screen)
-  assertContains("lmd-tui:launch:tab-list", "library",   in: screen)
+  assertContains("lmd-tui:launch:topbar", "lmd", in: screen)
+  assertContains("lmd-tui:launch:tab-list", "monitor", in: screen)
+  assertContains("lmd-tui:launch:tab-list", "library", in: screen)
   assertNotContains("lmd-tui:launch:crash-free", "exception", in: screen)
   assertNotContains("lmd-tui:launch:crash-free", "Exception", in: screen)
 
   // Tab 2: Library
-  driver.sendKey("2"); settle(0.5)
+  driver.sendKey("2")
+  settle(0.5)
   screen = driver.capture()
   printScreen("tab2/library", screen)
   assertContains("lmd-tui:tab:switch-by-number", "library", in: screen)
-  assertContains("lmd-tui:library:active",       "library", in: screen)
+  assertContains("lmd-tui:library:active", "library", in: screen)
 
   // Keyboard navigation
-  driver.sendKey("j"); settle(0.3)
-  driver.sendKey("j"); settle(0.3)
-  driver.sendKey("k"); settle(0.3)
+  driver.sendKey("j")
+  settle(0.3)
+  driver.sendKey("j")
+  settle(0.3)
+  driver.sendKey("k")
+  settle(0.3)
   screen = driver.capture()
   assertNotContains("lmd-tui:library:keyboard-nav", "exception", in: screen)
 
@@ -689,68 +715,86 @@ func qaLmdTui(driver: TUIDriver, binDir: String) {
   //   `MODELS  10 · sort:name · / search · s sort`
   // to `MODELS  N/10 · "q" · esc clear`. The `esc clear` hint only appears
   // while a query is active, so we use it as the "filtered" signal.
-  driver.sendKey("/"); settle(0.3)
-  driver.sendKey("q"); settle(0.2)
-  driver.sendKey("Enter"); settle(0.3)
+  driver.sendKey("/")
+  settle(0.3)
+  driver.sendKey("q")
+  settle(0.2)
+  driver.sendKey("Enter")
+  settle(0.3)
   screen = driver.capture()
   assertContains("lmd-tui:library:search-filter", "esc clear", in: screen)
 
   // Clear search by entering search then Escape. The `esc clear` hint
   // goes away and the `/ search · s sort` hint returns.
-  driver.sendKey("/"); settle(0.2)
-  driver.sendKey("Escape"); settle(0.3)
+  driver.sendKey("/")
+  settle(0.2)
+  driver.sendKey("Escape")
+  settle(0.3)
   screen = driver.capture()
   assertContains("lmd-tui:library:search-clear", "/ search", in: screen)
 
   // Sort: press `s` to cycle sort mode once. Screen should show sort:size.
-  driver.sendKey("s"); settle(0.3)
+  driver.sendKey("s")
+  settle(0.3)
   screen = driver.capture()
   assertContains("lmd-tui:library:sort-cycle", "sort:size", in: screen)
   // Cycle through the remaining modes and back to name.
-  driver.sendKey("s"); settle(0.2)
-  driver.sendKey("s"); settle(0.2)
+  driver.sendKey("s")
+  settle(0.2)
+  driver.sendKey("s")
+  settle(0.2)
 
   // Mouse click in library list
-  driver.mouseClick(col: 60, row: 10); settle(0.3)
+  driver.mouseClick(col: 60, row: 10)
+  settle(0.3)
   screen = driver.capture()
   assertNotContains("lmd-tui:library:mouse-click", "exception", in: screen)
 
   // Mouse scroll (wheel down + up)
-  driver.mouseScrollDown(col: 60, row: 15, times: 3); settle(0.3)
-  driver.mouseScrollUp(col: 60, row: 15, times: 3); settle(0.3)
+  driver.mouseScrollDown(col: 60, row: 15, times: 3)
+  settle(0.3)
+  driver.mouseScrollUp(col: 60, row: 15, times: 3)
+  settle(0.3)
   screen = driver.capture()
   assertNotContains("lmd-tui:library:mouse-scroll", "exception", in: screen)
 
   // Hover + scroll: verify region-scoped scroll does not crash
-  driver.mouseHoverAndScroll(col: 60, row: 15, scrollDown: true, times: 2); settle(0.3)
+  driver.mouseHoverAndScroll(col: 60, row: 15, scrollDown: true, times: 2)
+  settle(0.3)
   screen = driver.capture()
   assertNotContains("lmd-tui:library:hover-scroll", "exception", in: screen)
 
   // Tab 3: Bench
-  driver.sendKey("3"); settle(0.5)
+  driver.sendKey("3")
+  settle(0.5)
   screen = driver.capture()
   printScreen("tab3/bench", screen)
   assertContains("lmd-tui:bench:active", "bench", in: screen)
-  driver.mouseScrollDown(col: 60, row: 20, times: 2); settle(0.3)
+  driver.mouseScrollDown(col: 60, row: 20, times: 2)
+  settle(0.3)
   screen = driver.capture()
   assertNotContains("lmd-tui:bench:mouse-scroll", "exception", in: screen)
 
   // Tab 4: Events
-  driver.sendKey("4"); settle(0.5)
+  driver.sendKey("4")
+  settle(0.5)
   screen = driver.capture()
   printScreen("tab4/events", screen)
   assertContains("lmd-tui:events:active", "events", in: screen)
-  driver.mouseScrollDown(col: 60, row: 20, times: 2); settle(0.3)
+  driver.mouseScrollDown(col: 60, row: 20, times: 2)
+  settle(0.3)
   screen = driver.capture()
   assertNotContains("lmd-tui:events:mouse-scroll", "exception", in: screen)
 
   // Tab 1: Monitor
-  driver.sendKey("1"); settle(0.5)
+  driver.sendKey("1")
+  settle(0.5)
   screen = driver.capture()
   printScreen("tab1/monitor", screen)
-  assertContains("lmd-tui:monitor:active",         "monitor", in: screen)
+  assertContains("lmd-tui:monitor:active", "monitor", in: screen)
   assertContains("lmd-tui:monitor:thermal-section", "THERMAL", in: screen)
-  driver.mouseScrollDown(col: 60, row: 20, times: 3); settle(0.3)
+  driver.mouseScrollDown(col: 60, row: 20, times: 3)
+  settle(0.3)
   screen = driver.capture()
   assertNotContains("lmd-tui:monitor:mouse-scroll", "exception", in: screen)
 
@@ -758,15 +802,20 @@ func qaLmdTui(driver: TUIDriver, binDir: String) {
   // events), so 4 Tabs cycles all the way back to monitor. Go 1 Tab to
   // land on library and assert, then one more round to confirm full
   // cycle returns to monitor's THERMAL.
-  driver.sendKey("Tab"); settle(0.25)
+  driver.sendKey("Tab")
+  settle(0.25)
   screen = driver.capture()
   assertContains("lmd-tui:tab:switch-by-cycle", "library", in: screen)
-  for _ in 0..<3 { driver.sendKey("Tab"); settle(0.25) }
+  for _ in 0..<3 {
+    driver.sendKey("Tab")
+    settle(0.25)
+  }
   screen = driver.capture()
   assertContains("lmd-tui:tab:full-cycle-back-to-first", "THERMAL", in: screen)
 
   // Unbound key
-  driver.sendKey("~"); settle(0.3)
+  driver.sendKey("~")
+  settle(0.3)
   screen = driver.capture()
   assertNotContains("lmd-tui:resilience:unbound-key", "exception", in: screen)
 
@@ -778,8 +827,10 @@ func qaLmdTui(driver: TUIDriver, binDir: String) {
 
   // Quit. Force monitor tab first so we're not on library (which has its
   // own key handling that could complicate `q`).
-  driver.sendKey("1"); settle(0.3)
-  driver.sendKey("q"); settle(1.5)
+  driver.sendKey("1")
+  settle(0.3)
+  driver.sendKey("q")
+  settle(1.5)
   assertSessionGone("lmd-tui:quit:clean-exit", driver)
 
   driver.kill()
@@ -802,9 +853,10 @@ func loadRequiredLabels(from path: String) -> [String]? {
 // every driver's exercisedLabels set. Any missing label under any driver
 // counts as a failure.
 func enforceCoverage(requiredLabels: [String], scopeFilter: String?, driverNames: [String]) -> Int {
-  let required = scopeFilter.map { prefix in
-    requiredLabels.filter { $0.hasPrefix("\(prefix):") }
-  } ?? requiredLabels
+  let required =
+    scopeFilter.map { prefix in
+      requiredLabels.filter { $0.hasPrefix("\(prefix):") }
+    } ?? requiredLabels
   var deficit = 0
 
   say("\n========================================")
@@ -827,7 +879,8 @@ func enforceCoverage(requiredLabels: [String], scopeFilter: String?, driverNames
 
     let manifestSet = Set(required)
     let scopePrefix = scopeFilter.map { "\($0):" } ?? ""
-    let orphaned = ex
+    let orphaned =
+      ex
       .filter { scopePrefix.isEmpty || $0.hasPrefix(scopePrefix) }
       .filter { !manifestSet.contains($0) }
       .sorted()
@@ -880,7 +933,9 @@ public enum LMDQATool {
 
     let driverNames: [String]
     if let spec = driverSpec {
-      driverNames = spec.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+      driverNames = spec.split(separator: ",").map {
+        String($0).trimmingCharacters(in: .whitespaces)
+      }
     } else {
       driverNames = ["tmux", "pty", "iterm"]
     }
@@ -915,7 +970,8 @@ public enum LMDQATool {
     var coverageDeficit = 0
     if checkCoverage {
       if let required = loadRequiredLabels(from: coverageFile) {
-        coverageDeficit = enforceCoverage(requiredLabels: required, scopeFilter: scopeFilter, driverNames: driverNames)
+        coverageDeficit = enforceCoverage(
+          requiredLabels: required, scopeFilter: scopeFilter, driverNames: driverNames)
       } else {
         say("\n[coverage] WARN: manifest not found at \(coverageFile). Skipping coverage check.")
       }

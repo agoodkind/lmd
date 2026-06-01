@@ -95,12 +95,14 @@ final class TUILaunchTests: XCTestCase {
       let stdoutSnapshot = stdoutBuffer.snapshot()
       let stderrSnapshot = stderrBuffer.snapshot()
       if let text = String(data: stdoutSnapshot, encoding: .utf8),
-         text.contains(expectedMarker) {
+        text.contains(expectedMarker)
+      {
         saw = true
         break
       }
       if let stderrText = String(data: stderrSnapshot, encoding: .utf8),
-         stderrText.contains("lmd-tui: broker unavailable") {
+        stderrText.contains("lmd-tui: broker unavailable")
+      {
         brokerUnavailable = true
       }
       Thread.sleep(forTimeInterval: 0.05)

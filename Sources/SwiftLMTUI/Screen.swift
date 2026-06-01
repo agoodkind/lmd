@@ -50,7 +50,9 @@ public enum Screen {
   // MARK: - Size
 
   /// Terminal size as (rows, columns).
-  public static func currentSize(fallback: (rows: Int, cols: Int) = (rows: 40, cols: 120)) -> (rows: Int, cols: Int) {
+  public static func currentSize(fallback: (rows: Int, cols: Int) = (rows: 40, cols: 120)) -> (
+    rows: Int, cols: Int
+  ) {
     // `stty size` prints "rows cols" to stdout. We pin its stdin to /dev/tty
     // explicitly because callers routinely put inherited stdin into raw or
     // non-blocking mode, which breaks stty's ioctl probing.

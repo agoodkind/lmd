@@ -46,7 +46,8 @@ public enum SwapUsage {
 /// Count real swap files on disk under `/private/var/vm`.
 public enum SwapFiles {
   public static func count() -> Int {
-    guard let contents = try? FileManager.default.contentsOfDirectory(atPath: "/private/var/vm") else {
+    guard let contents = try? FileManager.default.contentsOfDirectory(atPath: "/private/var/vm")
+    else {
       return 0
     }
     return contents.filter { $0.hasPrefix("swapfile") }.count

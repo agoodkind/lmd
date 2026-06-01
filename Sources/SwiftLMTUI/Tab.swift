@@ -117,7 +117,9 @@ public final class TabRouter {
   public func setActive(index: Int) {
     guard !tabs.isEmpty else { return }
     let clamped = max(0, min(index, tabs.count - 1))
-    log.debug("tab.activated index=\(clamped, privacy: .public) label=\(self.tabs[clamped].label, privacy: .public)")
+    log.debug(
+      "tab.activated index=\(clamped, privacy: .public) label=\(self.tabs[clamped].label, privacy: .public)"
+    )
     activeIndex = clamped
   }
 

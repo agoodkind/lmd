@@ -13,8 +13,8 @@
 import AppLogger
 import Darwin
 import Foundation
-import SwiftLMCore
 import SwiftLMControl
+import SwiftLMCore
 import SwiftLMRuntime
 import SwiftLMTUI
 
@@ -53,7 +53,7 @@ func latestMonitorSnapshot() -> MonitorSnapshot {
   let lines = text.split(separator: "\n").map(String.init)
   for line in lines.reversed() where !line.isEmpty {
     guard let jsonData = line.data(using: .utf8),
-          let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+      let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
     else { continue }
     return MonitorSnapshot.from(json: obj)
   }
@@ -111,12 +111,13 @@ let stateLock = NSLock()
 func appendEvent(_ event: BrokerEvent) {
   let message = event.message.isEmpty ? event.kind.rawValue : event.message
   stateLock.lock()
-  events.append(EventEntry(
-    kind: event.kind.rawValue,
-    model: event.model ?? "-",
-    message: message,
-    timestamp: event.ts
-  ))
+  events.append(
+    EventEntry(
+      kind: event.kind.rawValue,
+      model: event.model ?? "-",
+      message: message,
+      timestamp: event.ts
+    ))
   stateLock.unlock()
   renderFrame()
 }
@@ -158,7 +159,8 @@ func renderFrame() {
   let barFg = Theme.barFg
   let barAccent = Theme.barAccent
   let title = " \(barAccent)▌ lmd \(barFg)  "
-  let tabBar = router.tabBar(active: barAccent, dim: Theme.barDim, reset: Ansi.reset + barBg + barFg)
+  let tabBar = router.tabBar(
+    active: barAccent, dim: Theme.barDim, reset: Ansi.reset + barBg + barFg)
   let topFill = max(0, cols - VisibleText.width(title) - VisibleText.width(tabBar) - 1)
   let topBar = barBg + title + tabBar + String(repeating: " ", count: topFill) + Ansi.reset
   buffer.put(row: 1, topBar)
@@ -173,7 +175,8 @@ func renderFrame() {
   let footBg = Theme.footBg
   let footFg = Theme.footFg
   let tabCount = router.tabs.count
-  let keys = " \(footBg)\(footFg)tab/1-\(tabCount) switch . j/k move . l load . u unload . q quit \(Ansi.reset)"
+  let keys =
+    " \(footBg)\(footFg)tab/1-\(tabCount) switch . j/k move . l load . u unload . q quit \(Ansi.reset)"
   let bottomFill = max(0, cols - VisibleText.width(keys))
   let bottomBar = keys + footBg + String(repeating: " ", count: bottomFill) + Ansi.reset
   buffer.put(row: rows, bottomBar)
@@ -220,7 +223,9 @@ func handleAction(_ action: TabAction) {
           do {
             _ = try await broker.preload(model: m)
           } catch {
-            log.error("tui.preload_failed model=\(m, privacy: .public) err=\(String(describing: error), privacy: .public)")
+            log.error(
+              "tui.preload_failed model=\(m, privacy: .public) err=\(String(describing: error), privacy: .public)"
+            )
           }
         }
       }
@@ -230,7 +235,9 @@ func handleAction(_ action: TabAction) {
           do {
             _ = try await broker.unload(model: m)
           } catch {
-            log.error("tui.unload_failed model=\(m, privacy: .public) err=\(String(describing: error), privacy: .public)")
+            log.error(
+              "tui.unload_failed model=\(m, privacy: .public) err=\(String(describing: error), privacy: .public)"
+            )
           }
         }
       }
@@ -372,7 +379,8 @@ public enum LMDTUIHost {
 
         if n >= 6 && buf[0] == 0x1B {
           if let mouseEvent = MouseParser.parse(Array(buf[0..<n]), start: 0, length: n) {
-            let input: TabInput = (mouseEvent.isWheelUp || mouseEvent.isWheelDown)
+            let input: TabInput =
+              (mouseEvent.isWheelUp || mouseEvent.isWheelDown)
               ? .mouseWheel(mouseEvent)
               : .mouseClick(mouseEvent)
             stateLock.lock()

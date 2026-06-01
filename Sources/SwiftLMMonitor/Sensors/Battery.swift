@@ -49,7 +49,8 @@ public enum Battery {
     for raw in text.split(separator: "\n") {
       let line = String(raw)
       if line.contains("\"InstantAmperage\""),
-         let r = line.range(of: #"=\s*(\d+)"#, options: .regularExpression) {
+        let r = line.range(of: #"=\s*(\d+)"#, options: .regularExpression)
+      {
         let s = String(line[r])
           .replacingOccurrences(of: "=", with: "")
           .trimmingCharacters(in: .whitespaces)
@@ -58,9 +59,10 @@ public enum Battery {
         }
       }
       if line.contains("\"Voltage\""),
-         !line.contains("Pack"),
-         !line.contains("Cell"),
-         let r = line.range(of: #"=\s*(\d+)"#, options: .regularExpression) {
+        !line.contains("Pack"),
+        !line.contains("Cell"),
+        let r = line.range(of: #"=\s*(\d+)"#, options: .regularExpression)
+      {
         let s = String(line[r])
           .replacingOccurrences(of: "=", with: "")
           .trimmingCharacters(in: .whitespaces)
@@ -78,7 +80,8 @@ public enum Battery {
     }
     var source = "unknown"
     if let first = text.split(separator: "\n").first,
-       let range = first.range(of: "'[^']+'", options: .regularExpression) {
+      let range = first.range(of: "'[^']+'", options: .regularExpression)
+    {
       source = String(first[range]).trimmingCharacters(in: CharacterSet(charactersIn: "'"))
     }
     var percent = 0

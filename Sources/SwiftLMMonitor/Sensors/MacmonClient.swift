@@ -60,7 +60,7 @@ public final class MacmonClient: Sendable {
     URLSession.shared.dataTask(with: req) { data, _, _ in
       defer { sem.signal() }
       guard let d = data,
-            let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any]
+        let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any]
       else { return }
       box.value = obj
     }.resume()

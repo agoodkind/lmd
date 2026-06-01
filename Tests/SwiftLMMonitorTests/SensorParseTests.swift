@@ -7,22 +7,23 @@
 //
 
 import XCTest
+
 @testable import SwiftLMMonitor
 
 final class VMStatParseTests: XCTestCase {
   func testExtractsFields() {
     let sample = """
-Mach Virtual Memory Statistics:
-Pages free:                               1234.
-Pages active:                          5678.
-Pages inactive:                         9012.
-Pages wired down:                        345.
-Pages stored in compressor:           67890.
-Pageins:                              11111.
-Pageouts:                                22.
-Compressions:                        333333.
-Decompressions:                      444444.
-"""
+      Mach Virtual Memory Statistics:
+      Pages free:                               1234.
+      Pages active:                          5678.
+      Pages inactive:                         9012.
+      Pages wired down:                        345.
+      Pages stored in compressor:           67890.
+      Pageins:                              11111.
+      Pageouts:                                22.
+      Compressions:                        333333.
+      Decompressions:                      444444.
+      """
     let snap = VMStat.parse(sample)
     XCTAssertEqual(snap.pagesFree, 1234)
     XCTAssertEqual(snap.pagesActive, 5678)
@@ -55,9 +56,9 @@ final class LoadAverageParseTests: XCTestCase {
 final class MemoryPressureParseTests: XCTestCase {
   func testExtractsPercentage() {
     let sample = """
-The system has 137438953472 (33554432 pages) of RAM
-System-wide memory free percentage: 64%
-"""
+      The system has 137438953472 (33554432 pages) of RAM
+      System-wide memory free percentage: 64%
+      """
     XCTAssertEqual(MemoryPressure.parseFreePercent(sample), 64)
   }
 }
@@ -65,9 +66,9 @@ System-wide memory free percentage: 64%
 final class BatteryParseTests: XCTestCase {
   func testChargingOnAC() {
     let sample = """
-Now drawing from 'AC Power'
- -InternalBattery-0 (id=12345) 82%; charging; not in use
-"""
+      Now drawing from 'AC Power'
+       -InternalBattery-0 (id=12345) 82%; charging; not in use
+      """
     let snap = Battery.parse(sample)
     XCTAssertEqual(snap.percent, 82)
     XCTAssertEqual(snap.acState, "charging")
@@ -76,9 +77,9 @@ Now drawing from 'AC Power'
 
   func testDischargingOnBattery() {
     let sample = """
-Now drawing from 'Battery'
- -InternalBattery-0 (id=12345) 45%; discharging; not in use
-"""
+      Now drawing from 'Battery'
+       -InternalBattery-0 (id=12345) 45%; discharging; not in use
+      """
     let snap = Battery.parse(sample)
     XCTAssertEqual(snap.percent, 45)
     XCTAssertEqual(snap.acState, "battery")

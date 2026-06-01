@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMRuntime
 
 final class BenchConfigTests: XCTestCase {

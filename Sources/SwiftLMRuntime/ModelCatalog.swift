@@ -116,7 +116,9 @@ public struct ModelCatalog {
     // is not a model and should be skipped. We guard on that here.
     let last = (path as NSString).lastPathComponent
     let parent = ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent
-    let grand = (((path as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent as NSString).lastPathComponent
+    let grand =
+      (((path as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent
+      as NSString).lastPathComponent
 
     // Skip the `refs/main` sibling which is not a model directory.
     if parent == "refs" {
@@ -185,12 +187,13 @@ public struct ModelCatalog {
     }
     let configPath = "\(modelDir)/config.json"
     guard let data = try? Data(contentsOf: URL(fileURLWithPath: configPath)),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     else {
       return heuristicNameKind(displayName: displayName, slug: slug)
     }
     if let arch = (json["architectures"] as? [String])?.first,
-       architectureLooksEmbedding(arch) {
+      architectureLooksEmbedding(arch)
+    {
       return .embedding
     }
     if let mt = json["model_type"] as? String {
@@ -257,7 +260,8 @@ public struct ModelCatalog {
     config: [String: Any],
     metadata: [[String: Any]]
   ) -> Double? {
-    let isSmolVLM2 = stringValue(config["model_type"])?.lowercased().hasPrefix("smolvlm") == true
+    let isSmolVLM2 =
+      stringValue(config["model_type"])?.lowercased().hasPrefix("smolvlm") == true
       || metadata.contains(where: { json in
         stringValue(json["processor_class"])?.contains("SmolVLM") == true
       })
@@ -266,7 +270,8 @@ public struct ModelCatalog {
     }
     for json in metadata {
       if let sampling = json["video_sampling"] as? [String: Any],
-         let fps = doubleValue(sampling["fps"]) {
+        let fps = doubleValue(sampling["fps"])
+      {
         return fps
       }
       if let fps = doubleValue(json["video_fps"]) {
@@ -280,7 +285,8 @@ public struct ModelCatalog {
     config: [String: Any],
     metadata: [[String: Any]]
   ) -> Double? {
-    let isGemma4 = stringValue(config["model_type"])?.lowercased().hasPrefix("gemma4") == true
+    let isGemma4 =
+      stringValue(config["model_type"])?.lowercased().hasPrefix("gemma4") == true
       || metadata.contains(where: { json in
         stringValue(json["processor_class"])?.contains("Gemma4") == true
       })
@@ -418,11 +424,13 @@ public struct ModelCatalog {
       .skipsHiddenFiles,
       .skipsPackageDescendants,
     ]
-    guard let enumerator = fileManager.enumerator(
-      at: URL(fileURLWithPath: path),
-      includingPropertiesForKeys: [.fileSizeKey, .isSymbolicLinkKey, .isRegularFileKey],
-      options: options
-    ) else {
+    guard
+      let enumerator = fileManager.enumerator(
+        at: URL(fileURLWithPath: path),
+        includingPropertiesForKeys: [.fileSizeKey, .isSymbolicLinkKey, .isRegularFileKey],
+        options: options
+      )
+    else {
       return 0
     }
     var visited = 0
@@ -432,7 +440,9 @@ public struct ModelCatalog {
       if visited > maxVisited { break }
 
       // Prefer the regular-file path: count its size directly.
-      if let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isSymbolicLinkKey, .isRegularFileKey]) {
+      if let values = try? url.resourceValues(forKeys: [
+        .fileSizeKey, .isSymbolicLinkKey, .isRegularFileKey,
+      ]) {
         if values.isRegularFile == true, let bytes = values.fileSize {
           total += Int64(bytes)
           continue
@@ -444,8 +454,9 @@ public struct ModelCatalog {
         if values.isSymbolicLink == true {
           let resolved = url.resolvingSymlinksInPath()
           if let rv = try? resolved.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
-             rv.isRegularFile == true,
-             let bytes = rv.fileSize {
+            rv.isRegularFile == true,
+            let bytes = rv.fileSize
+          {
             total += Int64(bytes)
           }
         }

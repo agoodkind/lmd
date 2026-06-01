@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMRuntime
 
 final class JSONEnforcementTests: XCTestCase {
@@ -142,8 +143,8 @@ final class JSONEnforcementTests: XCTestCase {
       "model": "x",
       "messages": [["role": "user", "content": "hi"]],
       "response_format": [
-        "type": "json_schema",
-        // no "json_schema.schema"
+        "type": "json_schema"
+          // no "json_schema.schema"
       ],
     ])
     let out = injectJSONInstructionIfNeeded(&json)

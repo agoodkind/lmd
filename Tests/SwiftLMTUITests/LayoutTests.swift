@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMTUI
 
 final class LayoutTests: XCTestCase {

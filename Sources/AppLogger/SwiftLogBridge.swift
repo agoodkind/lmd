@@ -85,7 +85,8 @@ struct SwiftLogToOSLogBackend: LogHandler {
     case .stringConvertible(let s): return s.description
     case .array(let a): return "[" + a.map(describe).joined(separator: ",") + "]"
     case .dictionary(let d):
-      return "{" + d.sorted { $0.key < $1.key }
+      return "{"
+        + d.sorted { $0.key < $1.key }
         .map { "\($0.key):\(describe($0.value))" }
         .joined(separator: ",") + "}"
     }

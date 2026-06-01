@@ -92,7 +92,8 @@ struct SmokeConfiguration {
 
   init(environment: [String: String], repoRoot: URL) throws {
     let binaryDirectoryPath = environment["LMD_BINARY_DIR"] ?? "Products/Build/Release"
-    binaryDirectory = URL(fileURLWithPath: binaryDirectoryPath, relativeTo: repoRoot)
+    binaryDirectory =
+      URL(fileURLWithPath: binaryDirectoryPath, relativeTo: repoRoot)
       .standardizedFileURL
 
     host = environment["LMD_HOST"] ?? "localhost"
@@ -103,7 +104,8 @@ struct SmokeConfiguration {
     useRunningDaemon = environment["LMD_SMOKE_USE_RUNNING_DAEMON"] == "1"
     if let portValue = environment["LMD_PORT"], !portValue.isEmpty {
       guard let parsedPort = Int(portValue), (1...65_535).contains(parsedPort) else {
-        throw ToolError.failure("LMD_PORT must be an integer from 1 through 65535, got \(portValue)")
+        throw ToolError.failure(
+          "LMD_PORT must be an integer from 1 through 65535, got \(portValue)")
       }
       port = parsedPort
     } else if useRunningDaemon {
@@ -401,7 +403,8 @@ final class DevTool {
 
       let parent = current.deletingLastPathComponent()
       if parent.path == current.path {
-        throw ToolError.failure("could not find repo root from \(FileManager.default.currentDirectoryPath)")
+        throw ToolError.failure(
+          "could not find repo root from \(FileManager.default.currentDirectoryPath)")
       }
       current = parent
     }
@@ -534,7 +537,8 @@ final class DevTool {
     if hasMetalCompiler() {
       return
     }
-    try writeLine("[preflight] Metal toolchain missing; running xcodebuild -downloadComponent MetalToolchain")
+    try writeLine(
+      "[preflight] Metal toolchain missing; running xcodebuild -downloadComponent MetalToolchain")
     try runPassthrough("xcodebuild", ["-downloadComponent", "MetalToolchain"])
     guard hasMetalCompiler() else {
       throw ToolError.failure(
@@ -818,13 +822,15 @@ final class DevTool {
     if let target {
       args.append(target)
     }
-    try runPassthrough(releaseBuildDirectory().appendingPathComponent("lmd").path, args, environment: env)
+    try runPassthrough(
+      releaseBuildDirectory().appendingPathComponent("lmd").path, args, environment: env)
   }
 
   private func logAudit() throws {
     try writeLine("[log-audit] scanning for forbidden output calls...")
     let swiftFiles = try sourceSwiftFiles(excludingPathComponent: "AppLogger")
-    let outputPattern = try NSRegularExpression(pattern: "(^|[^A-Za-z_])(print|NSLog|debugPrint|dump)\\(")
+    let outputPattern = try NSRegularExpression(
+      pattern: "(^|[^A-Za-z_])(print|NSLog|debugPrint|dump)\\(")
     var failed = false
 
     for file in swiftFiles {
@@ -836,7 +842,8 @@ final class DevTool {
       }
     }
     if failed {
-      throw ToolError.failure("[log-audit] FAILED: replace with log.<level>(...) or FileHandle.standardOutput.write")
+      throw ToolError.failure(
+        "[log-audit] FAILED: replace with log.<level>(...) or FileHandle.standardOutput.write")
     }
     try writeLine("[log-audit]   output calls: OK")
 
@@ -862,7 +869,8 @@ final class DevTool {
       }
     }
     if failed {
-      throw ToolError.failure("[log-audit] FAILED: swift-log must route through AppLogger/SwiftLogBridge")
+      throw ToolError.failure(
+        "[log-audit] FAILED: swift-log must route through AppLogger/SwiftLogBridge")
     }
     try writeLine("[log-audit]   swift-log direct use: OK")
     try writeLine("[log-audit] PASSED")
@@ -891,10 +899,13 @@ final class DevTool {
       ]
     )
     try result.output.write(to: captureFile, atomically: true, encoding: .utf8)
-    try writeLine("[log-smoke] capture size: \(result.output.split(separator: "\n").count) lines at \(captureFile.path)")
+    try writeLine(
+      "[log-smoke] capture size: \(result.output.split(separator: "\n").count) lines at \(captureFile.path)"
+    )
 
     if result.output.contains("<private>") {
-      throw ToolError.failure("[log-smoke] FAILED: <private> redactions detected. Capture at \(captureFile.path)")
+      throw ToolError.failure(
+        "[log-smoke] FAILED: <private> redactions detected. Capture at \(captureFile.path)")
     }
 
     try removeIfExists(captureFile)
@@ -908,7 +919,9 @@ final class DevTool {
       throw ToolError.failure("notary-setup: Apple ID is required")
     }
 
-    try writeLine("[notary-setup] storing credentials in keychain profile: \(try signing.required("NOTARY_PROFILE"))")
+    try writeLine(
+      "[notary-setup] storing credentials in keychain profile: \(try signing.required("NOTARY_PROFILE"))"
+    )
     try writeLine("[notary-setup] team: \(try signing.required("DEVELOPMENT_TEAM"))")
     try runPassthrough(
       "xcrun",
@@ -963,14 +976,18 @@ final class DevTool {
     try stageSignedBinaries(into: scratch)
 
     let zipPath = productsDirectory().appendingPathComponent("lmd-\(artifactStamp()).zip")
-    try runPassthrough("/usr/bin/ditto", ["-c", "-k", "--keepParent", ".", zipPath.path], currentDirectory: scratch)
+    try runPassthrough(
+      "/usr/bin/ditto", ["-c", "-k", "--keepParent", ".", zipPath.path], currentDirectory: scratch)
 
     switch mode {
     case .local:
       let signing = try localSigningConfig()
       try runPassthrough(
         "xcrun",
-        ["notarytool", "submit", zipPath.path, "--keychain-profile", try signing.required("NOTARY_PROFILE"), "--wait"]
+        [
+          "notarytool", "submit", zipPath.path, "--keychain-profile",
+          try signing.required("NOTARY_PROFILE"), "--wait",
+        ]
       )
     case .ci:
       let keyIdentifier = try environment.required("APPLE_API_KEY_ID")
@@ -1001,9 +1018,11 @@ final class DevTool {
   private func ciImportCertificate() throws {
     let certificateData = try decodeBase64Environment("APPLE_DEVELOPER_ID_P12_BASE64")
     let certificatePassword = try environment.required("APPLE_DEVELOPER_ID_P12_PASSWORD")
-    let keychainPassword = environment.values["KEYCHAIN_PASSWORD"] ?? UUID().uuidString  // gitleaks:allow
+    let keychainPassword =
+      environment.values["KEYCHAIN_PASSWORD"] ?? UUID().uuidString  // gitleaks:allow
     let runnerTemp = environment.value("RUNNER_TEMP", default: NSTemporaryDirectory())
-    let keychainPath = URL(fileURLWithPath: runnerTemp).appendingPathComponent("lmd-build.keychain-db")
+    let keychainPath = URL(fileURLWithPath: runnerTemp).appendingPathComponent(
+      "lmd-build.keychain-db")
     let scratch = try temporaryDirectory(prefix: "lmd-cert")
     defer {
       try? fileManager.removeItem(at: scratch)
@@ -1015,7 +1034,9 @@ final class DevTool {
     try runPassthrough("security", ["create-keychain", "-p", keychainPassword, keychainPath.path])
     try runPassthrough("security", ["set-keychain-settings", "-lut", "7200", keychainPath.path])
     try runPassthrough("security", ["unlock-keychain", "-p", keychainPassword, keychainPath.path])
-    try runPassthrough("security", ["list-keychains", "-d", "user", "-s", keychainPath.path] + currentUserKeychains())
+    try runPassthrough(
+      "security",
+      ["list-keychains", "-d", "user", "-s", keychainPath.path] + currentUserKeychains())
     try runPassthrough(
       "security",
       [
@@ -1058,7 +1079,9 @@ final class DevTool {
   private func pushTag() throws {
     let tag = try environment.required("TAG")
     try runPassthrough("git", ["-C", repoRoot.path, "config", "user.name", "github-actions[bot]"])
-    try runPassthrough("git", ["-C", repoRoot.path, "config", "user.email", "github-actions[bot]@users.noreply.github.com"])
+    try runPassthrough(
+      "git",
+      ["-C", repoRoot.path, "config", "user.email", "github-actions[bot]@users.noreply.github.com"])
     try runPassthrough("git", ["-C", repoRoot.path, "tag", tag])
     try runPassthrough("git", ["-C", repoRoot.path, "push", "origin", tag])
   }
@@ -1104,7 +1127,8 @@ final class DevTool {
 
   private func format() throws {
     do {
-      try runPassthrough("swift-format", ["format", "--in-place", "--recursive", "Sources", "Tests", "Tools"])
+      try runPassthrough(
+        "swift-format", ["format", "--in-place", "--recursive", "Sources", "Tests", "Tools"])
     } catch {
       try writeLine("swift-format not installed or failed, skipping")
     }
@@ -1173,14 +1197,17 @@ final class DevTool {
       return BuildCacheTool(name: "sccache", executable: executable)
     }
     if sccacheEnabled {
-      try writeLine("[build-cache] LMD_ENABLE_SCCACHE is set, but sccache was not found; building without sccache")
+      try writeLine(
+        "[build-cache] LMD_ENABLE_SCCACHE is set, but sccache was not found; building without sccache"
+      )
     }
 
     if ccacheEnabled, let executable = findExecutable("ccache") {
       return BuildCacheTool(name: "ccache", executable: executable)
     }
     if ccacheEnabled {
-      try writeLine("[build-cache] LMD_ENABLE_CCACHE is set, but ccache was not found; building without ccache")
+      try writeLine(
+        "[build-cache] LMD_ENABLE_CCACHE is set, but ccache was not found; building without ccache")
     }
 
     return nil
@@ -1195,7 +1222,9 @@ final class DevTool {
       if let executable = findExecutable(normalizedCache) {
         return BuildCacheTool(name: normalizedCache, executable: executable)
       }
-      try writeLine("[build-cache] LMD_BUILD_CACHE=\(normalizedCache), but \(normalizedCache) was not found; building without cache")
+      try writeLine(
+        "[build-cache] LMD_BUILD_CACHE=\(normalizedCache), but \(normalizedCache) was not found; building without cache"
+      )
       return nil
     }
     throw ToolError.usage("LMD_BUILD_CACHE must be sccache, ccache, none, off, or 0")
@@ -1282,7 +1311,8 @@ final class DevTool {
       guard fileManager.fileExists(atPath: searchRoot.path) else {
         continue
       }
-      guard let enumerator = fileManager.enumerator(at: searchRoot, includingPropertiesForKeys: nil) else {
+      guard let enumerator = fileManager.enumerator(at: searchRoot, includingPropertiesForKeys: nil)
+      else {
         continue
       }
       for case let item as URL in enumerator {
@@ -1292,7 +1322,8 @@ final class DevTool {
         guard !copied.contains(item.lastPathComponent) else {
           continue
         }
-        try copyReplacingItem(at: item, to: destination.appendingPathComponent(item.lastPathComponent))
+        try copyReplacingItem(
+          at: item, to: destination.appendingPathComponent(item.lastPathComponent))
         copied.insert(item.lastPathComponent)
         try writeLine("  staged \(item.lastPathComponent)")
       }
@@ -1306,12 +1337,15 @@ final class DevTool {
     return [derivedProducts, derived, xcodeDerived]
   }
 
-  private func copyRuntimeResources(from sourceDirectory: URL, to destinationDirectory: URL) throws {
+  private func copyRuntimeResources(from sourceDirectory: URL, to destinationDirectory: URL) throws
+  {
     for resourceName in ["mlx.metallib", "default.metallib", "mlx-swift_Cmlx.bundle"] {
       let source = sourceDirectory.appendingPathComponent(resourceName)
       if fileManager.fileExists(atPath: source.path) {
-        try copyReplacingItem(at: source, to: destinationDirectory.appendingPathComponent(resourceName))
-        try writeLine("  installed \(destinationDirectory.appendingPathComponent(resourceName).path)")
+        try copyReplacingItem(
+          at: source, to: destinationDirectory.appendingPathComponent(resourceName))
+        try writeLine(
+          "  installed \(destinationDirectory.appendingPathComponent(resourceName).path)")
       }
     }
   }
@@ -1323,7 +1357,8 @@ final class DevTool {
   ) throws {
     for target in targets {
       let inputURL = URL(fileURLWithPath: target, relativeTo: repoRoot).standardizedFileURL
-      let binaryPath = fileManager.fileExists(atPath: inputURL.path)
+      let binaryPath =
+        fileManager.fileExists(atPath: inputURL.path)
         ? inputURL
         : releaseBuildDirectory().appendingPathComponent(target)
       try signPath(
@@ -1371,10 +1406,12 @@ final class DevTool {
   /// picked up automatically.
   private func resourceBundlesToSign() -> [URL] {
     let staging = releaseBuildDirectory()
-    guard let contents = try? fileManager.contentsOfDirectory(
-      at: staging,
-      includingPropertiesForKeys: nil
-    ) else {
+    guard
+      let contents = try? fileManager.contentsOfDirectory(
+        at: staging,
+        includingPropertiesForKeys: nil
+      )
+    else {
       return []
     }
     return contents.filter { $0.pathExtension == "bundle" }
@@ -1399,7 +1436,9 @@ final class DevTool {
   private func localSigningConfig() throws -> [String: String] {
     let signingURL = repoRoot.appendingPathComponent("config/signing.env")
     guard fileManager.fileExists(atPath: signingURL.path) else {
-      throw ToolError.failure("missing \(signingURL.path); cp config/signing.env.example config/signing.env and fill in your values")
+      throw ToolError.failure(
+        "missing \(signingURL.path); cp config/signing.env.example config/signing.env and fill in your values"
+      )
     }
     return try parseKeyValueFile(signingURL)
   }
@@ -1429,7 +1468,8 @@ final class DevTool {
 
   private func sourceSwiftFiles(excludingPathComponent excluded: String) throws -> [URL] {
     let sources = repoRoot.appendingPathComponent("Sources")
-    guard let enumerator = fileManager.enumerator(at: sources, includingPropertiesForKeys: nil) else {
+    guard let enumerator = fileManager.enumerator(at: sources, includingPropertiesForKeys: nil)
+    else {
       return []
     }
     var files: [URL] = []
@@ -1521,7 +1561,9 @@ final class DevTool {
       if captureOutput, !output.isEmpty {
         try write(output)
       }
-      throw ToolError.failure("command failed (\(process.terminationStatus)): \(([executable] + arguments).joined(separator: " "))")
+      throw ToolError.failure(
+        "command failed (\(process.terminationStatus)): \(([executable] + arguments).joined(separator: " "))"
+      )
     }
 
     return CommandResult(status: process.terminationStatus, output: output)
@@ -1589,7 +1631,8 @@ final class DevTool {
     for (linkName, destinationName) in compatibilityCommandLinks {
       let linkPath = directory.appendingPathComponent(linkName)
       try removeIfExists(linkPath)
-      try fileManager.createSymbolicLink(atPath: linkPath.path, withDestinationPath: destinationName)
+      try fileManager.createSymbolicLink(
+        atPath: linkPath.path, withDestinationPath: destinationName)
       try writeLine("  linked \(linkName) -> \(destinationName)")
     }
   }
@@ -1683,7 +1726,9 @@ final class SmokeRunner {
 
   private func startBroker() throws {
     guard let brokerBinary = resolveBrokerBinary() else {
-      throw ToolError.failure("binary missing under \(configuration.binaryDirectory.path); run 'make build' first or set LMD_BINARY_DIR")
+      throw ToolError.failure(
+        "binary missing under \(configuration.binaryDirectory.path); run 'make build' first or set LMD_BINARY_DIR"
+      )
     }
 
     writeLine("starting lmd-serve at \(configuration.baseURL.absoluteString)")
@@ -1700,7 +1745,9 @@ final class SmokeRunner {
   }
 
   private func resolveBrokerBinary() -> URL? {
-    for candidateRelativePath in ["lmd-serve", "lmd_serve", "Release/lmd-serve", "Release/lmd_serve"] {
+    for candidateRelativePath in [
+      "lmd-serve", "lmd_serve", "Release/lmd-serve", "Release/lmd_serve",
+    ] {
       let candidate = configuration.binaryDirectory.appendingPathComponent(candidateRelativePath)
       if fileManager.isExecutableFile(atPath: candidate.path) {
         return candidate
@@ -1739,13 +1786,16 @@ final class SmokeRunner {
     guard !brokerProcess.isRunning else {
       return
     }
-    throw ToolError.failure("daemon exited before /health became ready with status \(brokerProcess.terminationStatus)")
+    throw ToolError.failure(
+      "daemon exited before /health became ready with status \(brokerProcess.terminationStatus)")
   }
 
   private func assertModels() async throws {
     let response = try await request(path: "v1/models", timeout: 3)
     guard response.statusCode == 200 else {
-      throw ToolError.failure("GET /v1/models failed with HTTP \(response.statusCode); response body: \(bodySnippet(response.data))")
+      throw ToolError.failure(
+        "GET /v1/models failed with HTTP \(response.statusCode); response body: \(bodySnippet(response.data))"
+      )
     }
     let models = try jsonDecoder.decode(ModelsResponse.self, from: response.data)
     guard models.object == "list" else {
@@ -1757,11 +1807,14 @@ final class SmokeRunner {
   private func assertLoadedModels() async throws {
     let response = try await request(path: "swiftlmd/loaded", timeout: 3)
     guard response.statusCode == 200 else {
-      throw ToolError.failure("GET /swiftlmd/loaded failed with HTTP \(response.statusCode); response body: \(bodySnippet(response.data))")
+      throw ToolError.failure(
+        "GET /swiftlmd/loaded failed with HTTP \(response.statusCode); response body: \(bodySnippet(response.data))"
+      )
     }
     let loaded = try jsonDecoder.decode(LoadedModelsResponse.self, from: response.data)
     if configuration.useRunningDaemon {
-      writeLine("loaded-models observed: count=\(loaded.models.count) allocated_gb=\(loaded.allocatedGB)")
+      writeLine(
+        "loaded-models observed: count=\(loaded.models.count) allocated_gb=\(loaded.allocatedGB)")
       return
     }
     guard loaded.models.isEmpty else {
@@ -1776,7 +1829,9 @@ final class SmokeRunner {
   private func runVideoAcceptance(videoSampleFile: URL) async throws {
     let sampleCopy = try copyVideoSampleToTemporaryDirectory(videoSampleFile)
     let requestBody = try buildVideoRequest(videoFile: sampleCopy)
-    writeLine("video acceptance: POST /v1/chat/completions model=\(configuration.videoModel) sample=\(sampleCopy.lastPathComponent)")
+    writeLine(
+      "video acceptance: POST /v1/chat/completions model=\(configuration.videoModel) sample=\(sampleCopy.lastPathComponent)"
+    )
 
     let response = try await request(
       path: "v1/chat/completions",
@@ -1790,14 +1845,18 @@ final class SmokeRunner {
     // populated assistant message because frame sampling at infinite tolerance
     // succeeds against both the 1-frame and 2-second fixtures.
     guard response.statusCode == 200 else {
-      throw ToolError.failure("video acceptance failed with HTTP \(response.statusCode); response body: \(responseText)")
+      throw ToolError.failure(
+        "video acceptance failed with HTTP \(response.statusCode); response body: \(responseText)")
     }
     let completion = try jsonDecoder.decode(ChatCompletionResponse.self, from: response.data)
     guard let firstChoice = completion.choices.first else {
-      throw ToolError.failure("video acceptance returned HTTP 200 but choices was empty; response body: \(responseText)")
+      throw ToolError.failure(
+        "video acceptance returned HTTP 200 but choices was empty; response body: \(responseText)")
     }
     guard firstChoice.message.content.isNonEmpty else {
-      throw ToolError.failure("video acceptance returned HTTP 200 but choices.0.message.content was empty; response body: \(responseText)")
+      throw ToolError.failure(
+        "video acceptance returned HTTP 200 but choices.0.message.content was empty; response body: \(responseText)"
+      )
     }
     writeLine("video acceptance OK: non-empty VLM response from \(configuration.videoModel)")
   }
@@ -1811,7 +1870,8 @@ final class SmokeRunner {
     }
     let resourceValues = try videoSampleFile.resourceValues(forKeys: [.isRegularFileKey])
     guard resourceValues.isRegularFile == true else {
-      throw ToolError.failure("video sample must point to a regular file at \(videoSampleFile.path)")
+      throw ToolError.failure(
+        "video sample must point to a regular file at \(videoSampleFile.path)")
     }
     let videoExtension = videoSampleFile.pathExtension.lowercased()
     guard supportedVideoExtensions.contains(videoExtension) else {
@@ -1821,7 +1881,8 @@ final class SmokeRunner {
       throw ToolError.failure("temporary directory was not initialized")
     }
 
-    let destination = temporaryDirectory.appendingPathComponent("lmd-video-sample.\(videoExtension)")
+    let destination = temporaryDirectory.appendingPathComponent(
+      "lmd-video-sample.\(videoExtension)")
     try fileManager.copyItem(at: videoSampleFile, to: destination)
     return destination.standardizedFileURL
   }

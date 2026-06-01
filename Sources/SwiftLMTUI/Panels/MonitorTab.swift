@@ -98,53 +98,62 @@ public final class MonitorTab: Tab {
     }
 
     write("\(Theme.head)THERMAL & LOAD\(Ansi.reset)")
-    write(Row.three(
-      "\(Theme.label)cpu temp\(Ansi.reset)",
-      "\(Theme.tempColor(snapshot.cpuTempC))\(String(format: "%.1f°C", snapshot.cpuTempC))\(Ansi.reset)",
-      ""
-    ))
-    write(Row.three(
-      "\(Theme.label)gpu temp\(Ansi.reset)",
-      "\(Theme.tempColor(snapshot.gpuTempC))\(String(format: "%.1f°C", snapshot.gpuTempC))\(Ansi.reset)",
-      ""
-    ))
-    write(Row.three(
-      "\(Theme.label)cpu use\(Ansi.reset)",
-      "\(Theme.text)\(String(format: "%.1f%%", snapshot.cpuPercent))\(Ansi.reset)",
-      ""
-    ))
-    write(Row.three(
-      "\(Theme.label)gpu use\(Ansi.reset)",
-      "\(Theme.text)\(String(format: "%.1f%%", snapshot.gpuPercent))\(Ansi.reset)",
-      ""
-    ))
+    write(
+      Row.three(
+        "\(Theme.label)cpu temp\(Ansi.reset)",
+        "\(Theme.tempColor(snapshot.cpuTempC))\(String(format: "%.1f°C", snapshot.cpuTempC))\(Ansi.reset)",
+        ""
+      ))
+    write(
+      Row.three(
+        "\(Theme.label)gpu temp\(Ansi.reset)",
+        "\(Theme.tempColor(snapshot.gpuTempC))\(String(format: "%.1f°C", snapshot.gpuTempC))\(Ansi.reset)",
+        ""
+      ))
+    write(
+      Row.three(
+        "\(Theme.label)cpu use\(Ansi.reset)",
+        "\(Theme.text)\(String(format: "%.1f%%", snapshot.cpuPercent))\(Ansi.reset)",
+        ""
+      ))
+    write(
+      Row.three(
+        "\(Theme.label)gpu use\(Ansi.reset)",
+        "\(Theme.text)\(String(format: "%.1f%%", snapshot.gpuPercent))\(Ansi.reset)",
+        ""
+      ))
     write("")
 
     write("\(Theme.head)MEMORY\(Ansi.reset)")
-    write(Row.three(
-      "\(Theme.label)ram used\(Ansi.reset)",
-      "\(Theme.text)\(String(format: "%.1f GB", snapshot.ramUsedGB))\(Ansi.reset)",
-      ""
-    ))
-    write(Row.three(
-      "\(Theme.label)pressure\(Ansi.reset)",
-      "\(Theme.text)\(snapshot.pressureFreePct)% free\(Ansi.reset)",
-      ""
-    ))
+    write(
+      Row.three(
+        "\(Theme.label)ram used\(Ansi.reset)",
+        "\(Theme.text)\(String(format: "%.1f GB", snapshot.ramUsedGB))\(Ansi.reset)",
+        ""
+      ))
+    write(
+      Row.three(
+        "\(Theme.label)pressure\(Ansi.reset)",
+        "\(Theme.text)\(snapshot.pressureFreePct)% free\(Ansi.reset)",
+        ""
+      ))
     write("")
 
     write("\(Theme.head)BATTERY\(Ansi.reset)")
-    write(Row.three(
-      "\(Theme.label)charge\(Ansi.reset)",
-      "\(Theme.text)\(snapshot.battPct)%\(Ansi.reset)",
-      "\(Theme.dim)\(snapshot.acState)\(Ansi.reset)"
-    ))
+    write(
+      Row.three(
+        "\(Theme.label)charge\(Ansi.reset)",
+        "\(Theme.text)\(snapshot.battPct)%\(Ansi.reset)",
+        "\(Theme.dim)\(snapshot.acState)\(Ansi.reset)"
+      ))
     let watts = snapshot.battWattsSigned
     let wattsLabel: String
     if watts > 0.1 {
-      wattsLabel = "\(Theme.ok)+\(String(format: "%.1f W", watts))\(Ansi.reset) \(Theme.dim)charging\(Ansi.reset)"
+      wattsLabel =
+        "\(Theme.ok)+\(String(format: "%.1f W", watts))\(Ansi.reset) \(Theme.dim)charging\(Ansi.reset)"
     } else if watts < -0.1 {
-      wattsLabel = "\(Theme.bad)\(String(format: "%.1f W", watts))\(Ansi.reset) \(Theme.dim)discharging\(Ansi.reset)"
+      wattsLabel =
+        "\(Theme.bad)\(String(format: "%.1f W", watts))\(Ansi.reset) \(Theme.dim)discharging\(Ansi.reset)"
     } else {
       wattsLabel = "\(Theme.dim)0.0 W idle\(Ansi.reset)"
     }

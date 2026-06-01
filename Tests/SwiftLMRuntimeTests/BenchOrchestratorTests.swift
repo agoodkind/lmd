@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMRuntime
 
 private final class FakeBackend: BenchBackend, @unchecked Sendable {
@@ -38,11 +39,12 @@ private final class FakeBackend: BenchBackend, @unchecked Sendable {
     timeout: TimeInterval
   ) async throws -> Data {
     let shouldFail = syncQ.sync { () -> Bool in
-      calls.append(Call(
-        model: model.id,
-        variant: variant.name,
-        prompt: String(systemPrompt.prefix(16))
-      ))
+      calls.append(
+        Call(
+          model: model.id,
+          variant: variant.name,
+          prompt: String(systemPrompt.prefix(16))
+        ))
       if let pattern = failCellPattern {
         return systemPrompt.contains(pattern)
       }
@@ -119,7 +121,7 @@ final class BenchOrchestratorTests: XCTestCase {
   func testSkipsExistingResults() async throws {
     let cfg = try makeConfig(
       prompts: [
-        (name: "review-a.txt", body: "x"),
+        (name: "review-a.txt", body: "x")
       ],
       models: [BenchModelSpec(id: "m1")],
       variants: [BenchVariant(name: "review", promptGlob: "review-*.txt")]

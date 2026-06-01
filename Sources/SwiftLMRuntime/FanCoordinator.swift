@@ -172,20 +172,34 @@ public func activityFloorRpm(
   llmActive: Bool
 ) -> Int {
   var floor = 0
-  if gpuPercent >= 80 { floor = max(floor, 4500) }
-  else if gpuPercent >= 50 { floor = max(floor, 3800) }
-  else if gpuPercent >= 25 { floor = max(floor, 3200) }
+  if gpuPercent >= 80 {
+    floor = max(floor, 4500)
+  } else if gpuPercent >= 50 {
+    floor = max(floor, 3800)
+  } else if gpuPercent >= 25 {
+    floor = max(floor, 3200)
+  }
 
-  if cpuPercent >= 70 { floor = max(floor, 4200) }
-  else if cpuPercent >= 40 { floor = max(floor, 3500) }
+  if cpuPercent >= 70 {
+    floor = max(floor, 4200)
+  } else if cpuPercent >= 40 {
+    floor = max(floor, 3500)
+  }
 
-  if pressureFreePct <= 10 { floor = max(floor, 4500) }
-  else if pressureFreePct <= 25 { floor = max(floor, 3800) }
+  if pressureFreePct <= 10 {
+    floor = max(floor, 4500)
+  } else if pressureFreePct <= 25 {
+    floor = max(floor, 3800)
+  }
 
   if llmActive {
-    if gpuPercent >= 50 { floor = max(floor, 5800) }
-    else if gpuPercent >= 25 { floor = max(floor, 5000) }
-    else { floor = max(floor, 4200) }
+    if gpuPercent >= 50 {
+      floor = max(floor, 5800)
+    } else if gpuPercent >= 25 {
+      floor = max(floor, 5000)
+    } else {
+      floor = max(floor, 4200)
+    }
   }
   return floor
 }
@@ -258,7 +272,9 @@ public final class FanCoordinator: @unchecked Sendable {
 
   /// Synchronous `Process` runner for `launchctl` / `pkill` only.
   public static func runLaunchProcess(_ path: String, _ args: [String]) -> Int32 {
-    log.debug("fan.process_run path=\(path, privacy: .public) args=\(args.joined(separator: ","), privacy: .public)")
+    log.debug(
+      "fan.process_run path=\(path, privacy: .public) args=\(args.joined(separator: ","), privacy: .public)"
+    )
     let p = Process()
     p.executableURL = URL(fileURLWithPath: path)
     p.arguments = args
@@ -267,10 +283,14 @@ public final class FanCoordinator: @unchecked Sendable {
     do {
       try p.run()
       p.waitUntilExit()
-      log.debug("fan.process_exit path=\(path, privacy: .public) exit_status=\(p.terminationStatus, privacy: .public)")
+      log.debug(
+        "fan.process_exit path=\(path, privacy: .public) exit_status=\(p.terminationStatus, privacy: .public)"
+      )
       return p.terminationStatus
     } catch {
-      log.error("fan.process_failed path=\(path, privacy: .public) error=\(String(describing: error), privacy: .public)")
+      log.error(
+        "fan.process_failed path=\(path, privacy: .public) error=\(String(describing: error), privacy: .public)"
+      )
       return -1
     }
   }
@@ -339,7 +359,8 @@ public final class FanCoordinator: @unchecked Sendable {
 
   /// Hand fans back to auto and reload the launchd agent if present.
   public func release() {
-    let releaseIndices = self.activeFanIndices.isEmpty ? self.config.fanIndices : self.activeFanIndices
+    let releaseIndices =
+      self.activeFanIndices.isEmpty ? self.config.fanIndices : self.activeFanIndices
     log.notice(
       "fan.coordinator_releasing fan_indices=\(releaseIndices, privacy: .public)"
     )
@@ -426,7 +447,8 @@ public final class FanCoordinator: @unchecked Sendable {
           state = .idle
           coolingStartedAt = nil
           handedToAuto = false
-          let why = tempOk
+          let why =
+            tempOk
             ? "temp \(Int(maxTemp))C<=\(Int(self.config.coolOffTempC))C"
             : "timeout"
           log.info("fan.state_changed from=cooling to=idle reason=\(why, privacy: .public)")
@@ -439,7 +461,9 @@ public final class FanCoordinator: @unchecked Sendable {
       }
     }
 
-    log.debug("fan.apply_state after_transition=\(self.state.rawValue, privacy: .public) from=\(previousState.rawValue, privacy: .public)")
+    log.debug(
+      "fan.apply_state after_transition=\(self.state.rawValue, privacy: .public) from=\(previousState.rawValue, privacy: .public)"
+    )
 
     if self.state == .idle {
       if !self.handedToAuto {
@@ -449,7 +473,9 @@ public final class FanCoordinator: @unchecked Sendable {
             try await smc.setAuto(fanIndex: f)
             log.info("fan.auto_set_success fan=\(f, privacy: .public)")
           } catch {
-            log.error("fan.auto_set_failed fan=\(f, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            log.error(
+              "fan.auto_set_failed fan=\(f, privacy: .public) error=\(String(describing: error), privacy: .public)"
+            )
           }
         }
         self.handedToAuto = true
@@ -462,17 +488,22 @@ public final class FanCoordinator: @unchecked Sendable {
 
     let rawMaxTemp = max(inputs.cpuTempC, inputs.gpuTempC)
     let emergency = rawMaxTemp >= self.config.emergencyTempC
-    log.debug("fan.temp_eval raw_max_temp=\(rawMaxTemp, privacy: .public) emergency=\(emergency, privacy: .public)")
+    log.debug(
+      "fan.temp_eval raw_max_temp=\(rawMaxTemp, privacy: .public) emergency=\(emergency, privacy: .public)"
+    )
 
     let maxSmooth = max(smoothCpuTempC, smoothGpuTempC)
     let hotEnoughForFullBlast = maxSmooth >= self.config.activeFullBlastTempC
 
-    let inActiveRampWindow = self.state == .active && !hotEnoughForFullBlast
-      && self.activeRampStartedAt.map({ now.timeIntervalSince($0) < self.config.activeRampDuration }) == true
+    let inActiveRampWindow =
+      self.state == .active && !hotEnoughForFullBlast
+      && self.activeRampStartedAt.map({ now.timeIntervalSince($0) < self.config.activeRampDuration }
+      ) == true
 
     let coolingElapsed = self.coolingStartedAt.map({ now.timeIntervalSince($0) }) ?? .infinity
     let inHoldWindow = self.state == .cooling && coolingElapsed < self.config.holdSeconds
-    let inCoolingRampWindow = self.state == .cooling
+    let inCoolingRampWindow =
+      self.state == .cooling
       && coolingElapsed >= self.config.holdSeconds
       && coolingElapsed < (self.config.holdSeconds + self.config.coolingRampDownSeconds)
 
@@ -483,7 +514,9 @@ public final class FanCoordinator: @unchecked Sendable {
 
     let activeSteady = activeSteadyTarget(inputs: inputs)
     let steadyCooling = steadyCoolingTarget(inputs: inputs)
-    log.debug("fan.steady_target active=\(activeSteady, privacy: .public) cooling=\(steadyCooling, privacy: .public)")
+    log.debug(
+      "fan.steady_target active=\(activeSteady, privacy: .public) cooling=\(steadyCooling, privacy: .public)"
+    )
 
     for f in self.activeFanIndices {
       let targetRpm: Int
@@ -491,7 +524,8 @@ public final class FanCoordinator: @unchecked Sendable {
         if emergency || hotEnoughForFullBlast {
           targetRpm = 10_000
         } else if let rampStart = activeRampStartedAt,
-                  now.timeIntervalSince(rampStart) < self.config.activeRampDuration {
+          now.timeIntervalSince(rampStart) < self.config.activeRampDuration
+        {
           let elapsed = now.timeIntervalSince(rampStart)
           let rampT = min(1, elapsed / self.config.activeRampDuration)
           let start = self.activeStartRpm[f] ?? self.config.startupBaselineRpm
@@ -512,19 +546,23 @@ public final class FanCoordinator: @unchecked Sendable {
         }
       }
       log.debug(
-      "fan.target_calc fan=\(f, privacy: .public) state=\(self.state.rawValue, privacy: .public) target_rpm=\(targetRpm, privacy: .public)"
+        "fan.target_calc fan=\(f, privacy: .public) state=\(self.state.rawValue, privacy: .public) target_rpm=\(targetRpm, privacy: .public)"
       )
 
       let prev = self.lastAppliedRpm[f] ?? -1
       if prev < 0 {
-        log.debug("fan.target_apply_first fan=\(f, privacy: .public) target_rpm=\(targetRpm, privacy: .public)")
+        log.debug(
+          "fan.target_apply_first fan=\(f, privacy: .public) target_rpm=\(targetRpm, privacy: .public)"
+        )
         do {
           try await smc.setRpm(fanIndex: f, rpm: targetRpm)
           lastAppliedRpm[f] = targetRpm
           lastChangeTime[f] = now
           log.info("fan.rpm_set fan=\(f, privacy: .public) rpm=\(targetRpm, privacy: .public)")
         } catch {
-          log.error("fan.set_rpm_failed fan=\(f, privacy: .public) target_rpm=\(targetRpm, privacy: .public) error=\(String(describing: error), privacy: .public)")
+          log.error(
+            "fan.set_rpm_failed fan=\(f, privacy: .public) target_rpm=\(targetRpm, privacy: .public) error=\(String(describing: error), privacy: .public)"
+          )
         }
         continue
       }
@@ -539,7 +577,8 @@ public final class FanCoordinator: @unchecked Sendable {
       }
 
       if !emergency, let last = lastChangeTime[f],
-         now.timeIntervalSince(last) < minInterval {
+        now.timeIntervalSince(last) < minInterval
+      {
         log.debug(
           "fan.skip_min_interval fan=\(f, privacy: .public) elapsed=\(now.timeIntervalSince(last), privacy: .public) threshold=\(minInterval, privacy: .public)"
         )
@@ -549,17 +588,22 @@ public final class FanCoordinator: @unchecked Sendable {
       let delta = targetRpm - prev
       if !emergency, !inRampPhase {
         if delta > 0 && delta < self.config.rampUpMinDelta {
-          log.debug("fan.rpm_skip_up_small_delta fan=\(f, privacy: .public) delta=\(delta, privacy: .public)")
+          log.debug(
+            "fan.rpm_skip_up_small_delta fan=\(f, privacy: .public) delta=\(delta, privacy: .public)"
+          )
           continue
         }
         if delta < 0 && -delta < self.config.rampDownMinDelta {
-          log.debug("fan.rpm_skip_down_small_delta fan=\(f, privacy: .public) delta=\(delta, privacy: .public)")
+          log.debug(
+            "fan.rpm_skip_down_small_delta fan=\(f, privacy: .public) delta=\(delta, privacy: .public)"
+          )
           continue
         }
       }
 
       if delta == 0 {
-        log.debug("fan.rpm_skip_no_delta fan=\(f, privacy: .public) rpm=\(targetRpm, privacy: .public)")
+        log.debug(
+          "fan.rpm_skip_no_delta fan=\(f, privacy: .public) rpm=\(targetRpm, privacy: .public)")
         continue
       }
 
@@ -571,7 +615,9 @@ public final class FanCoordinator: @unchecked Sendable {
         lastAppliedRpm[f] = targetRpm
         lastChangeTime[f] = now
       } catch {
-        log.error("fan.set_rpm_failed fan=\(f, privacy: .public) target_rpm=\(targetRpm, privacy: .public) error=\(String(describing: error), privacy: .public)")
+        log.error(
+          "fan.set_rpm_failed fan=\(f, privacy: .public) target_rpm=\(targetRpm, privacy: .public) error=\(String(describing: error), privacy: .public)"
+        )
       }
     }
   }
@@ -612,7 +658,8 @@ public final class FanCoordinator: @unchecked Sendable {
     activeRampStartedAt = now
     coolingStartedAt = nil
     self.smc.setCurrentPriority(self.config.activePriority)
-    log.debug("fan.state_entered_active now=\(now.timeIntervalSinceReferenceDate, privacy: .public)")
+    log.debug(
+      "fan.state_entered_active now=\(now.timeIntervalSinceReferenceDate, privacy: .public)")
     for f in self.activeFanIndices {
       self.activeStartRpm[f] = self.lastAppliedRpm[f] ?? self.config.startupBaselineRpm
       log.debug(
@@ -631,7 +678,8 @@ public final class FanCoordinator: @unchecked Sendable {
     coolingStartedAt = now
     activeRampStartedAt = nil
     self.smc.setCurrentPriority(self.config.coolingPriority)
-    log.debug("fan.state_entered_cooling now=\(now.timeIntervalSinceReferenceDate, privacy: .public)")
+    log.debug(
+      "fan.state_entered_cooling now=\(now.timeIntervalSinceReferenceDate, privacy: .public)")
     for f in self.activeFanIndices {
       self.coolingStartRpm[f] = self.lastAppliedRpm[f] ?? self.config.startupBaselineRpm
       log.debug(
@@ -647,7 +695,8 @@ public final class FanCoordinator: @unchecked Sendable {
     activeRampStartedAt = now
     coolingStartedAt = nil
     self.smc.setCurrentPriority(self.config.activePriority)
-    log.debug("fan.state_reenter_active now=\(now.timeIntervalSinceReferenceDate, privacy: .public)")
+    log.debug(
+      "fan.state_reenter_active now=\(now.timeIntervalSinceReferenceDate, privacy: .public)")
     for f in self.activeFanIndices {
       self.activeStartRpm[f] = self.lastAppliedRpm[f] ?? self.config.startupBaselineRpm
       log.debug(

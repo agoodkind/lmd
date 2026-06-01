@@ -7,8 +7,9 @@
 //
 
 import XCTest
-@testable import SwiftLMRuntime
+
 @testable import SwiftLMCore
+@testable import SwiftLMRuntime
 
 final class ModelCatalogTests: XCTestCase {
   private var tempDir: URL!
@@ -27,7 +28,8 @@ final class ModelCatalogTests: XCTestCase {
 
   // Build .../mlx-community/<name>/{config.json, weights}
   private func makeFakeModel(publisher: String, name: String, sizeBytes: Int) throws {
-    let dir = tempDir
+    let dir =
+      tempDir
       .appendingPathComponent(publisher)
       .appendingPathComponent(name)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -82,7 +84,8 @@ final class ModelCatalogTests: XCTestCase {
     // HF cache layout with the same slug. Smaller on disk (symlink-only
     // snapshot stub).
     let hub = tempDir.appendingPathComponent("hub")
-    let snap = hub
+    let snap =
+      hub
       .appendingPathComponent("models--mlx-community--Qwen-Dup")
       .appendingPathComponent("snapshots")
       .appendingPathComponent("deadbeef")
@@ -104,7 +107,8 @@ final class ModelCatalogTests: XCTestCase {
   // and uses the repo name as displayName.
   func testHFCacheSnapshotProducesRepoName() throws {
     let hub = tempDir.appendingPathComponent("hub")
-    let snap = hub
+    let snap =
+      hub
       .appendingPathComponent("models--mlx-community--Qwen3.5-4B-MLX-4bit")
       .appendingPathComponent("snapshots")
       .appendingPathComponent("06cacdcc84198b112b7c83224f816c6c7aa4a4a9")

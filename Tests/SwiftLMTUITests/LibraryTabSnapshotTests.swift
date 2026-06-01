@@ -10,6 +10,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMTUI
 
 final class LibraryTabSnapshotTests: XCTestCase {

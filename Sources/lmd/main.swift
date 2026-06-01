@@ -96,7 +96,9 @@ private func loadCommand(request: ModelLoadRequest) {
   let result = runBlocking { try await client.preload(request: request) }
   switch result {
   case .success(let response):
-    log.notice("load.completed model=\(request.model, privacy: .public) status=\(response.status, privacy: .public)")
+    log.notice(
+      "load.completed model=\(request.model, privacy: .public) status=\(response.status, privacy: .public)"
+    )
     say("status: \(response.status)")
     say("instance_id: \(response.instanceID)")
     if let canLoad = response.canLoad {
@@ -106,7 +108,9 @@ private func loadCommand(request: ModelLoadRequest) {
       say("estimated_total_memory_gb: \(String(format: "%.1f", estimated))")
     }
   case .failure(let error):
-    log.error("load.failed model=\(request.model, privacy: .public) err=\(String(describing: error), privacy: .public)")
+    log.error(
+      "load.failed model=\(request.model, privacy: .public) err=\(String(describing: error), privacy: .public)"
+    )
     sayErr("lmd load: \(error)")
     exit(1)
   }
@@ -118,7 +122,8 @@ private func unloadCommand(request: ModelUnloadRequest) {
   let result = runBlocking { try await client.unload(request: request) }
   switch result {
   case .success(let response):
-    log.notice("unload.completed models=\(response.modelIDs.joined(separator: ","), privacy: .public)")
+    log.notice(
+      "unload.completed models=\(response.modelIDs.joined(separator: ","), privacy: .public)")
     say("status: \(response.status)")
     say("models: \(response.modelIDs.joined(separator: ", "))")
   case .failure(let error):
@@ -138,14 +143,17 @@ private func embedCommand(modelId: String, text: String) {
       sayErr("lmd embed: broker returned no vectors")
       exit(1)
     }
-    log.notice("embed.completed model=\(modelId, privacy: .public) dims=\(first.count, privacy: .public)")
+    log.notice(
+      "embed.completed model=\(modelId, privacy: .public) dims=\(first.count, privacy: .public)")
     say("model: \(modelId)")
     say("dims: \(first.count)")
     let preview = first.prefix(8).map { String(format: "%.4f", $0) }.joined(separator: ", ")
     let suffix = first.count > 8 ? ", ..." : ""
     say("preview: [\(preview)\(suffix)]")
   case .failure(let error):
-    log.error("embed.failed model=\(modelId, privacy: .public) err=\(String(describing: error), privacy: .public)")
+    log.error(
+      "embed.failed model=\(modelId, privacy: .public) err=\(String(describing: error), privacy: .public)"
+    )
     sayErr("lmd embed: \(error)")
     exit(1)
   }
@@ -170,7 +178,9 @@ private func pullCommand(slug: String) {
       switch event {
       case .started(let eventSlug, let eventDestination):
         destination = eventDestination
-        log.notice("pull.started slug=\(eventSlug, privacy: .public) destination=\(eventDestination, privacy: .public)")
+        log.notice(
+          "pull.started slug=\(eventSlug, privacy: .public) destination=\(eventDestination, privacy: .public)"
+        )
         say("downloading \(eventSlug) -> \(eventDestination)")
       case .progress(let line):
         log.debug("pull.progress slug=\(slug, privacy: .public) line=\(line, privacy: .public)")
@@ -184,10 +194,13 @@ private func pullCommand(slug: String) {
   }
   switch result {
   case .success(let destination):
-    log.notice("pull.completed slug=\(slug, privacy: .public) dest=\(destination, privacy: .public)")
+    log.notice(
+      "pull.completed slug=\(slug, privacy: .public) dest=\(destination, privacy: .public)")
     say("done. \(destination)")
   case .failure(let error):
-    log.error("pull.failed slug=\(slug, privacy: .public) err=\(String(describing: error), privacy: .public)")
+    log.error(
+      "pull.failed slug=\(slug, privacy: .public) err=\(String(describing: error), privacy: .public)"
+    )
     sayErr("lmd pull: \(error)")
     exit(1)
   }
@@ -203,17 +216,23 @@ private func rmCommand(modelId: String) {
     exit(1)
   }
   let sizeGB = Double(descriptor.sizeBytes) / 1_073_741_824
-  say("remove \(descriptor.displayName) (\(String(format: "%.1f", sizeGB)) GB) at \(descriptor.path) ? [y/N]")
+  say(
+    "remove \(descriptor.displayName) (\(String(format: "%.1f", sizeGB)) GB) at \(descriptor.path) ? [y/N]"
+  )
   guard let line = readLine(), line.lowercased().hasPrefix("y") else {
     say("aborted.")
     return
   }
   do {
     try FileManager.default.removeItem(atPath: descriptor.path)
-    log.notice("rm.completed model=\(descriptor.id, privacy: .public) path=\(descriptor.path, privacy: .public)")
+    log.notice(
+      "rm.completed model=\(descriptor.id, privacy: .public) path=\(descriptor.path, privacy: .public)"
+    )
     say("removed \(descriptor.path)")
   } catch {
-    log.error("rm.failed model=\(descriptor.id, privacy: .public) err=\(String(describing: error), privacy: .public)")
+    log.error(
+      "rm.failed model=\(descriptor.id, privacy: .public) err=\(String(describing: error), privacy: .public)"
+    )
     sayErr("lmd rm: \(error)")
     exit(1)
   }
@@ -229,7 +248,9 @@ private func runBenchFromConfig(configPath: String) async {
       config = try loadBenchConfig(fromJSON: configPath)
     }
   } catch {
-    log.error("bench.config_load_failed path=\(configPath, privacy: .public) err=\(String(describing: error), privacy: .public)")
+    log.error(
+      "bench.config_load_failed path=\(configPath, privacy: .public) err=\(String(describing: error), privacy: .public)"
+    )
     sayErr("lmd bench run: failed to load config: \(error)")
     exit(2)
   }
@@ -255,7 +276,9 @@ private func runBenchFromConfig(configPath: String) async {
         say("  ✓ \(model.id)")
       case .runFinished(let done, let failed):
         say("done. completed=\(done) failed=\(failed)")
-        log.notice("bench.run_finished completed=\(done, privacy: .public) failed=\(failed, privacy: .public)")
+        log.notice(
+          "bench.run_finished completed=\(done, privacy: .public) failed=\(failed, privacy: .public)"
+        )
       }
     }
   )
@@ -444,7 +467,8 @@ struct LMDQACommand: ParsableCommand {
   @Argument(help: "Optional QA target. Valid values are `lmd-tui` or `all`.")
   var target: String = "all"
 
-  @Option(name: .long, help: "Driver list such as `tmux`, `pty`, `iterm`, or a comma-separated set.")
+  @Option(
+    name: .long, help: "Driver list such as `tmux`, `pty`, `iterm`, or a comma-separated set.")
   var driver: String?
 
   @Flag(name: .long, help: "Skip coverage enforcement.")

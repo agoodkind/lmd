@@ -15,8 +15,8 @@
 
 import AppLogger
 import Foundation
-import Hummingbird
 import HTTPTypes
+import Hummingbird
 import LMDServeSupport
 import SwiftLMBackend
 import SwiftLMControl
@@ -254,6 +254,8 @@ struct OpenAIModelsResponse: Codable {
   let object: String
   let data: [ModelEntry]
 
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  // Field names mirror the OpenAI `/v1/models` wire format verbatim.
   struct ModelEntry: Codable {
     let id: String
     let object: String
@@ -324,7 +326,8 @@ func brokerLoadedSnapshot(
   )
 }
 
-func modelLoadConfig(for request: ModelLoadRequest, descriptor: ModelDescriptor) -> ModelLoadConfig {
+func modelLoadConfig(for request: ModelLoadRequest, descriptor: ModelDescriptor) -> ModelLoadConfig
+{
   ModelLoadConfig(
     identifier: request.identifier,
     contextLength: request.contextLength,
@@ -552,11 +555,12 @@ struct SwiftLMD {
         let now = Date()
         for c in snap.loaded
         where c.isIdle && !c.isEmbedding
-          && now.timeIntervalSince(c.lastUsed) >= idleCutoff(
-            for: c,
-            defaultChat: chatIdleCutoff,
-            defaultEmbedding: embedIdleCutoff
-          )
+          && now.timeIntervalSince(c.lastUsed)
+            >= idleCutoff(
+              for: c,
+              defaultChat: chatIdleCutoff,
+              defaultEmbedding: embedIdleCutoff
+            )
         {
           slog(
             "idle-unload: \(c.modelID) (chat, last used \(Int(now.timeIntervalSince(c.lastUsed)))s ago)"
@@ -565,11 +569,12 @@ struct SwiftLMD {
         }
         for c in snap.loaded
         where c.isIdle && c.isEmbedding
-          && now.timeIntervalSince(c.lastUsed) >= idleCutoff(
-            for: c,
-            defaultChat: chatIdleCutoff,
-            defaultEmbedding: embedIdleCutoff
-          )
+          && now.timeIntervalSince(c.lastUsed)
+            >= idleCutoff(
+              for: c,
+              defaultChat: chatIdleCutoff,
+              defaultEmbedding: embedIdleCutoff
+            )
         {
           slog(
             "idle-unload: \(c.modelID) (embedding, last used \(Int(now.timeIntervalSince(c.lastUsed)))s ago)"
@@ -1052,6 +1057,8 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
     let object: String
     let data: [EmbRow]
     let model: String
+    // swift-format-ignore: AlwaysUseLowerCamelCase
+    // Field names mirror the OpenAI embedding usage wire format verbatim.
     struct Usage: Codable {
       let prompt_tokens: Int
       let total_tokens: Int
@@ -1179,7 +1186,8 @@ private func chatRequestBudgetError(
     return "estimated prompt tokens \(estimatedTokens) exceed context_length \(contextLength)"
   }
   if let promptCacheLimit = promptCacheMaxTokens(), estimatedTokens > promptCacheLimit {
-    return "estimated prompt tokens \(estimatedTokens) exceed prompt cache limit \(promptCacheLimit)"
+    return
+      "estimated prompt tokens \(estimatedTokens) exceed prompt cache limit \(promptCacheLimit)"
   }
   return nil
 }
@@ -1192,7 +1200,8 @@ private func lmReviewRequestID(from req: Request) -> String? {
   guard let fieldName = HTTPField.Name("X-LM-Review-Request-ID") else {
     return nil
   }
-  guard let rawValue = req.headers[fieldName]?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+  guard let rawValue = req.headers[fieldName]?.trimmingCharacters(in: .whitespacesAndNewlines)
+  else {
     return nil
   }
   guard !rawValue.isEmpty else {

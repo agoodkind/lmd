@@ -49,7 +49,7 @@ public enum BenchConfigTOMLError: Error, Equatable, Sendable {
 /// Load a `BenchConfig` from a TOML file.
 public func loadBenchConfig(fromTOML path: String) throws -> BenchConfig {
   guard let data = FileManager.default.contents(atPath: path),
-        let text = String(data: data, encoding: .utf8)
+    let text = String(data: data, encoding: .utf8)
   else {
     throw BenchConfigTOMLError.fileNotFound(path)
   }

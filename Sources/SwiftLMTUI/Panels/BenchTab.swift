@@ -118,7 +118,8 @@ public final class BenchTab: Tab {
     } else {
       startedSuffix = ""
     }
-    let header = "\(Theme.head)BENCH\(Ansi.reset)  "
+    let header =
+      "\(Theme.head)BENCH\(Ansi.reset)  "
       + "\(Theme.text)\(stats.done)/\(stats.total)\(Ansi.reset) "
       + "\(Theme.dim)(\(stats.passed) passed · \(stats.failed) failed · \(stats.running) running)\(Ansi.reset)"
       + "\(Theme.dim)\(startedSuffix)\(Ansi.reset)"
@@ -179,7 +180,10 @@ public final class BenchTab: Tab {
 
   fileprivate func summary() -> Summary {
     let total = models.count * variants.count
-    var passed = 0, failed = 0, running = 0, skipped = 0
+    var passed = 0
+    var failed = 0
+    var running = 0
+    var skipped = 0
     for v in cells.values {
       switch v {
       case .passed: passed += 1

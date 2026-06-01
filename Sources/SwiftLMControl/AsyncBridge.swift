@@ -54,7 +54,8 @@ public func runBlocking<Value>(
   }
   semaphore.wait()
   guard let boxedResult = box.get(),
-        let result = boxedResult else {
+    let result = boxedResult
+  else {
     return .failure(AsyncBridgeError.missingResult)
   }
   return result

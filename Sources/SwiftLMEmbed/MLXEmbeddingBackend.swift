@@ -127,7 +127,8 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
       let batchSize = encoded.count
       let totalTokens = encoded.reduce(0) { $0 + $1.count }
       let totalSlots = batchSize * maxLength
-      let paddingRatio = totalSlots > 0 ? Double(totalSlots - totalTokens) / Double(totalSlots) : 0.0
+      let paddingRatio =
+        totalSlots > 0 ? Double(totalSlots - totalTokens) / Double(totalSlots) : 0.0
       BackendTrace.debug(
         phase: TracePhase.Embedding.requestPostTokenize.rawValue,
         context: traceCtx,

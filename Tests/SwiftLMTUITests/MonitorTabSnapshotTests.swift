@@ -15,6 +15,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMTUI
 
 final class MonitorTabSnapshotTests: XCTestCase {

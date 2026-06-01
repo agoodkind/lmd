@@ -7,13 +7,15 @@
 //
 
 import XCTest
+
 @testable import SwiftLMCore
 @testable import SwiftLMRuntime
 
 final class ModelCatalogKindTests: XCTestCase {
   private func tempModelDir() throws -> String {
     let base = FileManager.default.temporaryDirectory
-    let dir = base.appendingPathComponent("lmd-kind-test-\(UUID().uuidString)", isDirectory: true).path
+    let dir = base.appendingPathComponent("lmd-kind-test-\(UUID().uuidString)", isDirectory: true)
+      .path
     try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
     return dir
   }

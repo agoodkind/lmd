@@ -30,20 +30,22 @@ private let jsonInstructionPrefix =
 ///   no change was needed.
 public func injectJSONInstructionIfNeeded(_ json: inout [String: Any]) -> Data? {
   guard let rf = json["response_format"] as? [String: Any],
-        let type = rf["type"] as? String,
-        type == "json_object" || type == "json_schema"
+    let type = rf["type"] as? String,
+    type == "json_object" || type == "json_schema"
   else { return nil }
 
   var instruction = """
-\(jsonInstructionPrefix) Do not include prose, \
-preamble, apology, or markdown code fences. The entire response must \
-parse with a standard JSON parser on the first try.
-"""
+    \(jsonInstructionPrefix) Do not include prose, \
+    preamble, apology, or markdown code fences. The entire response must \
+    parse with a standard JSON parser on the first try.
+    """
   if type == "json_schema",
-     let schema = rf["json_schema"] as? [String: Any],
-     let body = schema["schema"] {
+    let schema = rf["json_schema"] as? [String: Any],
+    let body = schema["schema"]
+  {
     if let data = try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]),
-       let text = String(data: data, encoding: .utf8) {
+      let text = String(data: data, encoding: .utf8)
+    {
       instruction += "\n\nThe JSON must conform to this JSON schema:\n\(text)"
     }
   }

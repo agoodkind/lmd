@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMRuntime
 
 final class FanCurveTests: XCTestCase {
@@ -147,13 +148,17 @@ final class FanCoordinatorStateTests: XCTestCase {
 
   func testActiveToCoolingWhenLLMUnloaded() async throws {
     let (coord, _) = makeCoordinator()
-    try await coord.apply(.init(cpuTempC: 80, gpuTempC: 85,
-                               cpuPercent: 30, gpuPercent: 90,
-                               pressureFreePct: 50, llmLoaded: true))
+    try await coord.apply(
+      .init(
+        cpuTempC: 80, gpuTempC: 85,
+        cpuPercent: 30, gpuPercent: 90,
+        pressureFreePct: 50, llmLoaded: true))
     XCTAssertEqual(coord.state, .active)
-    try await coord.apply(.init(cpuTempC: 80, gpuTempC: 85,
-                                cpuPercent: 5, gpuPercent: 0,
-                                pressureFreePct: 50, llmLoaded: false))
+    try await coord.apply(
+      .init(
+        cpuTempC: 80, gpuTempC: 85,
+        cpuPercent: 5, gpuPercent: 0,
+        pressureFreePct: 50, llmLoaded: false))
     XCTAssertEqual(coord.state, .cooling)
   }
 

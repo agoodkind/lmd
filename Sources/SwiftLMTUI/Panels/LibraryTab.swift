@@ -48,8 +48,8 @@ public struct LibraryEntry: Sendable, Equatable {
 
 /// How the library list is ordered.
 public enum LibrarySortMode: String, Sendable, CaseIterable {
-  case name         // alpha by display name
-  case sizeDesc     // largest first
+  case name  // alpha by display name
+  case sizeDesc  // largest first
   case loadedFirst  // loaded models above idle ones, alpha within each group
 }
 
@@ -80,9 +80,8 @@ public final class LibraryTab: Tab {
     } else {
       let q = query.lowercased()
       filtered = entries.filter {
-        $0.displayName.lowercased().contains(q) ||
-        $0.slug.lowercased().contains(q) ||
-        $0.id.lowercased().contains(q)
+        $0.displayName.lowercased().contains(q) || $0.slug.lowercased().contains(q)
+          || $0.id.lowercased().contains(q)
       }
     }
     switch sortMode {
@@ -162,28 +161,33 @@ public final class LibraryTab: Tab {
     let visible = visibleEntries
     let sortLabel: String
     switch sortMode {
-    case .name:         sortLabel = "name"
-    case .sizeDesc:     sortLabel = "size"
-    case .loadedFirst:  sortLabel = "loaded"
+    case .name: sortLabel = "name"
+    case .sizeDesc: sortLabel = "size"
+    case .loadedFirst: sortLabel = "loaded"
     }
 
     var listLines: [String] = []
     let header: String
     if query.isEmpty {
-      header = "\(Theme.head)MODELS\(Ansi.reset)  \(Theme.dim)\(entries.count) · sort:\(sortLabel) · / search · s sort\(Ansi.reset)"
+      header =
+        "\(Theme.head)MODELS\(Ansi.reset)  \(Theme.dim)\(entries.count) · sort:\(sortLabel) · / search · s sort\(Ansi.reset)"
     } else {
-      header = "\(Theme.head)MODELS\(Ansi.reset)  \(Theme.dim)\(visible.count)/\(entries.count) · \"\(query)\" · esc clear\(Ansi.reset)"
+      header =
+        "\(Theme.head)MODELS\(Ansi.reset)  \(Theme.dim)\(visible.count)/\(entries.count) · \"\(query)\" · esc clear\(Ansi.reset)"
     }
     listLines.append(header)
 
     if searchActive {
-      listLines.append("\(Theme.accent)SEARCH\(Ansi.reset) \(Theme.text)\(query)\(Ansi.reset)\(Theme.accent)▏\(Ansi.reset)")
+      listLines.append(
+        "\(Theme.accent)SEARCH\(Ansi.reset) \(Theme.text)\(query)\(Ansi.reset)\(Theme.accent)▏\(Ansi.reset)"
+      )
     } else {
       listLines.append("")
     }
 
     if entries.isEmpty {
-      listLines.append("\(Theme.dim)no models found under ~/.lmstudio/models or HF cache\(Ansi.reset)")
+      listLines.append(
+        "\(Theme.dim)no models found under ~/.lmstudio/models or HF cache\(Ansi.reset)")
     } else if visible.isEmpty {
       listLines.append("\(Theme.dim)no matches for \"\(query)\"\(Ansi.reset)")
     } else {
@@ -208,10 +212,13 @@ public final class LibraryTab: Tab {
         }
         let sizeStr = entry.sizeGB >= 0.1 ? String(format: "%6.1f GB", entry.sizeGB) : "     n/a"
         let nameCol = VisibleText.pad(VisibleText.truncate(entry.displayName, nameWidth), nameWidth)
-        let prefix = selected
+        let prefix =
+          selected
           ? "\(Theme.barBg)\(Theme.barFg) > \(Ansi.reset)"
           : "    "
-        listLines.append("\(prefix)\(marker)  \(Theme.text)\(nameCol)\(Ansi.reset)  \(Theme.text)\(sizeStr)\(Ansi.reset)")
+        listLines.append(
+          "\(prefix)\(marker)  \(Theme.text)\(nameCol)\(Ansi.reset)  \(Theme.text)\(sizeStr)\(Ansi.reset)"
+        )
       }
     }
 
@@ -283,7 +290,8 @@ public final class LibraryTab: Tab {
       if count > 0 { selection = max(selection - 1, 0) }
       return .none
     case .key(.top):
-      selection = 0; return .none
+      selection = 0
+      return .none
     case .key(.bottom):
       if count > 0 { selection = count - 1 }
       return .none

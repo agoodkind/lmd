@@ -63,7 +63,8 @@ final class EvictionPolicyTests: XCTestCase {
     let idleSmall = EvictionCandidate(
       modelID: "idle", sizeBytes: 10 * gb,
       lastUsed: now.addingTimeInterval(-60), inFlightRequests: 0)
-    let plan = EvictionPolicy.planEvictionToFree(candidates: [busy, idleSmall], bytesToFree: 5 * gb)
+    let plan = EvictionPolicy.planEvictionToFree(
+      candidates: [busy, idleSmall], bytesToFree: 5 * gb)
     XCTAssertEqual(plan, ["idle"])
   }
 

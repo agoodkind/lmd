@@ -129,7 +129,7 @@ public final class SensorSampler: @unchecked Sendable {
     let task = URLSession.shared.dataTask(with: req) { data, _, _ in
       defer { sem.signal() }
       guard let d = data,
-            let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any]
+        let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any]
       else { return }
       result.value = obj
     }
@@ -148,13 +148,17 @@ public final class SensorSampler: @unchecked Sendable {
     for raw in text.split(separator: "\n") {
       let line = String(raw)
       if line.contains("\"InstantAmperage\""),
-         let r = line.range(of: #"=\s*(\d+)"#, options: .regularExpression) {
-        let s = String(line[r]).replacingOccurrences(of: "=", with: "").trimmingCharacters(in: .whitespaces)
+        let r = line.range(of: #"=\s*(\d+)"#, options: .regularExpression)
+      {
+        let s = String(line[r]).replacingOccurrences(of: "=", with: "").trimmingCharacters(
+          in: .whitespaces)
         if let n = UInt64(s) { mA = Int64(bitPattern: n) }
       }
       if line.contains("\"Voltage\""), !line.contains("Pack"), !line.contains("Cell"),
-         let r = line.range(of: #"=\s*(\d+)"#, options: .regularExpression) {
-        let s = String(line[r]).replacingOccurrences(of: "=", with: "").trimmingCharacters(in: .whitespaces)
+        let r = line.range(of: #"=\s*(\d+)"#, options: .regularExpression)
+      {
+        let s = String(line[r]).replacingOccurrences(of: "=", with: "").trimmingCharacters(
+          in: .whitespaces)
         mV = Int64(s)
       }
     }
@@ -171,7 +175,8 @@ public final class SensorSampler: @unchecked Sendable {
     var ac = "battery"
     var source = "unknown"
     let lines = text.split(separator: "\n").map(String.init)
-    if let first = lines.first, let range = first.range(of: "'[^']+'", options: .regularExpression) {
+    if let first = lines.first, let range = first.range(of: "'[^']+'", options: .regularExpression)
+    {
       source = String(first[range]).trimmingCharacters(in: CharacterSet(charactersIn: "'"))
     }
     if let match = text.range(of: #"(\d+)%"#, options: .regularExpression) {
@@ -214,7 +219,8 @@ public final class SensorSampler: @unchecked Sendable {
     let pgWired = vmField("Pages wired down")
 
     let swapOut = runCommandCaptureOut("/usr/sbin/sysctl", args: ["-n", "vm.swapusage"])
-    var swapUsed = "0", swapTotal = "0"
+    var swapUsed = "0"
+    var swapTotal = "0"
     let swapFields = swapOut.split(separator: " ").map(String.init)
     for (i, f) in swapFields.enumerated() {
       if f == "used" && i + 2 < swapFields.count { swapUsed = swapFields[i + 2] }
@@ -251,7 +257,8 @@ public final class SensorSampler: @unchecked Sendable {
     let gpuPower = (mac?["gpu_power"] as? Double) ?? 0
     let sysPower = (mac?["sys_power"] as? Double) ?? 0
     let anePower = (mac?["ane_power"] as? Double) ?? 0
-    let ramUsageGb: Double = ((mac?["memory"] as? [String: Any])?["ram_usage"] as? Double)
+    let ramUsageGb: Double =
+      ((mac?["memory"] as? [String: Any])?["ram_usage"] as? Double)
       .map { $0 / 1_073_741_824 } ?? 0
 
     let sample: [String: Any] = [
@@ -296,7 +303,7 @@ public final class SensorSampler: @unchecked Sendable {
   private func writeSample(_ sample: [String: Any]) {
     let outPath = "\(config.baseDir)/memory.jsonl"
     guard let data = try? JSONSerialization.data(withJSONObject: sample),
-          let line = String(data: data, encoding: .utf8)
+      let line = String(data: data, encoding: .utf8)
     else { return }
     let toWrite = line + "\n"
     if !FileManager.default.fileExists(atPath: outPath) {

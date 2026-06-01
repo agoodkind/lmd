@@ -9,6 +9,7 @@
 import Foundation
 import SwiftLMCore
 import XCTest
+
 @testable import LMDServeSupport
 
 private actor CompletionCounter {
@@ -231,7 +232,8 @@ final class VideoChatRoutingTests: XCTestCase {
       ),
       (
         "text stream",
-        preparedRequest(model: model(id: "text-stream"), wantsStream: true, inspection: textInspection),
+        preparedRequest(
+          model: model(id: "text-stream"), wantsStream: true, inspection: textInspection),
         "swiftLMProxy"
       ),
       (
@@ -245,7 +247,8 @@ final class VideoChatRoutingTests: XCTestCase {
       ),
       (
         "embedding",
-        preparedRequest(model: model(id: "embedding", kind: .embedding), inspection: textInspection),
+        preparedRequest(
+          model: model(id: "embedding", kind: .embedding), inspection: textInspection),
         "failure: model is an embedding model; use POST /v1/embeddings"
       ),
       (
@@ -257,7 +260,8 @@ final class VideoChatRoutingTests: XCTestCase {
         "wrong endpoint",
         preparedRequest(
           endpoint: .completions,
-          model: model(id: "video-completions", capabilities: .init(video: true, videoSamplingFPS: 2)),
+          model: model(
+            id: "video-completions", capabilities: .init(video: true, videoSamplingFPS: 2)),
           inspection: videoInspection
         ),
         "failure: video input is supported only on POST /v1/chat/completions"
@@ -284,8 +288,10 @@ final class VideoChatRoutingTests: XCTestCase {
 
   func testSSEEncoderProducesOrderedOpenAIFramesAndDone() async throws {
     let stream = AsyncThrowingStream<BackendStreamEvent, Error> { continuation in
-      continuation.yield(.role(id: "chatcmpl-test", created: 1, model: "model-a", role: "assistant"))
-      continuation.yield(.content(id: "chatcmpl-test", created: 1, model: "model-a", content: "hello"))
+      continuation.yield(
+        .role(id: "chatcmpl-test", created: 1, model: "model-a", role: "assistant"))
+      continuation.yield(
+        .content(id: "chatcmpl-test", created: 1, model: "model-a", content: "hello"))
       continuation.yield(
         .finish(
           id: "chatcmpl-test",

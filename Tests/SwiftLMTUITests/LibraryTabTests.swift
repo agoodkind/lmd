@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMTUI
 
 final class LibraryTabTests: XCTestCase {
@@ -35,7 +36,7 @@ final class LibraryTabTests: XCTestCase {
     XCTAssertEqual(tab.selection, 1)
     _ = tab.handle(.key(.scrollDown))
     XCTAssertEqual(tab.selection, 2)
-    _ = tab.handle(.key(.scrollDown)) // clamp at last
+    _ = tab.handle(.key(.scrollDown))  // clamp at last
     XCTAssertEqual(tab.selection, 2)
     _ = tab.handle(.key(.scrollUp))
     XCTAssertEqual(tab.selection, 1)

@@ -15,9 +15,9 @@
 
 import AppLogger
 import Foundation
+import SwiftLMCore
 
 private let log = AppLogger.logger(category: "BenchConfig")
-import SwiftLMCore
 
 // MARK: - Test variant
 
@@ -136,11 +136,12 @@ public struct BenchConfig: Sendable, Equatable {
       for variant in variants {
         let prompts = resolvePrompts(variant: variant, fileManager: fileManager)
         for prompt in prompts {
-          cells.append(BenchCell(
-            model: model,
-            variant: variant,
-            promptFilename: prompt
-          ))
+          cells.append(
+            BenchCell(
+              model: model,
+              variant: variant,
+              promptFilename: prompt
+            ))
         }
       }
     }
@@ -150,7 +151,9 @@ public struct BenchConfig: Sendable, Equatable {
   private func resolvePrompts(variant: BenchVariant, fileManager: FileManager) -> [String] {
     guard let entries = try? fileManager.contentsOfDirectory(atPath: promptsDir) else { return [] }
     // Use a simple glob-to-regex mapping: `*` -> `.*`, `?` -> `.`.
-    let pattern = "^" + variant.promptGlob
+    let pattern =
+      "^"
+      + variant.promptGlob
       .replacingOccurrences(of: ".", with: "\\.")
       .replacingOccurrences(of: "*", with: ".*")
       .replacingOccurrences(of: "?", with: ".") + "$"

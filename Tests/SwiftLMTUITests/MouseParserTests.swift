@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMTUI
 
 final class MouseParserTests: XCTestCase {
@@ -53,9 +54,9 @@ final class MouseParserTests: XCTestCase {
   }
 
   func testParsesInsideLargerBuffer() {
-    var bytes: [UInt8] = [0x41, 0x42]                 // leading junk
+    var bytes: [UInt8] = [0x41, 0x42]  // leading junk
     bytes.append(contentsOf: sgrBytes(button: 64, x: 5, y: 9, pressed: true))
-    bytes.append(contentsOf: [0x43])                  // trailing junk
+    bytes.append(contentsOf: [0x43])  // trailing junk
     let ev = MouseParser.parse(bytes, start: 2, length: bytes.count)
     XCTAssertEqual(ev?.button, 64)
     XCTAssertEqual(ev?.column, 5)

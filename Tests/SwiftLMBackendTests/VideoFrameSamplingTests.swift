@@ -50,7 +50,8 @@ final class VideoFrameSamplingTests: XCTestCase {
 
   private func fixtureURL(_ name: String) throws -> URL {
     let thisFile = URL(fileURLWithPath: #filePath)
-    let repoRoot = thisFile
+    let repoRoot =
+      thisFile
       .deletingLastPathComponent()
       .deletingLastPathComponent()
       .deletingLastPathComponent()

@@ -24,6 +24,7 @@
 
 import Foundation
 import XCTest
+
 @testable import SwiftLMTUI
 
 enum Snapshot {
@@ -107,7 +108,7 @@ enum Snapshot {
     while dir.path != "/" {
       if dir.lastPathComponent == "SwiftLMTUITests" {
         return dir.appendingPathComponent("Snapshots")
-                  .appendingPathComponent("\(name).txt")
+          .appendingPathComponent("\(name).txt")
       }
       dir = dir.deletingLastPathComponent()
     }

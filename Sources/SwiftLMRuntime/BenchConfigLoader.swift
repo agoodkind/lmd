@@ -21,30 +21,36 @@ import Foundation
 
 /// Codable mirror of `BenchConfig`. Kept separate so the public
 /// configuration type is free of Codable boilerplate.
+// swift-format-ignore: AlwaysUseLowerCamelCase
+// Field names mirror the snake_case keys in the bench config JSON verbatim.
 private struct BenchConfigDTO: Decodable {
-  let prompts_dir: String          // swiftlint:disable:this identifier_name
-  let results_dir: String          // swiftlint:disable:this identifier_name
-  let repo_path: String?           // swiftlint:disable:this identifier_name
-  let run_label: String?           // swiftlint:disable:this identifier_name
-  let skip_existing: Bool?         // swiftlint:disable:this identifier_name
-  let test_timeout_seconds: Double? // swiftlint:disable:this identifier_name
-  let parallelism_per_model: Int?   // swiftlint:disable:this identifier_name
+  let prompts_dir: String  // swiftlint:disable:this identifier_name
+  let results_dir: String  // swiftlint:disable:this identifier_name
+  let repo_path: String?  // swiftlint:disable:this identifier_name
+  let run_label: String?  // swiftlint:disable:this identifier_name
+  let skip_existing: Bool?  // swiftlint:disable:this identifier_name
+  let test_timeout_seconds: Double?  // swiftlint:disable:this identifier_name
+  let parallelism_per_model: Int?  // swiftlint:disable:this identifier_name
   let models: [BenchModelSpecDTO]
   let variants: [BenchVariantDTO]
 }
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
+// Field names mirror the snake_case keys in the bench config JSON verbatim.
 private struct BenchModelSpecDTO: Decodable {
   let id: String
-  let context_size: Int?           // swiftlint:disable:this identifier_name
-  let max_tokens_override: Int?    // swiftlint:disable:this identifier_name
+  let context_size: Int?  // swiftlint:disable:this identifier_name
+  let max_tokens_override: Int?  // swiftlint:disable:this identifier_name
   let max_input_bytes_override: Int?  // swiftlint:disable:this identifier_name
 }
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
+// Field names mirror the snake_case keys in the bench config JSON verbatim.
 private struct BenchVariantDTO: Decodable {
   let name: String
-  let prompt_glob: String          // swiftlint:disable:this identifier_name
-  let max_input_bytes: Int?        // swiftlint:disable:this identifier_name
-  let max_tokens: Int?             // swiftlint:disable:this identifier_name
+  let prompt_glob: String  // swiftlint:disable:this identifier_name
+  let max_input_bytes: Int?  // swiftlint:disable:this identifier_name
+  let max_tokens: Int?  // swiftlint:disable:this identifier_name
   let thinking: Bool?
 }
 
