@@ -1,5 +1,5 @@
 {
-  "originHash" : "76d2b352e27677db58d37228e40bffe8826ce6b6e295e928ecc3f21f4df709e2",
+  "originHash" : "dcd695670316702c22cb48a909b58938e061d5162c34ef229d4ed514121c15af",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -34,7 +34,7 @@
       "location" : "https://github.com/agoodkind/macos-smc-fan.git",
       "state" : {
         "branch" : "main",
-        "revision" : "4f942a36f6b63c5b0951a3937f8bf2dcbc85446d"
+        "revision" : "d1b1937e624de1b63d751da0edcaf8db9117d576"
       }
     },
     {
@@ -44,6 +44,15 @@
       "state" : {
         "revision" : "61b9e011e09a62b489f6bd647958f1555bdf2896",
         "version" : "0.31.3"
+      }
+    },
+    {
+      "identity" : "mlx-swift-lm",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/john-rocky/mlx-swift-lm.git",
+      "state" : {
+        "branch" : "feat/gemma4-video",
+        "revision" : "ad97bfc70bda32b3fab7fe50518782afbef5a1ee"
       }
     },
     {

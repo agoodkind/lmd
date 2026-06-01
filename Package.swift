@@ -34,7 +34,8 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.23.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.12.0"),
     .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
-    .package(name: "mlx-swift-lm", url: "https://github.com/john-rocky/mlx-swift-lm.git", branch: "feat/gemma4-video"),
+    .package(url: "https://github.com/john-rocky/mlx-swift-lm.git", branch: "feat/gemma4-video"),
+    .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMinor(from: "0.31.3")),
     .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
     .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.3.2"),
     .package(url: "https://github.com/agoodkind/macos-smc-fan.git", branch: "main"),
@@ -48,7 +49,7 @@ let package = Package(
     ),
     .target(
       name: "SwiftLMCore",
-      dependencies: ["AppLogger"],
+      dependencies: [],
       path: "Sources/SwiftLMCore",
       swiftSettings: strictConcurrency
     ),
@@ -66,7 +67,6 @@ let package = Package(
       dependencies: [
         "AppLogger",
         "SwiftLMCore",
-        "SwiftLMTrace",
         .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
         .product(name: "MLXVLM", package: "mlx-swift-lm"),
         .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
@@ -104,19 +104,19 @@ let package = Package(
     ),
     .target(
       name: "SwiftLMMonitor",
-      dependencies: ["AppLogger", "SwiftLMCore"],
+      dependencies: ["AppLogger"],
       path: "Sources/SwiftLMMonitor",
       swiftSettings: strictConcurrency
     ),
     .target(
       name: "SwiftLMTUI",
-      dependencies: ["AppLogger", "SwiftLMCore"],
+      dependencies: ["AppLogger"],
       path: "Sources/SwiftLMTUI",
       swiftSettings: strictConcurrency
     ),
     .target(
       name: "SwiftLMControl",
-      dependencies: ["AppLogger", "SwiftLMRuntime"],
+      dependencies: ["AppLogger", "SwiftLMCore", "SwiftLMRuntime"],
       path: "Sources/SwiftLMControl",
       swiftSettings: strictConcurrency
     ),
@@ -128,7 +128,7 @@ let package = Package(
     ),
     .target(
       name: "LMDBenchTool",
-      dependencies: ["AppLogger", "SwiftLMCore", "SwiftLMBackend", "SwiftLMRuntime", "SwiftLMMonitor"],
+      dependencies: ["AppLogger", "SwiftLMBackend", "SwiftLMRuntime", "SwiftLMMonitor"],
       path: "Sources/lmd-bench",
       swiftSettings: [.swiftLanguageMode(.v5)]
     ),
@@ -197,13 +197,21 @@ let package = Package(
     ),
     .testTarget(
       name: "SwiftLMBackendTests",
-      dependencies: ["SwiftLMBackend"],
+      dependencies: [
+        "SwiftLMBackend",
+        "SwiftLMCore",
+        .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+      ],
       path: "Tests/SwiftLMBackendTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(
       name: "SwiftLMEmbedTests",
-      dependencies: ["SwiftLMEmbed", "SwiftLMCore"],
+      dependencies: [
+        "SwiftLMEmbed",
+        "SwiftLMCore",
+        .product(name: "MLX", package: "mlx-swift"),
+      ],
       path: "Tests/SwiftLMEmbedTests",
       swiftSettings: strictConcurrency
     ),
@@ -221,7 +229,7 @@ let package = Package(
     ),
     .testTarget(
       name: "SwiftLMControlTests",
-      dependencies: ["SwiftLMControl"],
+      dependencies: ["SwiftLMControl", "SwiftLMCore", "SwiftLMRuntime"],
       path: "Tests/SwiftLMControlTests",
       swiftSettings: strictConcurrency
     ),

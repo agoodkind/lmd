@@ -125,7 +125,7 @@ let project = Project(
     ),
     frameworkTarget(
       "SwiftLMCore",
-      dependencies: [.target(name: "AppLogger")]
+      dependencies: []
     ),
     frameworkTarget(
       "SwiftLMTrace",
@@ -139,7 +139,6 @@ let project = Project(
       dependencies: [
         .target(name: "AppLogger"),
         .target(name: "SwiftLMCore"),
-        .target(name: "SwiftLMTrace"),
         .external(name: "MLXLMCommon"),
         .external(name: "MLXVLM"),
         .external(name: "MLXHuggingFace"),
@@ -173,23 +172,22 @@ let project = Project(
       "SwiftLMMonitor",
       dependencies: [
         .target(name: "AppLogger"),
-        .target(name: "SwiftLMCore"),
       ]
     ),
     frameworkTarget(
-    "SwiftLMTUI",
-    dependencies: [
-      .target(name: "AppLogger"),
-      .target(name: "SwiftLMCore"),
-    ]
+      "SwiftLMTUI",
+      dependencies: [
+        .target(name: "AppLogger"),
+      ]
     ),
     frameworkTarget(
-    "SwiftLMControl",
-    dependencies: [
-      .target(name: "AppLogger"),
-      .target(name: "SwiftLMRuntime"),
-    ]
-  ),
+      "SwiftLMControl",
+      dependencies: [
+        .target(name: "AppLogger"),
+        .target(name: "SwiftLMCore"),
+        .target(name: "SwiftLMRuntime"),
+      ]
+    ),
     .target(
       name: "LMDTUIHost",
       destinations: .macOS,
@@ -215,7 +213,6 @@ let project = Project(
       sources: ["Sources/lmd-bench/**/*.swift"],
       dependencies: [
         .target(name: "AppLogger"),
-        .target(name: "SwiftLMCore"),
         .target(name: "SwiftLMBackend"),
         .target(name: "SwiftLMRuntime"),
         .target(name: "SwiftLMMonitor"),
@@ -241,6 +238,7 @@ let project = Project(
         .target(name: "SwiftLMCore"),
         .target(name: "SwiftLMBackend"),
         .external(name: "Hummingbird"),
+        .external(name: "MLXLMCommon"),
       ]
     ),
     commandLineTarget(
@@ -287,13 +285,18 @@ let project = Project(
     ),
     testTarget(
       "SwiftLMBackendTests",
-      dependencies: [.target(name: "SwiftLMBackend")]
+      dependencies: [
+        .target(name: "SwiftLMBackend"),
+        .target(name: "SwiftLMCore"),
+        .external(name: "MLXLMCommon"),
+      ]
     ),
     testTarget(
       "SwiftLMEmbedTests",
       dependencies: [
         .target(name: "SwiftLMEmbed"),
         .target(name: "SwiftLMCore"),
+        .external(name: "MLX"),
       ]
     ),
     testTarget(
@@ -310,7 +313,11 @@ let project = Project(
     ),
     testTarget(
       "SwiftLMControlTests",
-      dependencies: [.target(name: "SwiftLMControl")]
+      dependencies: [
+        .target(name: "SwiftLMControl"),
+        .target(name: "SwiftLMCore"),
+        .target(name: "SwiftLMRuntime"),
+      ]
     ),
     testTarget(
       "SwiftLMTUITests",
