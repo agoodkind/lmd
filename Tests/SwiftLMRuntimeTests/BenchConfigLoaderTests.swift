@@ -20,7 +20,7 @@ final class BenchConfigLoaderTests: XCTestCase {
         "variants": [{"name": "review", "prompt_glob": "review-*.txt"}]
       }
       """
-    let cfg = try loadBenchConfig(fromJSON: json.data(using: .utf8)!)
+    let cfg = try loadBenchConfig(fromJSON: Data(json.utf8))
     XCTAssertEqual(cfg.promptsDir, "/tmp/p")
     XCTAssertEqual(cfg.resultsDir, "/tmp/r")
     XCTAssertEqual(cfg.models.count, 1)
@@ -58,7 +58,7 @@ final class BenchConfigLoaderTests: XCTestCase {
         ]
       }
       """
-    let cfg = try loadBenchConfig(fromJSON: json.data(using: .utf8)!)
+    let cfg = try loadBenchConfig(fromJSON: Data(json.utf8))
     XCTAssertEqual(cfg.runLabel, "tonight")
     XCTAssertFalse(cfg.skipExisting)
     XCTAssertEqual(cfg.testTimeoutSeconds, 120)
@@ -75,7 +75,7 @@ final class BenchConfigLoaderTests: XCTestCase {
     let json = """
       {"prompts_dir": "/p", "results_dir": "/r", "models": [], "variants": [{"name": "v", "prompt_glob": "*"}]}
       """
-    XCTAssertThrowsError(try loadBenchConfig(fromJSON: json.data(using: .utf8)!)) { err in
+    XCTAssertThrowsError(try loadBenchConfig(fromJSON: Data(json.utf8))) { err in
       XCTAssertEqual(err as? BenchConfigLoadError, .emptyModels)
     }
   }
@@ -84,7 +84,7 @@ final class BenchConfigLoaderTests: XCTestCase {
     let json = """
       {"prompts_dir": "/p", "results_dir": "/r", "models": [{"id": "m"}], "variants": []}
       """
-    XCTAssertThrowsError(try loadBenchConfig(fromJSON: json.data(using: .utf8)!)) { err in
+    XCTAssertThrowsError(try loadBenchConfig(fromJSON: Data(json.utf8))) { err in
       XCTAssertEqual(err as? BenchConfigLoadError, .emptyVariants)
     }
   }
@@ -93,7 +93,7 @@ final class BenchConfigLoaderTests: XCTestCase {
     let json = """
       {"prompts_dir": "/p", "models": [{"id": "m"}], "variants": [{"name": "v", "prompt_glob": "*"}]}
       """
-    XCTAssertThrowsError(try loadBenchConfig(fromJSON: json.data(using: .utf8)!)) { err in
+    XCTAssertThrowsError(try loadBenchConfig(fromJSON: Data(json.utf8))) { err in
       if case .invalidJSON = (err as? BenchConfigLoadError) {
       } else {
         XCTFail("expected invalidJSON, got \(err)")

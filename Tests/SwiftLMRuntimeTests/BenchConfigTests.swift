@@ -17,6 +17,7 @@ final class BenchConfigTests: XCTestCase {
     super.setUp()
     tempDir = FileManager.default.temporaryDirectory
       .appendingPathComponent("bench-cfg-\(UUID().uuidString)")
+    // swiftlint:disable:next force_try
     try! FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
   }
 

@@ -440,7 +440,7 @@ final class MemoryMonitor {
       }
       if let fh = FileHandle(forWritingAtPath: outPath) {
         fh.seekToEndOfFile()
-        fh.write(toWrite.data(using: .utf8)!)
+        fh.write(Data(toWrite.utf8))
         try? fh.close()
       }
     }
@@ -671,6 +671,7 @@ func runChat(model: String, systemPrompt: String, userContent: String, maxTokens
     "max_tokens": maxTokens,
   ]
 
+  // swiftlint:disable:next force_unwrapping
   let url = URL(string: "http://\(serverHost):\(serverPort)/v1/chat/completions")!
   var req = URLRequest(url: url)
   req.httpMethod = "POST"

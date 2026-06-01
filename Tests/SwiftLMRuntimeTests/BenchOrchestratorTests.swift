@@ -53,7 +53,7 @@ private final class FakeBackend: BenchBackend, @unchecked Sendable {
     if shouldFail {
       throw NSError(domain: "fake", code: 2)
     }
-    return #"{"ok": true}"#.data(using: .utf8)!
+    return Data(#"{"ok": true}"#.utf8)
   }
 
   func unload(_ model: BenchModelSpec) {}
@@ -66,6 +66,7 @@ final class BenchOrchestratorTests: XCTestCase {
     super.setUp()
     tempDir = FileManager.default.temporaryDirectory
       .appendingPathComponent("bench-orch-\(UUID().uuidString)")
+    // swiftlint:disable:next force_try
     try! FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
   }
 
@@ -83,7 +84,7 @@ final class BenchOrchestratorTests: XCTestCase {
     let rd = tempDir.appendingPathComponent("results")
     try FileManager.default.createDirectory(at: pd, withIntermediateDirectories: true)
     for p in prompts {
-      try p.body.data(using: .utf8)!.write(to: pd.appendingPathComponent(p.name))
+      try Data(p.body.utf8).write(to: pd.appendingPathComponent(p.name))
     }
     return BenchConfig(
       promptsDir: pd.path,

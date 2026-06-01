@@ -18,6 +18,7 @@ final class ModelCatalogTests: XCTestCase {
     super.setUp()
     tempDir = FileManager.default.temporaryDirectory
       .appendingPathComponent("swiftlm-tests-\(UUID().uuidString)")
+    // swiftlint:disable:next force_try
     try! FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
   }
 

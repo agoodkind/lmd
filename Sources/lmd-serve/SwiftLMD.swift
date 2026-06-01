@@ -1679,6 +1679,7 @@ private func swiftLMProxyResult(
     return result
   }
 
+  // swiftlint:disable:next force_unwrapping
   let upstreamURL = URL(string: "http://localhost:\(backend.port)\(prepared.endpoint.path)")!
   let routerInfo = await state.router.chatLoadInfo(modelID: prepared.model.id)
   let routedContext = TraceContext(

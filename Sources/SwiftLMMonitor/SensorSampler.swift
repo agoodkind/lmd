@@ -315,7 +315,7 @@ public final class SensorSampler: @unchecked Sendable {
     }
     if let fh = FileHandle(forWritingAtPath: outPath) {
       fh.seekToEndOfFile()
-      fh.write(toWrite.data(using: .utf8)!)
+      fh.write(Data(toWrite.utf8))
       try? fh.close()
     }
   }

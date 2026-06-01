@@ -267,7 +267,7 @@ private func runBenchFromConfig(configPath: String) async {
       case .modelStarting(let model, let pending):
         say("  ▶ \(model.id) (\(pending) tests)")
       case .cellStarted(let cell):
-        FileHandle.standardOutput.write("    \(cell.promptFilename) …".data(using: .utf8)!)
+        FileHandle.standardOutput.write(Data("    \(cell.promptFilename) …".utf8))
       case .cellFinished(let cell, let elapsed, let bytes):
         say(" ✓ \(Int(elapsed))s \(bytes)B  [\(cell.variant.name)]")
       case .cellFailed(let cell, let error):

@@ -87,7 +87,8 @@ struct SmokeConfiguration {
   let videoMaxTokens: Int
 
   var baseURL: URL {
-    URL(string: "http://\(host):\(port)")!
+    // swiftlint:disable:next force_unwrapping
+    return URL(string: "http://\(host):\(port)")!
   }
 
   init(environment: [String: String], repoRoot: URL) throws {
