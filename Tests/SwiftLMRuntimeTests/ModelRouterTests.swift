@@ -7,6 +7,7 @@
 //
 
 import XCTest
+
 @testable import SwiftLMBackend
 @testable import SwiftLMCore
 @testable import SwiftLMRuntime
@@ -58,28 +59,91 @@ enum TestEmbeddingError: Error {
   case failed
 }
 
+/// A probe that always reports abundant memory and no pressure. Used by tests
+/// that exercise routing and ports rather than the headroom guard.
+private let abundantMemoryProbe: MemoryProbe = {
+  MemoryReading(availableBytes: 1 << 50, underPressure: false)
+}
+
+/// Models system memory as a function of the fake backends still running, plus
+/// an adjustable external-consumption knob and a pressure flag. Unloading a fake
+/// (which sets it stopped) frees its bytes, so the router's re-measure after
+/// eviction sees memory recover, exactly as it would against the real system.
+private final class MemoryModel: @unchecked Sendable {
+  let totalBytes: Int64
+  private let lock = NSLock()
+  private var chat: [FakeBackend] = []
+  private var embed: [FakeEmbeddingBackend] = []
+  private var externalUsedBytes: Int64 = 0
+  private var pressure = false
+
+  init(totalGB: Int64) {
+    self.totalBytes = totalGB * 1_073_741_824
+  }
+
+  func registerChat(_ backend: FakeBackend) {
+    lock.lock()
+    chat.append(backend)
+    lock.unlock()
+  }
+
+  func registerEmbed(_ backend: FakeEmbeddingBackend) {
+    lock.lock()
+    embed.append(backend)
+    lock.unlock()
+  }
+
+  func setExternalUsed(gb: Int64) {
+    lock.lock()
+    externalUsedBytes = gb * 1_073_741_824
+    lock.unlock()
+  }
+
+  func setUnderPressure(_ value: Bool) {
+    lock.lock()
+    pressure = value
+    lock.unlock()
+  }
+
+  func probe() -> MemoryProbe {
+    { [self] in
+      lock.lock()
+      defer { lock.unlock() }
+      var used = externalUsedBytes
+      for backend in chat where backend.isRunning {
+        used += backend.sizeBytes
+      }
+      for backend in embed where !backend.stopped {
+        used += backend.sizeBytes
+      }
+      return MemoryReading(availableBytes: max(0, totalBytes - used), underPressure: pressure)
+    }
+  }
+}
+
 final class ModelRouterTests: XCTestCase {
   private let gb: Int64 = 1_073_741_824
 
   private func makeRouter(
-    ceiling: Int64 = 80,
-    reserve: Int64 = 0,
+    reserveGB: Int64 = 0,
+    model: MemoryModel? = nil,
     eventSink: @escaping @Sendable (RouterLifecycleEvent) -> Void = { _ in }
   ) -> (ModelRouter, () -> [FakeBackend]) {
     let created = FakesBox()
-    let spawner: BackendSpawner = { model, port, _ in
-      let fake = FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
+    let spawner: BackendSpawner = { model2, port, _ in
+      let fake = FakeBackend(modelID: model2.id, port: port, sizeBytes: model2.sizeBytes)
       created.append(fake)
+      model?.registerChat(fake)
       return fake
     }
-    let budget = MemoryBudget(
-      ceilingBytes: ceiling * 1_073_741_824,
-      reservedBytes: reserve * 1_073_741_824
-    )
+    let probe: MemoryProbe = model?.probe() ?? abundantMemoryProbe
     let router = ModelRouter(
-      budget: budget,
+      reserveBytes: reserveGB * gb,
+      memoryProbe: probe,
       portRange: 5500...5502,
       spawner: spawner,
+      settleAttempts: 3,
+      settleIntervalMillis: 1,
       eventSink: eventSink
     )
     return (router, created.getAll)
@@ -139,8 +203,17 @@ final class ModelRouterTests: XCTestCase {
     XCTAssertEqual(created().count, 2)
   }
 
-  func testEvictsOldestIdleWhenBudgetExceeded() async throws {
-    let (router, created) = makeRouter(ceiling: 80)  // 80 usable
+  func testAdmitsWhenMemorySafe() async throws {
+    let memory = MemoryModel(totalGB: 100)
+    let (router, created) = makeRouter(reserveGB: 20, model: memory)
+    _ = try await router.routeAndBegin(desc("A", 40))
+    XCTAssertEqual(created().count, 1)
+    XCTAssertFalse(created()[0].stopped, "no eviction when memory is already safe")
+  }
+
+  func testEvictsOldestIdleWhenHeadroomExceeded() async throws {
+    let memory = MemoryModel(totalGB: 80)
+    let (router, created) = makeRouter(reserveGB: 0, model: memory)
     let a = try await router.routeAndBegin(desc("A", 40))
     await router.requestDone(modelID: "A")
     let b = try await router.routeAndBegin(desc("B", 30))
@@ -151,19 +224,74 @@ final class ModelRouterTests: XCTestCase {
     XCTAssertTrue(created()[0].stopped, "A should be evicted")
     XCTAssertFalse(created()[1].stopped, "B should still be alive")
     XCTAssertFalse(created()[2].stopped, "C should still be alive")
-    _ = a; _ = b; _ = c
+    _ = a
+    _ = b
+    _ = c
+  }
+
+  func testAdmitsAfterEvictingIdleModelWhenMemoryRecovers() async throws {
+    let memory = MemoryModel(totalGB: 60)
+    let (router, created) = makeRouter(reserveGB: 20, model: memory)
+    _ = try await router.routeAndBegin(desc("A", 30))
+    await router.requestDone(modelID: "A")
+    _ = try await router.routeAndBegin(desc("B", 30))
+    XCTAssertEqual(created().count, 2)
+    XCTAssertTrue(created()[0].stopped, "idle A is unloaded to make room")
+    XCTAssertFalse(created()[1].stopped, "B loads once memory recovers")
+  }
+
+  func testRefusesWhenEvictingAllIdleStillInsufficient() async throws {
+    let memory = MemoryModel(totalGB: 60)
+    let (router, created) = makeRouter(reserveGB: 20, model: memory)
+    // A stays busy (no requestDone), so it can never be evicted.
+    _ = try await router.routeAndBegin(desc("A", 40))
+    do {
+      _ = try await router.routeAndBegin(desc("B", 30))
+      XCTFail("expected insufficientHeadroom")
+    } catch let err as ModelRouter.RouteError {
+      guard case .insufficientHeadroom = err else {
+        XCTFail("expected insufficientHeadroom, got \(err)")
+        return
+      }
+    }
+    XCTAssertFalse(created()[0].stopped, "busy model is never evicted")
+  }
+
+  func testPressureForcesEvictionEvenWhenBytesFine() async throws {
+    let memory = MemoryModel(totalGB: 200)
+    let (router, created) = makeRouter(reserveGB: 20, model: memory)
+    _ = try await router.routeAndBegin(desc("A", 30))
+    await router.requestDone(modelID: "A")
+    // Byte count alone leaves plenty of room, but the system reports pressure.
+    memory.setUnderPressure(true)
+    _ = try await router.routeAndBegin(desc("B", 10))
+    XCTAssertTrue(created()[0].stopped, "pressure forces the idle model to unload")
+    XCTAssertFalse(created()[1].stopped, "B still loads after relief")
+  }
+
+  func testEnforceHeadroomFreesIdleUnderExternalPressure() async throws {
+    let memory = MemoryModel(totalGB: 100)
+    let (router, created) = makeRouter(reserveGB: 20, model: memory)
+    _ = try await router.routeAndBegin(desc("A", 30))
+    await router.requestDone(modelID: "A")
+    // An external process consumes memory after A was admitted, dropping free
+    // memory below the reserve with no load event to trigger the check.
+    memory.setExternalUsed(gb: 70)
+    await router.enforceHeadroom()
+    XCTAssertTrue(created()[0].stopped, "idle A is unloaded to restore the reserve")
   }
 
   func testThrowsWhenCannotFit() async throws {
-    let (router, _) = makeRouter(ceiling: 20)
+    let memory = MemoryModel(totalGB: 20)
+    let (router, _) = makeRouter(reserveGB: 0, model: memory)
     do {
       _ = try await router.routeAndBegin(desc("Huge", 50))
       XCTFail("expected error")
     } catch let err as ModelRouter.RouteError {
-      if case .cannotFitInBudget = err {
+      if case .insufficientHeadroom = err {
         return
       }
-      XCTFail("expected cannotFitInBudget, got \(err)")
+      XCTFail("expected insufficientHeadroom, got \(err)")
     }
   }
 
@@ -205,11 +333,14 @@ final class ModelRouterTests: XCTestCase {
     )
   }
 
-  func testBudgetEvictionPublishesModelEvictedLifecycleEvent() async throws {
+  func testHeadroomEvictionPublishesModelEvictedLifecycleEvent() async throws {
     let events = RouterEventsBox()
-    let (router, created) = makeRouter(ceiling: 80, eventSink: { event in
-      events.append(event)
-    })
+    let memory = MemoryModel(totalGB: 80)
+    let (router, created) = makeRouter(
+      reserveGB: 0, model: memory,
+      eventSink: { event in
+        events.append(event)
+      })
 
     _ = try await router.routeAndBegin(desc("A", 40))
     await router.requestDone(modelID: "A")
@@ -229,20 +360,27 @@ final class ModelRouterTests: XCTestCase {
     )
   }
 
-  func testBudgetEvictionPublishesEmbeddingEvictedLifecycleEvent() async throws {
+  func testHeadroomEvictionPublishesEmbeddingEvictedLifecycleEvent() async throws {
     let events = RouterEventsBox()
+    let memory = MemoryModel(totalGB: 80)
     let embeddingModel = embeddingDesc("embed", 40)
     let embeddingBackend = FakeEmbeddingBackend(
       modelID: embeddingModel.id,
       sizeBytes: embeddingModel.sizeBytes
     )
     let router = ModelRouter(
-      budget: MemoryBudget(ceilingBytes: 80 * gb),
+      reserveBytes: 0,
+      memoryProbe: memory.probe(),
       portRange: 5500...5502,
       spawner: { model, port, _ in
         FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
       },
-      embeddingSpawner: { _, _ in embeddingBackend },
+      embeddingSpawner: { _, _ in
+        memory.registerEmbed(embeddingBackend)
+        return embeddingBackend
+      },
+      settleAttempts: 3,
+      settleIntervalMillis: 1,
       eventSink: { event in
         events.append(event)
       }
@@ -280,7 +418,8 @@ final class ModelRouterTests: XCTestCase {
     let embeddingBackend = FakeEmbeddingBackend(modelID: model.id, sizeBytes: model.sizeBytes)
     let delayedSpawner = DelayedEmbeddingSpawner(backend: embeddingBackend)
     let router = ModelRouter(
-      budget: MemoryBudget(ceilingBytes: 80 * gb),
+      reserveBytes: 0,
+      memoryProbe: abundantMemoryProbe,
       spawner: { model, port, _ in
         FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
       },
@@ -308,7 +447,8 @@ final class ModelRouterTests: XCTestCase {
     let embeddingBackend = FakeEmbeddingBackend(modelID: model.id, sizeBytes: model.sizeBytes)
     let retrySpawner = RetryEmbeddingSpawner(backend: embeddingBackend)
     let router = ModelRouter(
-      budget: MemoryBudget(ceilingBytes: 80 * gb),
+      reserveBytes: 0,
+      memoryProbe: abundantMemoryProbe,
       spawner: { model, port, _ in
         FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
       },

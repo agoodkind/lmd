@@ -27,13 +27,14 @@ BenchOrchestrator
 BrokerBenchBackend
 FanCoordinator
 JSONEnforcement
-MemoryBudget
 ModelCatalog
 ModelRouter
 
 # SwiftLMMonitor
+AvailableMemorySensor
 BatterySensor
 MacmonClient
+MemoryPressureMonitor
 MemoryPressureSensor
 ShellExec
 SwapSensor
