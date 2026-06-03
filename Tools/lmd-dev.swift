@@ -526,7 +526,7 @@ final class DevTool {
         scheme: "mlx-swift_Cmlx",
         configuration: configuration
       ),
-      environment: try buildEnvironment()
+      environment: xcodeBuildEnvironment()
     )
   }
 
@@ -1171,11 +1171,16 @@ final class DevTool {
     return arguments
   }
 
-  /// Environment for build invocations. Merges the parent environment with
-  /// `CC` and `CXX` set to a `ccache`/`sccache` wrapper when one is enabled.
-  /// Both `swift build` and `xcodebuild` honor these variables, so the same
-  /// wrapper applies to MLX's C/C++ Metal kernels regardless of which build
-  /// system is invoked.
+  /// Environment for `swift build` invocations. Merges the parent environment
+  /// with `CC` and `CXX` set to a `ccache`/`sccache` wrapper when one is
+  /// enabled. `swift build` word-splits these values when it execs the
+  /// compiler, so the two-word `"<cache> /usr/bin/clang"` form works there.
+  ///
+  /// This form is NOT safe for `xcodebuild`: its `CreateBuildDescription`
+  /// compiler probe execs the whole `CC` value as a single file path instead
+  /// of word-splitting it, so a two-word `CC` fails to launch with
+  /// "is not an executable file". `xcodeBuildEnvironment()` is used for that
+  /// path instead.
   private func buildEnvironment() throws -> [String: String] {
     var environmentMap = ProcessInfo.processInfo.environment
     if let buildCacheTool = try resolveBuildCacheTool() {
@@ -1183,6 +1188,19 @@ final class DevTool {
       environmentMap["CC"] = "\(buildCacheTool.executable) /usr/bin/clang"
       environmentMap["CXX"] = "\(buildCacheTool.executable) /usr/bin/clang++"
     }
+    return environmentMap
+  }
+
+  /// Environment for `xcodebuild` invocations. Deliberately leaves `CC`/`CXX`
+  /// unset so xcodebuild's compiler probe can launch the real compiler. A
+  /// two-word `CC` such as `"ccache /usr/bin/clang"` breaks xcodebuild because
+  /// it execs the whole value as one path. ccache is only a build-speed
+  /// optimization, so the xcodebuild Metal step runs without it rather than
+  /// risk the masquerade-on-PATH setup being fragile across runners.
+  private func xcodeBuildEnvironment() -> [String: String] {
+    var environmentMap = ProcessInfo.processInfo.environment
+    environmentMap.removeValue(forKey: "CC")
+    environmentMap.removeValue(forKey: "CXX")
     return environmentMap
   }
 
