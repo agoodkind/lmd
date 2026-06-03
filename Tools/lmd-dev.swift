@@ -991,9 +991,9 @@ final class DevTool {
         ]
       )
     case .ci:
-      let keyIdentifier = try environment.required("APPLE_API_KEY_ID")
+      let keyIdentifier = try environment.required("APPLE_NOTARY_KEY_ID")
       let keyPath = scratch.appendingPathComponent("AuthKey_\(keyIdentifier).p8")
-      try decodeBase64Environment("APPLE_API_KEY_P8_BASE64").write(to: keyPath, options: .atomic)
+      try decodeBase64Environment("APPLE_NOTARY_KEY_BASE64").write(to: keyPath, options: .atomic)
       try runPassthrough(
         "xcrun",
         [
@@ -1005,7 +1005,7 @@ final class DevTool {
           "--key-id",
           keyIdentifier,
           "--issuer",
-          try environment.required("APPLE_API_ISSUER_ID"),
+          try environment.required("APPLE_NOTARY_ISSUER_ID"),
           "--wait",
         ]
       )
