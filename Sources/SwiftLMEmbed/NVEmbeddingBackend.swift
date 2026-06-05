@@ -176,6 +176,17 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
   /// removing the call site reintroduces the leak.
   static var cacheLimitBytes: Int { configuredEmbeddingCacheLimitBytes() }
 
+  /// Shrink the MLX allocator cache under a `hard` battery throttle, restoring
+  /// the configured cap for `none`/`mild`. Mirrors `MLXEmbeddingBackend`.
+  public func applyPowerThrottle(_ level: PowerThrottleLevel) {
+    switch level {
+    case .none, .mild:
+      Memory.cacheLimit = NVEmbeddingBackend.cacheLimitBytes
+    case .hard:
+      Memory.cacheLimit = throttledEmbeddingCacheLimitBytes
+    }
+  }
+
   public func shutdown() {
     guard runtime != nil else {
       return

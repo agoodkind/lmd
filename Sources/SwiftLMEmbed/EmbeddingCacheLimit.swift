@@ -10,6 +10,12 @@ import Foundation
 
 private let defaultEmbeddingCacheLimitBytes = 2 * 1024 * 1024 * 1024
 
+/// MLX allocator cache cap applied at the `hard` battery throttle level. Far
+/// below the steady-state working set so the GPU footprint shrinks under
+/// battery pressure; the backend restores `configuredEmbeddingCacheLimitBytes`
+/// when the throttle releases.
+let throttledEmbeddingCacheLimitBytes = 512 * 1024 * 1024
+
 func configuredEmbeddingCacheLimitBytes() -> Int {
   guard let raw = ProcessInfo.processInfo.environment["LMD_MLX_CACHE_LIMIT_GB"],
     let gigabytes = Double(raw),

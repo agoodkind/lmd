@@ -124,7 +124,19 @@ public actor ModelRouter {
   public let spawner: BackendSpawner
   public let embeddingSpawner: EmbeddingSpawner?
   public let chatMaxConcurrency: Int?
-  public let embeddingMaxConcurrency: Int?
+  /// The live embedding concurrency cap. Lowered by the battery throttle and
+  /// restored to `configuredEmbeddingMaxConcurrency` when it releases.
+  public private(set) var embeddingMaxConcurrency: Int?
+  /// The configured embedding concurrency ceiling, never exceeded by the
+  /// throttle and used as the restore target.
+  private let configuredEmbeddingMaxConcurrency: Int?
+  /// Inter-request embedding pacing in nanoseconds, set by the battery throttle.
+  /// Read by the embeddings handler, which paces a request before releasing its
+  /// slot so consecutive embeds leave a GPU-idle gap.
+  private var embeddingPacingNanos: UInt64 = 0
+  /// The active battery throttle level, applied to embedding backends as they
+  /// load so a model spawned while throttled inherits the shrunken GPU cache.
+  private var currentThrottleLevel: PowerThrottleLevel = .none
 
   public let eventSink: @Sendable (RouterLifecycleEvent) -> Void
 
@@ -152,7 +164,9 @@ public actor ModelRouter {
     self.spawner = spawner
     self.embeddingSpawner = embeddingSpawner
     self.chatMaxConcurrency = positiveLimit(chatMaxConcurrency)
-    self.embeddingMaxConcurrency = positiveLimit(embeddingMaxConcurrency)
+    let normalizedEmbeddingLimit = positiveLimit(embeddingMaxConcurrency)
+    self.embeddingMaxConcurrency = normalizedEmbeddingLimit
+    self.configuredEmbeddingMaxConcurrency = normalizedEmbeddingLimit
     self.eventSink = eventSink
   }
 
@@ -688,6 +702,58 @@ public actor ModelRouter {
     )
   }
 
+  // MARK: - Battery throttle
+
+  /// Inter-request embedding pacing in nanoseconds for the embeddings handler to
+  /// sleep before releasing a request's slot. Zero when not throttled.
+  public func embeddingPacing() -> UInt64 {
+    embeddingPacingNanos
+  }
+
+  /// Apply a battery throttle level: cap embedding concurrency, set inter-request
+  /// pacing, and forward the level to every loaded embedding backend so it can
+  /// shrink the GPU cache. Concurrency is never raised above the configured
+  /// ceiling, and `none` restores the configured cap with zero pacing.
+  public func applyPowerThrottle(_ level: PowerThrottleLevel) {
+    let concurrency: Int?
+    let pacingNanos: UInt64
+    switch level {
+    case .none:
+      concurrency = configuredEmbeddingMaxConcurrency
+      pacingNanos = 0
+    case .mild:
+      concurrency = cappedEmbeddingConcurrency(ceiling: 2)
+      pacingNanos = 75_000_000
+    case .hard:
+      concurrency = cappedEmbeddingConcurrency(ceiling: 1)
+      pacingNanos = 250_000_000
+    }
+    embeddingMaxConcurrency = concurrency
+    embeddingPacingNanos = pacingNanos
+    currentThrottleLevel = level
+    for state in embeddingRoutes.values {
+      if case .loaded(let entry) = state {
+        entry.backend.applyPowerThrottle(level)
+      }
+    }
+    log.notice(
+      """
+      router.power_throttle_applied level=\(level.rawValue, privacy: .public) \
+      embedding_concurrency=\(concurrency ?? -1, privacy: .public) \
+      pacing_ms=\(pacingNanos / 1_000_000, privacy: .public)
+      """
+    )
+  }
+
+  /// The throttled concurrency: `ceiling`, clamped so it never exceeds the
+  /// configured ceiling. Returns `ceiling` when no limit was configured.
+  private func cappedEmbeddingConcurrency(ceiling: Int) -> Int? {
+    guard let configured = configuredEmbeddingMaxConcurrency else {
+      return ceiling
+    }
+    return min(configured, ceiling)
+  }
+
   public func unload(modelID: String) {
     unload(modelID: modelID, disposition: .unloaded)
   }
@@ -837,6 +903,9 @@ public actor ModelRouter {
       )
       entry.inFlight = 1
       embeddingRoutes[model.id] = .loaded(entry)
+      // A model spawned while throttled inherits the active throttle so its GPU
+      // cache is shrunk on load, not only on the next level change.
+      backend.applyPowerThrottle(currentThrottleLevel)
       log.notice(
         "router.embedding_spawned model=\(model.id, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)"
       )

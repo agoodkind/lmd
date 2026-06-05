@@ -79,6 +79,18 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
   /// that constant for why this value is the contract.
   static var cacheLimitBytes: Int { configuredEmbeddingCacheLimitBytes() }
 
+  /// Shrink the MLX allocator cache under a `hard` battery throttle, restoring
+  /// the configured cap for `none`/`mild`. Applied between requests by the
+  /// router; with concurrency throttled there is a clean moment to change it.
+  public func applyPowerThrottle(_ level: PowerThrottleLevel) {
+    switch level {
+    case .none, .mild:
+      Memory.cacheLimit = MLXEmbeddingBackend.cacheLimitBytes
+    case .hard:
+      Memory.cacheLimit = throttledEmbeddingCacheLimitBytes
+    }
+  }
+
   public func shutdown() {
     guard container != nil else {
       return

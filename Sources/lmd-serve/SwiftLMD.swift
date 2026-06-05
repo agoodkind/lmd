@@ -520,6 +520,31 @@ struct SwiftLMD {
       }
     }
 
+    // Battery throttle: a wide engage/resume band so the level never flaps. It
+    // engages the embedding throttle once charge falls to LMD_BATTERY_THROTTLE_PCT
+    // (default 20) and holds it until charge recovers to LMD_BATTERY_RESUME_PCT
+    // (default 80), letting the battery recharge a full cycle before releasing.
+    // Mirrors the memory-pressure monitor above.
+    let powerConfig = PowerMonitor.Config(
+      engagePct: Int(ProcessInfo.processInfo.environment["LMD_BATTERY_THROTTLE_PCT"] ?? "") ?? 20,
+      resumePct: Int(ProcessInfo.processInfo.environment["LMD_BATTERY_RESUME_PCT"] ?? "") ?? 80
+    )
+    let powerMonitor = PowerMonitor(config: powerConfig) {
+      Battery.read().percent
+    }
+    powerMonitor.setOnChange { level in
+      let throttle: PowerThrottleLevel
+      switch level {
+      case .none:
+        throttle = .none
+      case .hard:
+        throttle = .hard
+      }
+      Task { await router.applyPowerThrottle(throttle) }
+    }
+    powerMonitor.start()
+    _ = powerMonitor
+
     // XPC control surface for first-party Swift clients (lmd CLI,
     // lmd-tui). Shares `state` with the HTTP routes so both transports
     // see the same router and catalog. The listener is retained for
@@ -1030,6 +1055,13 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
       message: "embedding failed: \(error)",
       type: "embedding_failed"
     )
+  }
+  // Battery throttle: pace before releasing the slot so consecutive embeds leave
+  // a GPU-idle gap. The sleep runs in this handler task, not the router actor, so
+  // chat and other routing are never blocked while a request is paced.
+  let embeddingPacingNanos = await state.router.embeddingPacing()
+  if embeddingPacingNanos > 0 {
+    try? await Task.sleep(nanoseconds: embeddingPacingNanos)
   }
   await requestDoneToken.finish()
   BackendTrace.notice(
