@@ -235,13 +235,16 @@ public final class SwiftLMServer {
     }
 
     let logFileHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+    // Capture the subprocess output best-effort. Writing through the raw file
+    // descriptor returns an error instead of raising the uncaught NSException
+    // that FileHandle.write throws, so a write failure (for example ENOSPC when
+    // APFS local snapshots fill the volume) drops the chunk rather than crashing
+    // the whole daemon.
     stdout.fileHandleForReading.readabilityHandler = { handle in
-      let data = handle.availableData
-      if !data.isEmpty { logFileHandle.write(data) }
+      appendBestEffort(handle.availableData, to: logFileHandle.fileDescriptor)
     }
     stderr.fileHandleForReading.readabilityHandler = { handle in
-      let data = handle.availableData
-      if !data.isEmpty { logFileHandle.write(data) }
+      appendBestEffort(handle.availableData, to: logFileHandle.fileDescriptor)
     }
     log.notice("server.log_file_attached path=\(path, privacy: .public)")
   }
@@ -250,4 +253,32 @@ public final class SwiftLMServer {
 private final class SwiftLMServerMutableBox<T>: @unchecked Sendable {
   var value: T
   init(_ value: T) { self.value = value }
+}
+
+/// Append `data` to an open file descriptor best-effort. Unlike
+/// `FileHandle.write`, the POSIX `write` returns an error instead of raising an
+/// uncaught `NSException`, so a failed write (for example `ENOSPC` when the
+/// volume is full) drops the chunk rather than terminating the process. `EINTR`
+/// is retried; any other error stops this chunk.
+private func appendBestEffort(_ data: Data, to fileDescriptor: Int32) {
+  guard !data.isEmpty else {
+    return
+  }
+  data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+    guard let base = raw.baseAddress else {
+      return
+    }
+    var offset = 0
+    while offset < raw.count {
+      let written = write(fileDescriptor, base + offset, raw.count - offset)
+      if written > 0 {
+        offset += written
+        continue
+      }
+      if written == -1, errno == EINTR {
+        continue
+      }
+      break
+    }
+  }
 }
