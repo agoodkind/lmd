@@ -27,6 +27,9 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
   private let hostBinaryPath: String
   private let hostService: String
   private let pending: PendingSpawns
+  // Sampling rate forwarded to a video host so it samples frames at the rate the
+  // model's preprocessor expects. nil for non-video kinds.
+  private let videoSamplingFPS: Double?
 
   private let lock = NSLock()
   private var process: Process?
@@ -41,7 +44,8 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
     kind: BackendKind,
     hostBinaryPath: String,
     hostService: String,
-    pending: PendingSpawns
+    pending: PendingSpawns,
+    videoSamplingFPS: Double? = nil
   ) {
     self.modelID = descriptor.id
     self.sizeBytes = descriptor.sizeBytes
@@ -50,6 +54,7 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
     self.hostBinaryPath = hostBinaryPath
     self.hostService = hostService
     self.pending = pending
+    self.videoSamplingFPS = videoSamplingFPS
   }
 
   // Runs `body` under the lock from a synchronous scope. Swift 6 forbids
@@ -112,11 +117,15 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
     // MLX loads its metallib relative to cwd; the host lives beside it.
     proc.currentDirectoryURL = URL(
       fileURLWithPath: (hostBinaryPath as NSString).deletingLastPathComponent)
-    proc.arguments = [
+    var arguments = [
       "--model", modelPath,
       "--kind", kind.rawValue,
       "--host-service", hostService,
     ]
+    if let videoSamplingFPS {
+      arguments.append(contentsOf: ["--video-sampling-fps", String(videoSamplingFPS)])
+    }
+    proc.arguments = arguments
     let stdinPipe = Pipe()
     proc.standardInput = stdinPipe
     do {

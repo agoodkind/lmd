@@ -35,10 +35,16 @@ final class SessionBox: @unchecked Sendable {
 }
 let box = SessionBox()
 
-// The embedding backend, loaded after dial-in. nil for non-embedding kinds in
-// this phase, which makes their requests fail fast.
+// The embedding backend, loaded after dial-in. nil for non-embedding kinds,
+// which routes their requests to their own host below.
 let embeddingHost: EmbeddingHost? = args.kind == .embedding
   ? EmbeddingHost(modelPath: args.modelPath) : nil
+
+// The video backend. nil for non-video kinds. Unlike embedding it loads the VLM
+// model lazily on the first request, the same as the broker's former in-process
+// backend did, so there is no eager load before `ready`.
+let videoHost: VideoHost? = args.kind == .video
+  ? VideoHost(modelPath: args.modelPath, videoSamplingFPS: args.videoSamplingFPS) : nil
 
 // Dial the broker. The broker is the listener; this child is the client. Each
 // request runs on its own Task so the synchronous message handler returns
@@ -60,7 +66,19 @@ do {
             box.send(frame)
           }
         }
-      case .chat, .video:
+      case .video:
+        guard let videoHost else {
+          box.send(
+            .failed(requestID: request.requestID, message: "video host not initialized"))
+          return nil
+        }
+        Task {
+          let frames = await videoHost.frames(for: request)
+          for frame in frames {
+            box.send(frame)
+          }
+        }
+      case .chat:
         box.send(
           .failed(
             requestID: request.requestID,

@@ -13,6 +13,19 @@ final class HostArgumentsTests: XCTestCase {
     XCTAssertEqual(args?.modelPath, "/models/arctic")
     XCTAssertEqual(args?.kind, .embedding)
     XCTAssertEqual(args?.hostService, "io.goodkind.lmd.host")
+    XCTAssertNil(args?.videoSamplingFPS)
+  }
+
+  func testParsesVideoSamplingFPS() throws {
+    let args = HostArguments.parse([
+      "--model", "/models/qwen-vl",
+      "--kind", "video",
+      "--host-service", "io.goodkind.lmd.host",
+      "--video-sampling-fps", "2.0",
+    ])
+    XCTAssertEqual(args?.modelPath, "/models/qwen-vl")
+    XCTAssertEqual(args?.kind, .video)
+    XCTAssertEqual(args?.videoSamplingFPS, 2.0)
   }
 
   func testRejectsUnknownKind() {

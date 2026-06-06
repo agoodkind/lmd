@@ -183,6 +183,7 @@ let package = Package(
         "SwiftLMBackend",
         "SwiftLMEmbed",
         "SwiftLMHostProtocol",
+        "LMDServeSupport",
         .product(name: "MLX", package: "mlx-swift"),
       ],
       path: "Sources/lmd-model-host"

@@ -541,6 +541,33 @@ struct SwiftLMD {
       }
     )
 
+    // Video now runs inside an lmd-model-host child reached over XPC, the same
+    // mechanism embedding uses. The launcher spawns the video host, registers it
+    // so its dial-in binds, and waits for the model to be resident; the adapter
+    // forwards the verbatim OpenAI body and rebuilds the streamed frames into the
+    // same BackendChatResult the chat path already renders. The broker runs no
+    // video inference. The video sampling rate from the model's capabilities is
+    // passed to the host so it samples frames at the rate the model expects.
+    let videoChatBackend = XPCVideoChatBackend { model in
+      let server = XPCModelServer(
+        descriptor: model,
+        kind: .video,
+        hostBinaryPath: hostBinaryPath,
+        hostService: brokerHostServiceName,
+        pending: pendingSpawns,
+        videoSamplingFPS: model.capabilities.videoSamplingFPS
+      )
+      hostServers.register(modelID: model.id, server: server)
+      do {
+        try await server.spawn()
+        try await server.waitReady()
+      } catch {
+        hostServers.remove(modelID: model.id)
+        throw error
+      }
+      return server
+    }
+
     let state = BrokerState(
       catalog: catalog,
       router: router,
@@ -549,7 +576,7 @@ struct SwiftLMD {
       aliasStore: aliasStore,
       pendingSpawns: pendingSpawns,
       hostServers: hostServers,
-      videoChatBackend: InProcessVLMVideoChatBackend()
+      videoChatBackend: videoChatBackend
     )
 
     // React to memory pressure the instant the system reports it, ahead of the
