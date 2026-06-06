@@ -1,5 +1,5 @@
 {
-  "originHash" : "95d2982cb0abf558ad4b7604b0ef6cc34143ff3390bd1dd03dec6496047969a9",
+  "originHash" : "10cb66bf948fd861a1b359e2a30ef22be8a8ec59a3aca7e479dac090caffaa37",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -40,19 +40,18 @@
     {
       "identity" : "mlx-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ml-explore/mlx-swift",
+      "location" : "https://github.com/agoodkind/mlx-swift.git",
       "state" : {
-        "revision" : "dc43e62d7055353c7f99fa071a4e71d29dfddc44",
-        "version" : "0.31.4"
+        "branch" : "main",
+        "revision" : "133864c733c8d4178547f8fe92897da6a788368f"
       }
     },
     {
       "identity" : "mlx-swift-lm",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/john-rocky/mlx-swift-lm.git",
+      "location" : "https://github.com/agoodkind/mlx-swift-lm.git",
       "state" : {
-        "branch" : "feat/gemma4-video",
-        "revision" : "ad97bfc70bda32b3fab7fe50518782afbef5a1ee"
+        "revision" : "3e1052721d436bf5611d0632dc3ee88994d60dea"
       }
     },
     {
@@ -276,8 +275,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swiftlang/swift-syntax.git",
       "state" : {
-        "revision" : "9de99a78f099e59caf2b2beec65a4c45d54b2081",
-        "version" : "603.0.1"
+        "revision" : "0687f71944021d616d34d922343dcef086855920",
+        "version" : "600.0.1"
       }
     },
     {
