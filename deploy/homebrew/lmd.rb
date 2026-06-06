@@ -24,7 +24,7 @@ class Lmd < Formula
   head "https://github.com/agoodkind/lmd.git", branch: "main"
 
   depends_on xcode: ["15.0", :build]
-  depends_on macos: :sonoma
+  depends_on macos: :tahoe
 
   def install
     system "swift", "build",

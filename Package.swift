@@ -15,7 +15,7 @@ let strictConcurrency: [SwiftSetting] = [
 
 let package = Package(
   name: "lmd",
-  platforms: [.macOS(.v14)],
+  platforms: [.macOS("26.0")],
   products: [
     .library(name: "AppLogger", targets: ["AppLogger"]),
     .library(name: "SwiftLMCore", targets: ["SwiftLMCore"]),
