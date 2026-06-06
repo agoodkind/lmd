@@ -1,3 +1,4 @@
+import SwiftLMCore
 import SwiftLMHostProtocol
 import SwiftLMRuntime
 import XCTest
@@ -11,8 +12,16 @@ private final class FakeModelServer: ModelServer, @unchecked Sendable {
   let modelID: String
   let sizeBytes: Int64
   private let framesFor: @Sendable (BackendRequest) -> [BackendFrame]
+  private let lock = NSLock()
+  private var throttleLevels: [ThrottleLevel] = []
   private(set) var didShutdown = false
   private(set) var didSpawn = false
+
+  var appliedThrottleLevels: [ThrottleLevel] {
+    lock.lock()
+    defer { lock.unlock() }
+    return throttleLevels
+  }
 
   init(
     modelID: String,
@@ -39,6 +48,12 @@ private final class FakeModelServer: ModelServer, @unchecked Sendable {
 
   func stats() async -> BackendStats {
     BackendStats(rssBytes: 0, gpuActiveBytes: 0, gpuCacheBytes: 0)
+  }
+
+  func applyPowerThrottle(_ level: ThrottleLevel) {
+    lock.lock()
+    throttleLevels.append(level)
+    lock.unlock()
   }
 
   func shutdown() { didShutdown = true }
@@ -99,5 +114,14 @@ final class XPCEmbeddingBackendTests: XCTestCase {
     XCTAssertTrue(server.didSpawn)
     backend.shutdown()
     XCTAssertTrue(server.didShutdown)
+  }
+
+  func testApplyPowerThrottleForwardsMappedLevelToServer() {
+    let server = FakeModelServer(modelID: "/m", sizeBytes: 0) { _ in [] }
+    let backend = XPCEmbeddingBackend(server: server)
+    backend.applyPowerThrottle(.hard)
+    backend.applyPowerThrottle(.mild)
+    backend.applyPowerThrottle(.none)
+    XCTAssertEqual(server.appliedThrottleLevels, [.hard, .mild, .none])
   }
 }

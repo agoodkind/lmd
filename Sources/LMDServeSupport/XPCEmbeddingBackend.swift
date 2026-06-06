@@ -75,10 +75,20 @@ public final class XPCEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
     server.shutdown()
   }
 
-  /// No-op. The wire protocol carries no broker-to-host control message for the
-  /// battery throttle, so the level is not forwarded to the helper in this
-  /// phase. The in-process backends shrank the MLX cache on a `hard` throttle;
-  /// the XPC helper does not yet, a behavior delta noted for a later phase that
-  /// adds a control channel.
-  public func applyPowerThrottle(_ level: PowerThrottleLevel) {}
+  /// Forward the battery throttle level to the embedding host over the control
+  /// channel so its in-process MLX backend shrinks the allocator cache at `hard`
+  /// and restores it otherwise. Restores the behavior the in-process backend had
+  /// before embedding moved to the helper.
+  public func applyPowerThrottle(_ level: PowerThrottleLevel) {
+    let wire: ThrottleLevel
+    switch level {
+    case .none:
+      wire = .none
+    case .mild:
+      wire = .mild
+    case .hard:
+      wire = .hard
+    }
+    server.applyPowerThrottle(wire)
+  }
 }
