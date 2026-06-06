@@ -941,19 +941,87 @@ final class DevTool {
   private func signLocal(targets: [String]) throws {
     let signing = try localSigningConfig()
     let selectedTargets = targets.isEmpty ? productBinaries : targets
+    let identity = signingIdentityThroughSwiftMk(
+      source: try signing.required("CODE_SIGN_IDENTITY"),
+      team: signing["DEVELOPMENT_TEAM"])
     try signTargets(
       selectedTargets,
-      identity: try signing.required("CODE_SIGN_IDENTITY"),
+      identity: identity,
       bundleIdentifierPrefix: try signing.required("BUNDLE_ID_PREFIX")
     )
   }
 
   private func signCI() throws {
+    let identity = signingIdentityThroughSwiftMk(
+      source: try environment.required("APPLE_CODE_SIGN_IDENTITY"),
+      team: environment.values["APPLE_TEAM_ID"])
     try signTargets(
       productBinaries,
-      identity: try environment.required("APPLE_CODE_SIGN_IDENTITY"),
+      identity: identity,
       bundleIdentifierPrefix: defaultBundleIdentifierPrefix
     )
+  }
+
+  /// Resolve the code-signing identity through swift-mk so this post-build
+  /// codesign uses the same identity resolution as the xcodebuild consumers.
+  /// swift-mk reads SWIFT_MK_SIGN_IDENTITY then CODE_SIGN_IDENTITY, so the source
+  /// identity and team are exported before asking it. Falls back to `source` when
+  /// no swift-mk binary is found or it resolves nothing, so signing never breaks.
+  private func signingIdentityThroughSwiftMk(source: String, team: String?) -> String {
+    guard let swiftMk = swiftMkBinaryPath() else {
+      return source
+    }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: swiftMk)
+    process.arguments = ["signing-identity"]
+    var env = ProcessInfo.processInfo.environment
+    env["CODE_SIGN_IDENTITY"] = source
+    if let team, !team.isEmpty {
+      env["DEVELOPMENT_TEAM"] = team
+    }
+    process.environment = env
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+    } catch {
+      return source
+    }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    let resolved = (String(data: data, encoding: .utf8) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return resolved.isEmpty ? source : resolved
+  }
+
+  /// Locate the swift-mk binary: SWIFT_MK_BIN if set and executable, else the
+  /// first `swift-mk` on PATH. Returns nil when neither is available.
+  private func swiftMkBinaryPath() -> String? {
+    if let bin = environment.values["SWIFT_MK_BIN"],
+      fileManager.isExecutableFile(atPath: bin)
+    {
+      return bin
+    }
+    let probe = Process()
+    probe.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    probe.arguments = ["command", "-v", "swift-mk"]
+    let pipe = Pipe()
+    probe.standardOutput = pipe
+    probe.standardError = FileHandle.nullDevice
+    do {
+      try probe.run()
+    } catch {
+      return nil
+    }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    probe.waitUntilExit()
+    guard probe.terminationStatus == 0 else {
+      return nil
+    }
+    let path = (String(data: data, encoding: .utf8) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return path.isEmpty ? nil : path
   }
 
   private enum NotarizeMode {
