@@ -193,6 +193,7 @@ let package = Package(
         "SwiftLMMonitor",
         "SwiftLMControl",
         "SwiftLMTrace",
+        "SwiftLMHostProtocol",
         "LMDServeSupport",
         .product(name: "Hummingbird", package: "hummingbird"),
         .product(name: "NIOTransportServices", package: "swift-nio-transport-services"),
