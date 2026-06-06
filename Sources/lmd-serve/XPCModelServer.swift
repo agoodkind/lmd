@@ -161,7 +161,7 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
         return
       }
       do {
-        try session.send(request)
+        try session.send(HostInbound.request(request))
       } catch {
         continuation.finish(throwing: error)
       }
@@ -170,6 +170,27 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
 
   func stats() async -> BackendStats {
     withLock { lastStats }
+  }
+
+  // Forward a battery throttle level to the host as an out-of-band control
+  // message. Best-effort: a missing or failed session is logged and dropped,
+  // since the next spawn inherits the level and a throttle change is not a
+  // request whose failure the caller can act on.
+  func applyPowerThrottle(_ level: ThrottleLevel) {
+    let session = withLock { self.session }
+    guard let session else {
+      log.notice(
+        "host.power_throttle_no_session model=\(self.modelID, privacy: .public) level=\(level.rawValue, privacy: .public)"
+      )
+      return
+    }
+    do {
+      try session.send(HostInbound.control(.applyPowerThrottle(level)))
+    } catch {
+      log.error(
+        "host.power_throttle_send_failed model=\(self.modelID, privacy: .public) err=\(String(describing: error), privacy: .public)"
+      )
+    }
   }
 
   func shutdown() {

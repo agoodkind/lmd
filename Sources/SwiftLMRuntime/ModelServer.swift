@@ -30,6 +30,15 @@ public protocol ModelServer: AnyObject, Sendable {
   func send(_ request: BackendRequest) -> AsyncThrowingStream<BackendFrame, Error>
   /// Most recent footprint the host reported.
   func stats() async -> BackendStats
+  /// Forward a battery throttle level to the host as an out-of-band control
+  /// message. The host applies it to its in-process backend so the GPU cache
+  /// shrinks under battery pressure, matching the in-process router behavior.
+  /// The default is a no-op for servers whose host manages no GPU cache.
+  func applyPowerThrottle(_ level: ThrottleLevel)
   /// Cancel the session and SIGKILL the host, reclaiming its memory.
   func shutdown()
+}
+
+extension ModelServer {
+  public func applyPowerThrottle(_ level: ThrottleLevel) {}
 }
