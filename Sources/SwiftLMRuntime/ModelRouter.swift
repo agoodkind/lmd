@@ -87,6 +87,19 @@ private enum EmbeddingRouteState: Sendable {
   case loaded(EmbeddingLoadedEntry)
 }
 
+/// A request waiting for a concurrency slot on a specific model. Lives only in
+/// `ModelRouter`'s actor-isolated state. Resumed with `true` when a slot frees
+/// and `false` when the wait times out or the model is torn down.
+private final class ConcurrencyWaiter {
+  let id: UUID
+  let continuation: CheckedContinuation<Bool, Never>
+
+  init(id: UUID, continuation: CheckedContinuation<Bool, Never>) {
+    self.id = id
+    self.continuation = continuation
+  }
+}
+
 private enum UnloadDisposition {
   case unloaded
   case evicted
@@ -143,6 +156,15 @@ public actor ModelRouter {
   private var loaded: [String: LoadedEntry] = [:]
   private var embeddingRoutes: [String: EmbeddingRouteState] = [:]
   private var allocatedPorts: Set<Int> = []
+
+  /// FIFO waiters per model id, shared by chat and embedding routing. When a
+  /// concurrency slot frees, the matching request-done path wakes the oldest
+  /// waiter for that id, so contention queues rather than rejecting with a 429.
+  private var concurrencyWaiters: [String: [ConcurrencyWaiter]] = [:]
+
+  /// How long a queued request waits for a slot before the router gives up and
+  /// surfaces `concurrencyLimitExceeded`. Settable for tests.
+  private var queueTimeoutNanos: UInt64 = 120 * 1_000_000_000
 
   public init(
     reserveBytes: Int64,
@@ -459,23 +481,27 @@ public actor ModelRouter {
       throw RouteError.wrongKindForChat(modelID: model.id)
     }
     let effectiveLoadConfig = (loadConfig ?? .default).normalized(for: .chat)
-    if var entry = loaded[model.id] {
+    chatAcquire: while var entry = loaded[model.id] {
       if loadConfig != nil && entry.loadConfig != effectiveLoadConfig {
         if entry.inFlight > 0 {
           throw RouteError.loadConfigConflict(modelID: model.id)
         }
         unload(modelID: model.id, disposition: .unloaded)
-      } else {
-        if let chatMaxConcurrency, entry.inFlight >= chatMaxConcurrency {
+        break chatAcquire
+      }
+      if let chatMaxConcurrency, entry.inFlight >= chatMaxConcurrency {
+        // Queue instead of rejecting: wait for a slot to free, then re-check.
+        if await waitForConcurrencySlot(modelID: model.id) == false {
           throw RouteError.concurrencyLimitExceeded(modelID: model.id, limit: chatMaxConcurrency)
         }
-        entry.lastUsed = Date()
-        entry.inFlight += 1
-        loaded[model.id] = entry
-        resultLoadID = entry.loadID
-        resultBackendObj = entry.backendObjectID
-        return entry.backend
+        continue chatAcquire
       }
+      entry.lastUsed = Date()
+      entry.inFlight += 1
+      loaded[model.id] = entry
+      resultLoadID = entry.loadID
+      resultBackendObj = entry.backendObjectID
+      return entry.backend
     }
 
     try await ensureHeadroom(modelID: model.id, needing: model.sizeBytes)
@@ -580,7 +606,7 @@ public actor ModelRouter {
     }
     let effectiveLoadConfig = (loadConfig ?? .default).normalized(for: .embedding)
 
-    if let state = embeddingRoutes[model.id] {
+    embeddingAcquire: while let state = embeddingRoutes[model.id] {
       switch state {
       case .loaded(var entry):
         if loadConfig != nil && entry.loadConfig != effectiveLoadConfig {
@@ -588,20 +614,24 @@ public actor ModelRouter {
             throw RouteError.loadConfigConflict(modelID: model.id)
           }
           unload(modelID: model.id, disposition: .unloaded)
-        } else {
-          if let embeddingMaxConcurrency, entry.inFlight >= embeddingMaxConcurrency {
+          break embeddingAcquire
+        }
+        if let embeddingMaxConcurrency, entry.inFlight >= embeddingMaxConcurrency {
+          // Queue instead of rejecting: wait for a slot to free, then re-check.
+          if await waitForConcurrencySlot(modelID: model.id) == false {
             throw RouteError.concurrencyLimitExceeded(
               modelID: model.id,
               limit: embeddingMaxConcurrency
             )
           }
-          entry.lastUsed = Date()
-          entry.inFlight += 1
-          embeddingRoutes[model.id] = .loaded(entry)
-          resultLoadID = entry.loadID
-          resultBackendObj = entry.backendObjectID
-          return entry.backend
+          continue embeddingAcquire
         }
+        entry.lastUsed = Date()
+        entry.inFlight += 1
+        embeddingRoutes[model.id] = .loaded(entry)
+        resultLoadID = entry.loadID
+        resultBackendObj = entry.backendObjectID
+        return entry.backend
       case .loading(let loading):
         log.debug(
           "router.embedding_load_wait model=\(model.id, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)"
@@ -651,6 +681,7 @@ public actor ModelRouter {
     if entry.inFlight > 0 { entry.inFlight -= 1 }
     entry.lastUsed = Date()
     loaded[modelID] = entry
+    wakeNextConcurrencyWaiter(modelID: modelID)
     log.notice(
       """
       router.request_done model=\(modelID, privacy: .public) \
@@ -686,6 +717,7 @@ public actor ModelRouter {
     if entry.inFlight > 0 { entry.inFlight -= 1 }
     entry.lastUsed = Date()
     embeddingRoutes[modelID] = .loaded(entry)
+    wakeNextConcurrencyWaiter(modelID: modelID)
     log.debug(
       "router.embedding_request_done model=\(modelID, privacy: .public) in_flight=\(entry.inFlight, privacy: .public)"
     )
@@ -700,6 +732,65 @@ public actor ModelRouter {
       snapshot: .current(),
       extras: ["inflight": "\(entry.inFlight)"]
     )
+  }
+
+  // MARK: - Concurrency queue
+
+  /// Set the queue wait timeout. Intended for tests, which use a short value so
+  /// the timeout path does not stall the suite.
+  public func setQueueTimeoutNanos(_ nanos: UInt64) {
+    queueTimeoutNanos = nanos
+  }
+
+  /// Suspend until a slot for `modelID` frees. Returns `true` when woken to
+  /// retry the capacity check, `false` when the wait timed out or the model was
+  /// torn down. The caller re-checks state after a `true` result, since a fresh
+  /// request may have taken the freed slot first.
+  private func waitForConcurrencySlot(modelID: String) async -> Bool {
+    let waiterID = UUID()
+    let timeoutNanos = queueTimeoutNanos
+    return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+      concurrencyWaiters[modelID, default: []].append(
+        ConcurrencyWaiter(id: waiterID, continuation: continuation))
+      Task.detached { [weak self] in
+        try? await Task.sleep(nanoseconds: timeoutNanos)
+        await self?.expireConcurrencyWaiter(modelID: modelID, waiterID: waiterID)
+      }
+    }
+  }
+
+  /// Resume a still-queued waiter with `false` after its timeout elapsed. A
+  /// no-op if the waiter was already woken or drained, since its id is gone.
+  private func expireConcurrencyWaiter(modelID: String, waiterID: UUID) {
+    guard var waiters = concurrencyWaiters[modelID],
+      let index = waiters.firstIndex(where: { $0.id == waiterID })
+    else {
+      return
+    }
+    let waiter = waiters.remove(at: index)
+    concurrencyWaiters[modelID] = waiters.isEmpty ? nil : waiters
+    waiter.continuation.resume(returning: false)
+  }
+
+  /// Wake the oldest waiter for `modelID`, if any, after a slot frees.
+  private func wakeNextConcurrencyWaiter(modelID: String) {
+    guard var waiters = concurrencyWaiters[modelID], !waiters.isEmpty else {
+      return
+    }
+    let waiter = waiters.removeFirst()
+    concurrencyWaiters[modelID] = waiters.isEmpty ? nil : waiters
+    waiter.continuation.resume(returning: true)
+  }
+
+  /// Resume every waiter for `modelID` with `false`, used when the model is
+  /// unloaded or evicted so no queued request hangs forever.
+  private func drainConcurrencyWaiters(modelID: String) {
+    guard let waiters = concurrencyWaiters.removeValue(forKey: modelID) else {
+      return
+    }
+    for waiter in waiters {
+      waiter.continuation.resume(returning: false)
+    }
   }
 
   // MARK: - Battery throttle
@@ -763,6 +854,8 @@ public actor ModelRouter {
   }
 
   private func unload(modelID: String, disposition: UnloadDisposition) {
+    // Release any queued waiters first so none hangs on a model going away.
+    drainConcurrencyWaiters(modelID: modelID)
     if let entry = loaded.removeValue(forKey: modelID) {
       let port = entry.backend.port
       allocatedPorts.remove(port)
@@ -885,11 +978,19 @@ public actor ModelRouter {
 
     switch state {
     case .loaded(var entry):
-      if let embeddingMaxConcurrency, entry.inFlight >= embeddingMaxConcurrency {
-        throw RouteError.concurrencyLimitExceeded(
-          modelID: model.id,
-          limit: embeddingMaxConcurrency
-        )
+      // Another request already serves this model. Queue for a slot rather than
+      // rejecting, re-reading the entry after each wait since it may change.
+      while let embeddingMaxConcurrency, entry.inFlight >= embeddingMaxConcurrency {
+        if await waitForConcurrencySlot(modelID: model.id) == false {
+          throw RouteError.concurrencyLimitExceeded(
+            modelID: model.id,
+            limit: embeddingMaxConcurrency
+          )
+        }
+        guard case .loaded(let refreshed)? = embeddingRoutes[model.id] else {
+          throw RouteError.backendLaunchFailed(modelID: model.id)
+        }
+        entry = refreshed
       }
       entry.lastUsed = Date()
       entry.inFlight += 1

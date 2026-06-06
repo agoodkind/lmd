@@ -470,6 +470,179 @@ final class ModelRouterTests: XCTestCase {
     let retrySpawnCount = await retrySpawner.spawnCount()
     XCTAssertEqual(retrySpawnCount, 2)
   }
+
+  // MARK: - Concurrency queue
+
+  private func makeChatRouter(chatMaxConcurrency: Int) -> ModelRouter {
+    ModelRouter(
+      reserveBytes: 0,
+      memoryProbe: abundantMemoryProbe,
+      spawner: { model, port, _ in
+        FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
+      },
+      chatMaxConcurrency: chatMaxConcurrency
+    )
+  }
+
+  private func makeEmbeddingRouter(embeddingMaxConcurrency: Int) -> ModelRouter {
+    ModelRouter(
+      reserveBytes: 0,
+      memoryProbe: abundantMemoryProbe,
+      spawner: { model, port, _ in
+        FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
+      },
+      embeddingSpawner: { model, _ in
+        FakeEmbeddingBackend(modelID: model.id, sizeBytes: model.sizeBytes)
+      },
+      embeddingMaxConcurrency: embeddingMaxConcurrency
+    )
+  }
+
+  func testChatContentionQueuesThenProceeds() async throws {
+    let router = makeChatRouter(chatMaxConcurrency: 1)
+    let model = desc("A", 10)
+    _ = try await router.routeAndBegin(model)  // holds the only slot
+
+    async let second = router.routeAndBegin(model)
+    for _ in 0..<20 { await Task.yield() }
+    var snapshot = await router.snapshot()
+    XCTAssertEqual(
+      snapshot.loaded.first?.inFlightRequests, 1, "second request should queue, not be admitted")
+
+    await router.requestDone(modelID: model.id)
+    _ = try await second
+    snapshot = await router.snapshot()
+    XCTAssertEqual(snapshot.loaded.first?.inFlightRequests, 1)
+  }
+
+  func testEmbeddingContentionQueuesThenProceeds() async throws {
+    let router = makeEmbeddingRouter(embeddingMaxConcurrency: 1)
+    let model = embeddingDesc("embed", 10)
+    _ = try await router.routeEmbeddingAndBegin(model)  // loads, holds the only slot
+
+    async let second = router.routeEmbeddingAndBegin(model)
+    for _ in 0..<20 { await Task.yield() }
+    var snapshot = await router.snapshot()
+    XCTAssertEqual(snapshot.loaded.first?.inFlightRequests, 1)
+
+    await router.embeddingRequestDone(modelID: model.id)
+    _ = try await second
+    snapshot = await router.snapshot()
+    XCTAssertEqual(snapshot.loaded.first?.inFlightRequests, 1)
+  }
+
+  func testChatQueueTimeoutSurfacesConcurrencyLimit() async throws {
+    let router = makeChatRouter(chatMaxConcurrency: 1)
+    await router.setQueueTimeoutNanos(50_000_000)
+    let model = desc("A", 10)
+    _ = try await router.routeAndBegin(model)  // never released
+
+    do {
+      _ = try await router.routeAndBegin(model)
+      XCTFail("expected concurrencyLimitExceeded after the queue wait timed out")
+    } catch let error as ModelRouter.RouteError {
+      guard case .concurrencyLimitExceeded = error else {
+        return XCTFail("expected concurrencyLimitExceeded, got \(error)")
+      }
+    }
+  }
+
+  func testEmbeddingQueueTimeoutSurfacesConcurrencyLimit() async throws {
+    let router = makeEmbeddingRouter(embeddingMaxConcurrency: 1)
+    await router.setQueueTimeoutNanos(50_000_000)
+    let model = embeddingDesc("embed", 10)
+    _ = try await router.routeEmbeddingAndBegin(model)  // never released
+
+    do {
+      _ = try await router.routeEmbeddingAndBegin(model)
+      XCTFail("expected concurrencyLimitExceeded after the queue wait timed out")
+    } catch let error as ModelRouter.RouteError {
+      guard case .concurrencyLimitExceeded = error else {
+        return XCTFail("expected concurrencyLimitExceeded, got \(error)")
+      }
+    }
+  }
+
+  func testChatDefaultWidthAdmitsUpToLimitThenQueues() async throws {
+    let router = makeChatRouter(chatMaxConcurrency: 4)
+    await router.setQueueTimeoutNanos(50_000_000)
+    let model = desc("A", 10)
+    for _ in 0..<4 {
+      _ = try await router.routeAndBegin(model)  // four admitted without waiting
+    }
+    let snapshot = await router.snapshot()
+    XCTAssertEqual(snapshot.loaded.first?.inFlightRequests, 4)
+
+    do {
+      _ = try await router.routeAndBegin(model)  // fifth queues, then times out
+      XCTFail("expected the fifth request to queue and time out")
+    } catch let error as ModelRouter.RouteError {
+      guard case .concurrencyLimitExceeded = error else {
+        return XCTFail("expected concurrencyLimitExceeded, got \(error)")
+      }
+    }
+  }
+
+  func testUnloadDrainsQueuedWaiter() async throws {
+    let router = makeChatRouter(chatMaxConcurrency: 1)
+    let model = desc("A", 10)
+    _ = try await router.routeAndBegin(model)
+
+    async let second = router.routeAndBegin(model)
+    try await Task.sleep(nanoseconds: 50_000_000)  // let the second request queue
+    await router.unload(modelID: model.id)
+
+    do {
+      _ = try await second
+      XCTFail("expected the drained waiter to surface an error rather than hang")
+    } catch is ModelRouter.RouteError {
+      // Expected: a drained waiter resolves instead of hanging.
+    }
+  }
+
+  func testChatWaitersWakeInFifoOrder() async throws {
+    let router = makeChatRouter(chatMaxConcurrency: 1)
+    let model = desc("A", 10)
+    _ = try await router.routeAndBegin(model)  // holds the only slot
+
+    let order = OrderRecorder()
+    async let w0: Void = acquireThenRecord(router: router, model: model, index: 0, order: order)
+    try await Task.sleep(nanoseconds: 20_000_000)
+    async let w1: Void = acquireThenRecord(router: router, model: model, index: 1, order: order)
+    try await Task.sleep(nanoseconds: 20_000_000)
+    async let w2: Void = acquireThenRecord(router: router, model: model, index: 2, order: order)
+    try await Task.sleep(nanoseconds: 20_000_000)
+
+    for _ in 0..<3 {
+      await router.requestDone(modelID: model.id)
+      try await Task.sleep(nanoseconds: 20_000_000)
+    }
+    _ = await [w0, w1, w2]
+    let recorded = await order.values()
+    XCTAssertEqual(recorded, [0, 1, 2])
+  }
+}
+
+private actor OrderRecorder {
+  private var recorded: [Int] = []
+  func append(_ value: Int) { recorded.append(value) }
+  func values() -> [Int] { recorded }
+}
+
+/// Acquire a chat slot then record `index`. A free function so `async let` does
+/// not send the non-Sendable test case across a concurrency boundary.
+private func acquireThenRecord(
+  router: ModelRouter,
+  model: ModelDescriptor,
+  index: Int,
+  order: OrderRecorder
+) async {
+  do {
+    _ = try await router.routeAndBegin(model)
+    await order.append(index)
+  } catch {
+    // The FIFO test never exercises the failure path.
+  }
 }
 
 private actor DelayedEmbeddingSpawner {
