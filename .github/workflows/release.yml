@@ -81,6 +81,17 @@ jobs:
           APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
         run: swift Tools/lmd-dev.swift ci-import-cert
 
+      # Build swift-mk so ci-sign resolves the codesign identity through it
+      # (lmd-dev's signing-identity routing). It falls back to the explicit
+      # APPLE_CODE_SIGN_IDENTITY if this is unavailable, so signing never breaks.
+      - name: Build swift-mk for signing-identity routing
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/swift-makefile"
+          git clone --depth 1 https://github.com/agoodkind/swift-makefile "$src"
+          swift build --package-path "$src" -c release --product swift-mk
+          echo "SWIFT_MK_BIN=$(swift build --package-path "$src" -c release --show-bin-path)/swift-mk" >> "$GITHUB_ENV"
+
       - name: Codesign binaries
         env:
           APPLE_CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
