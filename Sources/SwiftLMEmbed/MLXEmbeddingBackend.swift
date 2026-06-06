@@ -61,10 +61,13 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
       context: lifecycleContext(),
       snapshot: .current()
     )
-    container = try await EmbedderModelFactory.shared.loadContainer(
-      from: URL(fileURLWithPath: descriptor.path),
-      using: #huggingFaceTokenizerLoader()
+    let resolved = ResolvedModelConfiguration(
+      directory: URL(fileURLWithPath: descriptor.path))
+    let context = try await EmbedderModelFactory.shared._load(
+      configuration: resolved,
+      tokenizerLoader: #huggingFaceTokenizerLoader()
     )
+    container = EmbedderModelFactory.shared._wrap(context)
     // Bound MLX's allocator cache; see NVEmbeddingBackend for the
     // rationale and the trace data this is calibrated against.
     Memory.cacheLimit = MLXEmbeddingBackend.cacheLimitBytes
