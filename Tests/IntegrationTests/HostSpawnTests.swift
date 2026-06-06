@@ -1,5 +1,5 @@
-import XCTest
 import SwiftLMHostProtocol
+import XCTest
 
 final class HostSpawnTests: XCTestCase {
   func testTwoListenersCoexistUnderOneLaunchdJob() throws {

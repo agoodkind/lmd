@@ -1,5 +1,6 @@
-import XCTest
 import SwiftLMHostProtocol
+import XCTest
+
 @testable import lmd_model_host
 
 final class HostArgumentsTests: XCTestCase {
