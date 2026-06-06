@@ -152,6 +152,8 @@ let package = Package(
         "AppLogger",
         "SwiftLMCore",
         "SwiftLMBackend",
+        "SwiftLMRuntime",
+        "SwiftLMHostProtocol",
         .product(name: "Hummingbird", package: "hummingbird"),
         .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
       ],
@@ -263,7 +265,7 @@ let package = Package(
     ),
     .testTarget(
       name: "LMDServeTests",
-      dependencies: ["LMDServeSupport", "SwiftLMCore"],
+      dependencies: ["LMDServeSupport", "SwiftLMCore", "SwiftLMRuntime", "SwiftLMHostProtocol"],
       path: "Tests/LMDServeTests",
       swiftSettings: strictConcurrency
     ),
