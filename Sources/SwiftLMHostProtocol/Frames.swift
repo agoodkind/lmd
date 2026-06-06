@@ -17,6 +17,32 @@ public enum BackendKind: String, Codable, Sendable {
   case video
 }
 
+/// Battery throttle level on the wire. Mirrors `SwiftLMCore.PowerThrottleLevel`
+/// without depending on it, so this module stays free of MLX and SwiftLMCore.
+/// The broker maps `PowerThrottleLevel` to this before sending; the host maps it
+/// back when applying it to its in-process backend.
+public enum ThrottleLevel: String, Codable, Sendable, Equatable {
+  case none
+  case mild
+  case hard
+}
+
+/// A broker-to-host control message that is not request work. Carried in
+/// `HostInbound.control` so the host can act on it out of band from serving.
+public enum HostControl: Codable, Sendable, Equatable {
+  /// Apply a battery throttle level to the host's in-process backend so it can
+  /// shrink its GPU cache, matching the in-process router behavior.
+  case applyPowerThrottle(ThrottleLevel)
+}
+
+/// Everything the broker sends a host over its bound session: either request
+/// work or an out-of-band control message. The host decodes this single
+/// envelope and routes by case.
+public enum HostInbound: Codable, Sendable, Equatable {
+  case request(BackendRequest)
+  case control(HostControl)
+}
+
 /// One unit of work the broker sends to a model host over its bound session.
 public struct BackendRequest: Codable, Sendable, Equatable {
   public let requestID: UUID

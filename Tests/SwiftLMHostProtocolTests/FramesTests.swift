@@ -30,4 +30,24 @@ final class FramesTests: XCTestCase {
       XCTAssertEqual(try roundTrip(frame), frame, "frame \(frame) did not round-trip")
     }
   }
+
+  func testThrottleLevelRoundTrips() throws {
+    for level in [ThrottleLevel.none, .mild, .hard] {
+      XCTAssertEqual(try roundTrip(level), level, "level \(level) did not round-trip")
+    }
+  }
+
+  func testHostInboundRequestRoundTrips() throws {
+    let req = BackendRequest(
+      requestID: UUID(), kind: .embedding, openAIBody: Data([4, 5, 6]), stream: false)
+    let inbound = HostInbound.request(req)
+    XCTAssertEqual(try roundTrip(inbound), inbound)
+  }
+
+  func testHostInboundControlRoundTrips() throws {
+    for level in [ThrottleLevel.none, .mild, .hard] {
+      let inbound = HostInbound.control(.applyPowerThrottle(level))
+      XCTAssertEqual(try roundTrip(inbound), inbound, "control \(level) did not round-trip")
+    }
+  }
 }
