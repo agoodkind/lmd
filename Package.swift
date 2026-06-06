@@ -173,6 +173,15 @@ let package = Package(
       path: "Sources/lmd"
     ),
     .executableTarget(
+      name: "lmd-model-host",
+      dependencies: [
+        "AppLogger",
+        "SwiftLMCore",
+        "SwiftLMHostProtocol",
+      ],
+      path: "Sources/lmd-model-host"
+    ),
+    .executableTarget(
       name: "lmd-serve",
       dependencies: [
         "AppLogger",
@@ -257,6 +266,12 @@ let package = Package(
       name: "SwiftLMHostProtocolTests",
       dependencies: ["SwiftLMHostProtocol"],
       path: "Tests/SwiftLMHostProtocolTests",
+      swiftSettings: strictConcurrency
+    ),
+    .testTarget(
+      name: "LMDModelHostTests",
+      dependencies: ["lmd-model-host"],
+      path: "Tests/LMDModelHostTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(
