@@ -75,6 +75,18 @@ func slog(_ message: String) {
   log.notice("\(message, privacy: .public)")
 }
 
+/// Absolute path to a binary installed beside this broker. The broker, the
+/// model host, and the shared metallib all live in the same install bin dir, so
+/// the host child loads MLX's metallib from its cwd the way the chat subprocess
+/// does today. Falls back to the bare name when the executable path cannot be
+/// resolved, which lets PATH lookup handle a development run.
+func resolveSiblingBinaryPath(_ name: String) -> String {
+  guard let executableURL = Bundle.main.executableURL?.resolvingSymlinksInPath() else {
+    return name
+  }
+  return executableURL.deletingLastPathComponent().appendingPathComponent(name).path
+}
+
 // MARK: - Live backend adapter
 
 final class LiveBackend: SwiftLMBackendProtocol, @unchecked Sendable {
@@ -149,6 +161,32 @@ final class LoadedAliasStore: @unchecked Sendable {
   }
 }
 
+/// Tracks the live `XPCModelServer` per model id so a host dial-in binds to the
+/// server the router spawned, and so eviction can drop the entry. Keyed on the
+/// same model id the router and the spawn-token registry use.
+final class HostServerStore: @unchecked Sendable {
+  private let lock = NSLock()
+  private var byModelID: [String: XPCModelServer] = [:]
+
+  func register(modelID: String, server: XPCModelServer) {
+    lock.lock()
+    byModelID[modelID] = server
+    lock.unlock()
+  }
+
+  func remove(modelID: String) {
+    lock.lock()
+    byModelID.removeValue(forKey: modelID)
+    lock.unlock()
+  }
+
+  func server(forModelID modelID: String) -> XPCModelServer? {
+    lock.lock()
+    defer { lock.unlock() }
+    return byModelID[modelID]
+  }
+}
+
 /// Everything the HTTP handlers need. The router is a `ModelRouter` actor.
 final class BrokerState: @unchecked Sendable {
   let catalog: ModelCatalog
@@ -158,7 +196,8 @@ final class BrokerState: @unchecked Sendable {
   let modelsByID: [String: ModelDescriptor]
   let downloadCoordinator: HubDownloadCoordinator
   let aliasStore: LoadedAliasStore
-  let pendingSpawns = PendingSpawns()
+  let pendingSpawns: PendingSpawns
+  let hostServers: HostServerStore
 
   init(
     catalog: ModelCatalog,
@@ -166,6 +205,8 @@ final class BrokerState: @unchecked Sendable {
     config: BrokerConfig,
     models: [ModelDescriptor],
     aliasStore: LoadedAliasStore,
+    pendingSpawns: PendingSpawns,
+    hostServers: HostServerStore,
     videoChatBackend: VideoChatBackend = NotConfiguredVideoChatBackend()
   ) {
     self.catalog = catalog
@@ -174,6 +215,8 @@ final class BrokerState: @unchecked Sendable {
     self.videoChatBackend = videoChatBackend
     self.downloadCoordinator = HubDownloadCoordinator()
     self.aliasStore = aliasStore
+    self.pendingSpawns = pendingSpawns
+    self.hostServers = hostServers
     var map: [String: ModelDescriptor] = [:]
     for m in models {
       map[m.id] = m
@@ -193,9 +236,12 @@ final class BrokerState: @unchecked Sendable {
 }
 
 extension BrokerState: HostServerRegistry {
-  // Phase 1: the router has not adopted XPCModelServer yet, so no model is
-  // backed by a host. Phase 2 replaces this with a real lookup.
-  func server(forModelID modelID: String) -> XPCModelServer? { nil }
+  // A dial-in binds to the XPCModelServer the embedding spawner registered for
+  // this model id. Returns nil for a model with no live host, so the listener
+  // drops an unmatched session.
+  func server(forModelID modelID: String) -> XPCModelServer? {
+    hostServers.server(forModelID: modelID)
+  }
 }
 
 // MARK: - OpenAI JSON schemas
@@ -428,11 +474,22 @@ struct SwiftLMD {
       exit(1)
     }
 
+    // The model host child lives beside this broker binary so it loads the same
+    // metallib from cwd. Resolve it relative to this executable's directory.
+    let hostBinaryPath = resolveSiblingBinaryPath("lmd-model-host")
+    slog("host binary: \(hostBinaryPath)")
+
+    // Shared spawn collaborators. Created here so the embedding spawner closure
+    // can capture them before `BrokerState` exists, then injected into the
+    // state so the host listener and HTTP handlers see the same instances.
+    let aliasStore = LoadedAliasStore()
+    let pendingSpawns = PendingSpawns()
+    let hostServers = HostServerStore()
+
     // Router. `ModelRouter` writes its own structured logs directly.
     // The typed lifecycle hook only feeds the shared `EventBus` so
     // subscribers (`/swiftlmd/events`, future EventsTab) see state
     // transitions without a duplicate broker log line.
-    let aliasStore = LoadedAliasStore()
     let router = ModelRouter(
       reserveBytes: reserveBytes,
       memoryProbe: memoryProbe,
@@ -446,8 +503,25 @@ struct SwiftLMD {
         )
       },
       embeddingSpawner: { model, _ in
-        let backend = try EmbeddingBackendFactory.makeBackend(descriptor: model)
-        try await backend.launch()
+        // Embedding now runs inside an lmd-model-host child reached over XPC.
+        // Spawn the host, register it so its dial-in binds, and return the
+        // adapter so the router and HTTP handlers keep their existing
+        // EmbeddingBackendProtocol seam. The broker runs no embedding inference.
+        let server = XPCModelServer(
+          descriptor: model,
+          kind: .embedding,
+          hostBinaryPath: hostBinaryPath,
+          hostService: brokerHostServiceName,
+          pending: pendingSpawns
+        )
+        hostServers.register(modelID: model.id, server: server)
+        let backend = XPCEmbeddingBackend(server: server)
+        do {
+          try await backend.launch()
+        } catch {
+          hostServers.remove(modelID: model.id)
+          throw error
+        }
         return backend
       },
       chatMaxConcurrency: config.chatMaxConcurrency,
@@ -459,6 +533,7 @@ struct SwiftLMD {
           .embeddingUnloaded(let modelID),
           .embeddingEvicted(let modelID):
           aliasStore.clear(modelID: modelID)
+          hostServers.remove(modelID: modelID)
         default:
           break
         }
@@ -472,6 +547,8 @@ struct SwiftLMD {
       config: config,
       models: models,
       aliasStore: aliasStore,
+      pendingSpawns: pendingSpawns,
+      hostServers: hostServers,
       videoChatBackend: InProcessVLMVideoChatBackend()
     )
 
