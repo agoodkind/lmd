@@ -108,7 +108,7 @@ public actor MLXVLMVideoBackend {
         for await generation in generationStream {
           switch generation {
           case .chunk(let chunk):
-            continuation.yield(.chunk(chunk))
+            continuation.yield(.chunk(chunk.0))
           case .info(let info):
             continuation.yield(.info(MLXVLMVideoCompletionInfo(info: info)))
           case .toolCall:
