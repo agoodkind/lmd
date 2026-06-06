@@ -56,18 +56,7 @@ high-fidelity subtle-animation analysis.
 
 ## Environment
 
-Defaults live in `deploy/io.goodkind.lmd.serve.plist.example`. All `lmd-serve` environment variables:
-
-| Var | Default | Meaning |
-|---|---|---|
-| `LMD_HOST` | `localhost` | Broker bind host. |
-| `LMD_PORT` | `5400` | Broker bind port. |
-| `LMD_BUDGET_GB` | `80` | Max GB of models resident at once. Evictions happen above this. |
-| `LMD_IDLE_MINUTES` | `15` | After this many minutes idle, unload a chat (SwiftLM) model. |
-| `LMD_EMBEDDING_IDLE_MINUTES` | `60` | Idle timeout for in-process embedding backends (often longer than chat). |
-| `LMD_SAMPLE_INTERVAL` | `15` | Seconds between sensor samples. |
-| `LMD_DATA_DIR` | `~/Library/Application Support/io.goodkind.lmd` | Where `memory.jsonl` lands. |
-| `LMD_SWIFTLM_BINARY` | `~/Sites/SwiftLM/.build/arm64-apple-macosx/release/SwiftLM` | SwiftLM inference engine to spawn. |
+Every `lmd-serve` configuration key, its type, validity, and meaning live in [docs/configuration.md](docs/configuration.md). The values ship in `deploy/io.goodkind.lmd.serve.plist.example`. The broker fails fast at startup unless every key is defined, so edit the plist (or run `make install`) rather than relying on code defaults.
 
 The client-side dispatcher also reads `LMD_HOST` and `LMD_PORT` for `lmd status`, `lmd load`, `lmd unload`, etc.
 
