@@ -278,7 +278,7 @@ let package = Package(
     ),
     .testTarget(
       name: "IntegrationTests",
-      dependencies: ["SwiftLMControl", "SwiftLMCore", "SwiftLMRuntime"],
+      dependencies: ["SwiftLMControl", "SwiftLMCore", "SwiftLMRuntime", "SwiftLMHostProtocol"],
       path: "Tests/IntegrationTests",
       swiftSettings: strictConcurrency
     ),
