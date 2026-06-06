@@ -45,7 +45,8 @@ public enum VectorBlob {
     var floats = [Float](repeating: 0, count: totalFloats)
     for i in 0..<totalFloats {
       let base = i * 4
-      let bits = UInt32(bytes[base]) | (UInt32(bytes[base + 1]) << 8)
+      let bits =
+        UInt32(bytes[base]) | (UInt32(bytes[base + 1]) << 8)
         | (UInt32(bytes[base + 2]) << 16) | (UInt32(bytes[base + 3]) << 24)
       floats[i] = Float(bitPattern: bits)
     }

@@ -82,14 +82,22 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
       lastStats = BackendStats(rssBytes: rss, gpuActiveBytes: active, gpuCacheBytes: cache)
       lock.unlock()
     case .chunk(let id, _), .vectors(let id, _, _), .usage(let id, _, _):
-      lock.lock(); let cont = streams[id]; lock.unlock()
+      lock.lock()
+      let cont = streams[id]
+      lock.unlock()
       cont?.yield(frame)
     case .done(let id):
-      lock.lock(); let cont = streams.removeValue(forKey: id); lock.unlock()
-      cont?.yield(frame); cont?.finish()
+      lock.lock()
+      let cont = streams.removeValue(forKey: id)
+      lock.unlock()
+      cont?.yield(frame)
+      cont?.finish()
     case .failed(let id, _):
-      lock.lock(); let cont = streams.removeValue(forKey: id); lock.unlock()
-      cont?.yield(frame); cont?.finish()
+      lock.lock()
+      let cont = streams.removeValue(forKey: id)
+      lock.unlock()
+      cont?.yield(frame)
+      cont?.finish()
     case .hello, .metricsSnapshot:
       break  // hello handled at bind time; metrics handled by the metrics task
     }

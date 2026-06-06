@@ -158,6 +158,7 @@ final class BrokerState: @unchecked Sendable {
   let modelsByID: [String: ModelDescriptor]
   let downloadCoordinator: HubDownloadCoordinator
   let aliasStore: LoadedAliasStore
+  let pendingSpawns = PendingSpawns()
 
   init(
     catalog: ModelCatalog,
@@ -189,6 +190,12 @@ final class BrokerState: @unchecked Sendable {
     }
     return aliasStore.resolve(id)
   }
+}
+
+extension BrokerState: HostServerRegistry {
+  // Phase 1: the router has not adopted XPCModelServer yet, so no model is
+  // backed by a host. Phase 2 replaces this with a real lookup.
+  func server(forModelID modelID: String) -> XPCModelServer? { nil }
 }
 
 // MARK: - OpenAI JSON schemas
@@ -525,6 +532,27 @@ struct SwiftLMD {
       }
     }
     _ = xpcListener
+
+    // Host XPC surface for model host children (lmd-model-host). Children dial
+    // in on io.goodkind.lmd.host and bind to the XPCModelServer the router
+    // spawned. Distinct from the control listener above; retained for the life
+    // of the process.
+    let hostListener: XPCListener?
+    if config.disableXPC {
+      hostListener = nil
+      log.info("host.disabled reason=environment")
+    } else {
+      do {
+        hostListener = try startHostListener(pending: state.pendingSpawns, registry: state)
+      } catch let skipped as XPCListenerSkippedError {
+        hostListener = nil
+        log.notice("host.listener_skipped reason=\(skipped.reason, privacy: .public)")
+      } catch {
+        hostListener = nil
+        log.error("host.listener_failed reason=\(String(describing: error), privacy: .public)")
+      }
+    }
+    _ = hostListener
 
     // Idle-unload loop: every 60s, unload any model whose lastUsed is older
     // than LMD_IDLE_MINUTES (default 15). Saves memory when idle.

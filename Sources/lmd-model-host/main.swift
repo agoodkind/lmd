@@ -56,7 +56,9 @@ do {
 // Identify, then declare readiness (no model to load in Phase 1).
 box.send(.hello(spawnToken: spawnToken))
 box.send(.ready)
-log.notice("host.ready model=\(args.modelPath, privacy: .public) kind=\(args.kind.rawValue, privacy: .public)")
+log.notice(
+  "host.ready model=\(args.modelPath, privacy: .public) kind=\(args.kind.rawValue, privacy: .public)"
+)
 
 // Push memory stats every 2 seconds.
 let statsTimer = DispatchSource.makeTimerSource(queue: .global())

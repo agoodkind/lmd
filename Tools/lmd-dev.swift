@@ -9,7 +9,7 @@
 import Darwin
 import Foundation
 
-let productBinaries = ["lmd", "lmd-serve"]
+let productBinaries = ["lmd", "lmd-serve", "lmd-model-host"]
 let compatibilityCommandLinks = [
   "lmd-tui": "lmd",
   "lmd-bench": "lmd",
