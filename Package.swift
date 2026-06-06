@@ -104,6 +104,7 @@ let package = Package(
         "SwiftLMCore",
         "SwiftLMBackend",
         "SwiftLMTrace",
+        "SwiftLMHostProtocol",
         .product(name: "SMCFanXPCClient", package: "macos-smc-fan"),
       ],
       path: "Sources/SwiftLMRuntime",
