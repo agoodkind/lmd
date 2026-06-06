@@ -52,39 +52,48 @@ let videoHost: VideoHost? = args.kind == .video
 do {
   box.session = try XPCSession(
     machService: args.hostService,
-    incomingMessageHandler: { (request: BackendRequest) -> (any Encodable)? in
-      switch request.kind {
-      case .embedding:
-        guard let embeddingHost else {
-          box.send(
-            .failed(requestID: request.requestID, message: "embedding host not initialized"))
-          return nil
+    incomingMessageHandler: { (inbound: HostInbound) -> (any Encodable)? in
+      switch inbound {
+      case .control(.applyPowerThrottle(let level)):
+        // Only embedding has a GPU cache to shrink; video is unaffected.
+        if let embeddingHost {
+          Task { await embeddingHost.applyPowerThrottle(level) }
         }
-        Task {
-          let frames = await embeddingHost.frames(for: request)
-          for frame in frames {
-            box.send(frame)
+        return nil
+      case .request(let request):
+        switch request.kind {
+        case .embedding:
+          guard let embeddingHost else {
+            box.send(
+              .failed(requestID: request.requestID, message: "embedding host not initialized"))
+            return nil
           }
-        }
-      case .video:
-        guard let videoHost else {
-          box.send(
-            .failed(requestID: request.requestID, message: "video host not initialized"))
-          return nil
-        }
-        Task {
-          let frames = await videoHost.frames(for: request)
-          for frame in frames {
-            box.send(frame)
+          Task {
+            let frames = await embeddingHost.frames(for: request)
+            for frame in frames {
+              box.send(frame)
+            }
           }
+        case .video:
+          guard let videoHost else {
+            box.send(
+              .failed(requestID: request.requestID, message: "video host not initialized"))
+            return nil
+          }
+          Task {
+            let frames = await videoHost.frames(for: request)
+            for frame in frames {
+              box.send(frame)
+            }
+          }
+        case .chat:
+          box.send(
+            .failed(
+              requestID: request.requestID,
+              message: "\(request.kind.rawValue) serving lands in a later phase"))
         }
-      case .chat:
-        box.send(
-          .failed(
-            requestID: request.requestID,
-            message: "\(request.kind.rawValue) serving lands in a later phase"))
+        return nil
       }
-      return nil
     },
     cancellationHandler: { reason in
       log.notice("host.session_canceled reason=\(String(describing: reason), privacy: .public)")

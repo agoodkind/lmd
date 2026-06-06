@@ -40,6 +40,24 @@ actor EmbeddingHost {
     self.backend = backend
   }
 
+  /// Apply a battery throttle level to the loaded backend so it shrinks the MLX
+  /// allocator cache at `hard` and restores it otherwise, the behavior the
+  /// in-process router drove before embedding moved to this helper. A no-op when
+  /// the backend has not loaded yet; the level the broker resends after load
+  /// recovers the state.
+  func applyPowerThrottle(_ level: ThrottleLevel) {
+    let mapped: PowerThrottleLevel
+    switch level {
+    case .none:
+      mapped = .none
+    case .mild:
+      mapped = .mild
+    case .hard:
+      mapped = .hard
+    }
+    backend?.applyPowerThrottle(mapped)
+  }
+
   /// Run one embedding request and return the frames to send back, in order.
   /// Decoding, the forward pass, and encoding all happen here; any thrown error
   /// is mapped to a single `failed` frame by the caller.
