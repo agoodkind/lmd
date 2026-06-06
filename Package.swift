@@ -27,6 +27,7 @@ let package = Package(
     .library(name: "SwiftLMTUI", targets: ["SwiftLMTUI"]),
     .library(name: "SwiftLMControl", targets: ["SwiftLMControl"]),
     .library(name: "LMDServeSupport", targets: ["LMDServeSupport"]),
+    .library(name: "SwiftLMHostProtocol", targets: ["SwiftLMHostProtocol"]),
   ],
   dependencies: [
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.7.0"),
@@ -45,6 +46,12 @@ let package = Package(
       name: "AppLogger",
       dependencies: [.product(name: "Logging", package: "swift-log")],
       path: "Sources/AppLogger",
+      swiftSettings: strictConcurrency
+    ),
+    .target(
+      name: "SwiftLMHostProtocol",
+      dependencies: [],
+      path: "Sources/SwiftLMHostProtocol",
       swiftSettings: strictConcurrency
     ),
     .target(
@@ -244,6 +251,12 @@ let package = Package(
       name: "LMDServeTests",
       dependencies: ["LMDServeSupport", "SwiftLMCore"],
       path: "Tests/LMDServeTests",
+      swiftSettings: strictConcurrency
+    ),
+    .testTarget(
+      name: "SwiftLMHostProtocolTests",
+      dependencies: ["SwiftLMHostProtocol"],
+      path: "Tests/SwiftLMHostProtocolTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(
