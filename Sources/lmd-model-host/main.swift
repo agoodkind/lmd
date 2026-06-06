@@ -2,9 +2,11 @@
 //  main.swift
 //  lmd-model-host
 //
-//  Phase 1 skeleton. Dials the broker's host Mach service, identifies itself
-//  with the stdin spawn token, reports readiness and memory, and exits when
-//  the broker drops the session or closes stdin. Model loading is Phase 2+.
+//  Dials the broker's host Mach service, identifies itself with the stdin
+//  spawn token, loads its model in-process, and serves requests for its kind.
+//  Embedding is served here in-process via SwiftLMEmbed; chat and video land in
+//  later phases and fail fast for now. Exits when the broker drops the session
+//  or closes stdin.
 //
 
 import AppLogger
@@ -33,14 +35,37 @@ final class SessionBox: @unchecked Sendable {
 }
 let box = SessionBox()
 
-// Dial the broker. The broker is the listener; this child is the client.
+// The embedding backend, loaded after dial-in. nil for non-embedding kinds in
+// this phase, which makes their requests fail fast.
+let embeddingHost: EmbeddingHost? = args.kind == .embedding
+  ? EmbeddingHost(modelPath: args.modelPath) : nil
+
+// Dial the broker. The broker is the listener; this child is the client. Each
+// request runs on its own Task so the synchronous message handler returns
+// immediately and the actor serializes the forward pass.
 do {
   box.session = try XPCSession(
     machService: args.hostService,
     incomingMessageHandler: { (request: BackendRequest) -> (any Encodable)? in
-      // Phase 1: no model loaded, so every request fails fast. Phase 2 routes
-      // by `request.kind` into the loaded MLX model.
-      box.send(.failed(requestID: request.requestID, message: "model loading lands in Phase 2"))
+      switch request.kind {
+      case .embedding:
+        guard let embeddingHost else {
+          box.send(
+            .failed(requestID: request.requestID, message: "embedding host not initialized"))
+          return nil
+        }
+        Task {
+          let frames = await embeddingHost.frames(for: request)
+          for frame in frames {
+            box.send(frame)
+          }
+        }
+      case .chat, .video:
+        box.send(
+          .failed(
+            requestID: request.requestID,
+            message: "\(request.kind.rawValue) serving lands in a later phase"))
+      }
       return nil
     },
     cancellationHandler: { reason in
@@ -53,19 +78,38 @@ do {
   exit(1)
 }
 
-// Identify, then declare readiness (no model to load in Phase 1).
+// Identify immediately so the broker binds this session, then load the model
+// and declare readiness. The broker awaits `ready` before sending any request,
+// so loading before `ready` is the contract the router relies on.
 box.send(.hello(spawnToken: spawnToken))
-box.send(.ready)
 log.notice(
-  "host.ready model=\(args.modelPath, privacy: .public) kind=\(args.kind.rawValue, privacy: .public)"
+  "host.dialed model=\(args.modelPath, privacy: .public) kind=\(args.kind.rawValue, privacy: .public)"
 )
 
-// Push memory stats every 2 seconds.
+Task {
+  if let embeddingHost {
+    do {
+      try await embeddingHost.load()
+    } catch {
+      FileHandle.standardError.write(Data("lmd-model-host: load failed: \(error)\n".utf8))
+      log.error("host.load_failed err=\(String(describing: error), privacy: .public)")
+      exit(1)
+    }
+  }
+  box.send(.ready)
+  log.notice("host.ready model=\(args.modelPath, privacy: .public)")
+}
+
+// Push memory stats every 2 seconds: RSS plus MLX GPU active and cache bytes.
 let statsTimer = DispatchSource.makeTimerSource(queue: .global())
 statsTimer.schedule(deadline: .now() + 2, repeating: 2)
 statsTimer.setEventHandler {
   let stats = HostMemory.currentStats()
-  box.send(.stats(rssBytes: stats.rssBytes, gpuActiveBytes: 0, gpuCacheBytes: 0))
+  box.send(
+    .stats(
+      rssBytes: stats.rssBytes,
+      gpuActiveBytes: stats.gpuActiveBytes,
+      gpuCacheBytes: stats.gpuCacheBytes))
 }
 statsTimer.resume()
 

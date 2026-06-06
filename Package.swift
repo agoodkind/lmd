@@ -178,7 +178,10 @@ let package = Package(
       dependencies: [
         "AppLogger",
         "SwiftLMCore",
+        "SwiftLMBackend",
+        "SwiftLMEmbed",
         "SwiftLMHostProtocol",
+        .product(name: "MLX", package: "mlx-swift"),
       ],
       path: "Sources/lmd-model-host"
     ),
