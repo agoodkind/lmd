@@ -35,60 +35,12 @@ private let signposter = AppLogger.signposter()
 
 // MARK: - Defaults
 
-let defaultBrokerHost = "localhost"
-let defaultBrokerPort = 5400
-// SwiftLM is a sibling project. Override via LMD_SWIFTLM_BINARY.
-let defaultSwiftLMBinary: String = {
-  let home = NSHomeDirectory()
-  return "\(home)/Sites/SwiftLM/.build/arm64-apple-macosx/release/SwiftLM"
-}()
 // Per-model spawn log. Rotated per-boot. Lives under the user's
 // Application Support for the bundle so it survives repo moves.
 let defaultLogPath: String = {
   let home = NSHomeDirectory()
   return "\(home)/Library/Application Support/io.goodkind.lmd/logs/lmd-serve.log"
 }()
-
-enum BrokerListenAddressError: Error, CustomStringConvertible {
-  case disallowedHost(String)
-  case invalidPort(String)
-
-  var description: String {
-    switch self {
-    case .disallowedHost(let host):
-      return "LMD_HOST must be localhost or [::1], got \(host)"
-    case .invalidPort(let port):
-      return "LMD_PORT must be an integer from 1 through 65535, got \(port)"
-    }
-  }
-}
-
-struct BrokerListenAddress {
-  let host: String
-  let port: Int
-  let bindHost: String
-
-  var displayAddress: String {
-    "\(host):\(port)"
-  }
-
-  init(environment: [String: String]) throws {
-    host = environment["LMD_HOST"] ?? defaultBrokerHost
-
-    let rawPort = environment["LMD_PORT"] ?? "\(defaultBrokerPort)"
-    guard let parsedPort = Int(rawPort), (1...65_535).contains(parsedPort) else {
-      throw BrokerListenAddressError.invalidPort(rawPort)
-    }
-    port = parsedPort
-
-    switch host {
-    case "localhost", "[::1]":
-      bindHost = "::1"
-    default:
-      throw BrokerListenAddressError.disallowedHost(host)
-    }
-  }
-}
 
 // MARK: - Shared timestamp formatter
 //
@@ -121,18 +73,6 @@ func publishRouterEvent(_ event: RouterLifecycleEvent) {
 // with per-value privacy annotations per Rule 3.
 func slog(_ message: String) {
   log.notice("\(message, privacy: .public)")
-}
-
-// MARK: - Memory headroom
-
-/// Bytes of system memory the broker keeps free at all times. A model load is
-/// admitted only when at least this much remains available afterward. Set with
-/// `LMD_RESERVE_GB`, defaulting to 20 GB.
-func defaultReserveBytes() -> Int64 {
-  let raw = ProcessInfo.processInfo.environment["LMD_RESERVE_GB"]
-  let reserveGB = Int64(raw ?? "") ?? 20
-  let gigabyte: Int64 = 1_073_741_824
-  return reserveGB * gigabyte
 }
 
 // MARK: - Live backend adapter
@@ -213,6 +153,7 @@ final class LoadedAliasStore: @unchecked Sendable {
 final class BrokerState: @unchecked Sendable {
   let catalog: ModelCatalog
   let router: ModelRouter
+  let config: BrokerConfig
   let videoChatBackend: VideoChatBackend
   let modelsByID: [String: ModelDescriptor]
   let downloadCoordinator: HubDownloadCoordinator
@@ -221,12 +162,14 @@ final class BrokerState: @unchecked Sendable {
   init(
     catalog: ModelCatalog,
     router: ModelRouter,
+    config: BrokerConfig,
     models: [ModelDescriptor],
     aliasStore: LoadedAliasStore,
     videoChatBackend: VideoChatBackend = NotConfiguredVideoChatBackend()
   ) {
     self.catalog = catalog
     self.router = router
+    self.config = config
     self.videoChatBackend = videoChatBackend
     self.downloadCoordinator = HubDownloadCoordinator()
     self.aliasStore = aliasStore
@@ -430,6 +373,22 @@ struct SwiftLMD {
     AppLogger.bootstrap(subsystem: "io.goodkind.lmd")
     slog("swiftlmd v\(SwiftLMCore.version) starting")
 
+    // Resolve configuration once, through the single typed seam. A missing or
+    // invalid value fails fast here, naming every offending key, rather than
+    // silently falling back to a guessed default. Swapping to a file-backed
+    // source is a one-line change to the source passed below.
+    let config: BrokerConfig
+    do {
+      config = try BrokerConfig(source: EnvironmentConfigSource())
+    } catch {
+      slog("ERROR: \(error)")
+      exit(78)  // EX_CONFIG
+    }
+
+    // Hand the resolved value to the lower-level module that owns the MLX
+    // embedding cache cap, so that module no longer reads the environment.
+    setConfiguredEmbeddingCacheLimitBytes(config.mlxCacheLimitBytes)
+
     // Build catalog
     let catalog = ModelCatalog(roots: ModelCatalog.defaultRoots)
     let models = catalog.allModels()
@@ -440,7 +399,7 @@ struct SwiftLMD {
     }
 
     // Memory headroom and binary
-    let reserveBytes = defaultReserveBytes()
+    let reserveBytes = config.reserveBytes
     slog("memory: reserve=\(reserveBytes / 1_073_741_824) GB")
 
     // Watch system memory pressure. The probe reads the latest level on demand,
@@ -456,7 +415,7 @@ struct SwiftLMD {
       )
     }
 
-    let binary = ProcessInfo.processInfo.environment["LMD_SWIFTLM_BINARY"] ?? defaultSwiftLMBinary
+    let binary = config.swiftlmBinary
     guard FileManager.default.isExecutableFile(atPath: binary) else {
       slog("ERROR: SwiftLM binary not executable at \(binary)")
       exit(1)
@@ -467,10 +426,6 @@ struct SwiftLMD {
     // subscribers (`/swiftlmd/events`, future EventsTab) see state
     // transitions without a duplicate broker log line.
     let aliasStore = LoadedAliasStore()
-    let chatMaxConcurrency =
-      Int(ProcessInfo.processInfo.environment["LMD_CHAT_MAX_CONCURRENCY"] ?? "")
-    let embeddingMaxConcurrency =
-      Int(ProcessInfo.processInfo.environment["LMD_EMBEDDING_MAX_CONCURRENCY"] ?? "")
     let router = ModelRouter(
       reserveBytes: reserveBytes,
       memoryProbe: memoryProbe,
@@ -488,8 +443,8 @@ struct SwiftLMD {
         try await backend.launch()
         return backend
       },
-      chatMaxConcurrency: chatMaxConcurrency,
-      embeddingMaxConcurrency: embeddingMaxConcurrency,
+      chatMaxConcurrency: config.chatMaxConcurrency,
+      embeddingMaxConcurrency: config.embeddingMaxConcurrency,
       eventSink: { event in
         switch event {
         case .modelUnloaded(let modelID, _),
@@ -507,6 +462,7 @@ struct SwiftLMD {
     let state = BrokerState(
       catalog: catalog,
       router: router,
+      config: config,
       models: models,
       aliasStore: aliasStore,
       videoChatBackend: InProcessVLMVideoChatBackend()
@@ -526,8 +482,8 @@ struct SwiftLMD {
     // (default 80), letting the battery recharge a full cycle before releasing.
     // Mirrors the memory-pressure monitor above.
     let powerConfig = PowerMonitor.Config(
-      engagePct: Int(ProcessInfo.processInfo.environment["LMD_BATTERY_THROTTLE_PCT"] ?? "") ?? 20,
-      resumePct: Int(ProcessInfo.processInfo.environment["LMD_BATTERY_RESUME_PCT"] ?? "") ?? 80
+      engagePct: config.batteryThrottlePct,
+      resumePct: config.batteryResumePct
     )
     let powerMonitor = PowerMonitor(config: powerConfig) {
       Battery.read().percent
@@ -550,7 +506,7 @@ struct SwiftLMD {
     // see the same router and catalog. The listener is retained for
     // the life of the process; let the constant pin it.
     let xpcListener: XPCListener?
-    if ProcessInfo.processInfo.environment["LMD_DISABLE_XPC"] == "1" {
+    if config.disableXPC {
       xpcListener = nil
       log.info("xpc.disabled reason=environment")
     } else {
@@ -568,10 +524,9 @@ struct SwiftLMD {
 
     // Idle-unload loop: every 60s, unload any model whose lastUsed is older
     // than LMD_IDLE_MINUTES (default 15). Saves memory when idle.
-    let idleMinutes = Int(ProcessInfo.processInfo.environment["LMD_IDLE_MINUTES"] ?? "") ?? 15
+    let idleMinutes = config.idleMinutes
     let chatIdleCutoff = TimeInterval(idleMinutes * 60)
-    let embedIdleMinutes =
-      Int(ProcessInfo.processInfo.environment["LMD_EMBEDDING_IDLE_MINUTES"] ?? "") ?? 60
+    let embedIdleMinutes = config.embeddingIdleMinutes
     let embedIdleCutoff = TimeInterval(embedIdleMinutes * 60)
     Task {
       while !Task.isCancelled {
@@ -616,11 +571,8 @@ struct SwiftLMD {
     // Sensor sampler: replaces the standalone swiftmon daemon. Runs as
     // a background Task inside the broker and writes a JSONL record
     // every `LMD_SAMPLE_INTERVAL` seconds under `LMD_DATA_DIR`.
-    let dataDir =
-      ProcessInfo.processInfo.environment["LMD_DATA_DIR"]
-      ?? "\(NSHomeDirectory())/Library/Application Support/io.goodkind.lmd"
-    let sampleInterval =
-      Double(ProcessInfo.processInfo.environment["LMD_SAMPLE_INTERVAL"] ?? "") ?? 15
+    let dataDir = config.dataDir
+    let sampleInterval = config.sampleInterval
     let sampler = SensorSampler(
       config: .init(
         baseDir: dataDir,
@@ -640,13 +592,12 @@ struct SwiftLMD {
     let httpRouter = Router()
     registerRoutes(on: httpRouter, state: state)
 
-    let listenAddress = try BrokerListenAddress(environment: ProcessInfo.processInfo.environment)
-    slog("HTTP server starting on \(listenAddress.displayAddress)")
+    slog("HTTP server starting on \(config.host):\(config.port)")
 
     let app = Application(
       router: httpRouter,
       configuration: .init(
-        address: .hostname(listenAddress.bindHost, port: listenAddress.port),
+        address: .hostname(config.bindHost, port: config.port),
         serverName: "swiftlmd/\(SwiftLMCore.version)"
       )
     )
@@ -1188,36 +1139,16 @@ private func estimatedPromptTokens(for request: PreparedChatRequest) -> Int {
   return max(1, (characters / 4) + 32)
 }
 
-private func promptCacheMaxTokens() -> Int? {
-  guard let value = Int(ProcessInfo.processInfo.environment["LMD_PROMPT_CACHE_MAX_TOKENS"] ?? ""),
-    value > 0
-  else {
-    if !promptCacheEnabled() {
-      return 8192
-    }
-    return nil
-  }
-  return value
-}
-
-private func promptCacheEnabled() -> Bool {
-  switch (ProcessInfo.processInfo.environment["LMD_PROMPT_CACHE_ENABLED"] ?? "").lowercased() {
-  case "0", "false", "no", "off":
-    return false
-  default:
-    return true
-  }
-}
-
 private func chatRequestBudgetError(
   prepared: PreparedChatRequest,
-  loadConfig: ModelLoadConfig
+  loadConfig: ModelLoadConfig,
+  promptCacheMaxTokens: Int?
 ) -> String? {
   let estimatedTokens = estimatedPromptTokens(for: prepared)
   if let contextLength = loadConfig.contextLength, estimatedTokens > contextLength {
     return "estimated prompt tokens \(estimatedTokens) exceed context_length \(contextLength)"
   }
-  if let promptCacheLimit = promptCacheMaxTokens(), estimatedTokens > promptCacheLimit {
+  if let promptCacheLimit = promptCacheMaxTokens, estimatedTokens > promptCacheLimit {
     return
       "estimated prompt tokens \(estimatedTokens) exceed prompt cache limit \(promptCacheLimit)"
   }
@@ -1741,7 +1672,11 @@ private func swiftLMProxyResult(
     $0.modelID == prepared.model.id && $0.kind == .chat
   }
   let effectiveLoadConfig = loadedInfo?.loadConfig ?? .default
-  if let budgetError = chatRequestBudgetError(prepared: prepared, loadConfig: effectiveLoadConfig) {
+  if let budgetError = chatRequestBudgetError(
+    prepared: prepared,
+    loadConfig: effectiveLoadConfig,
+    promptCacheMaxTokens: state.config.effectivePromptCacheMaxTokens
+  ) {
     await requestDoneToken.finish()
     logChatRequestFailed(
       logContext,
