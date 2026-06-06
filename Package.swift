@@ -1,4 +1,4 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 6.2
 //
 //  Package.swift
 //  lmd
@@ -15,7 +15,7 @@ let strictConcurrency: [SwiftSetting] = [
 
 let package = Package(
   name: "lmd",
-  platforms: [.macOS("26.0")],
+  platforms: [.macOS(.v26)],
   products: [
     .library(name: "AppLogger", targets: ["AppLogger"]),
     .library(name: "SwiftLMCore", targets: ["SwiftLMCore"]),
