@@ -86,7 +86,8 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
       lock.lock()
       lastStats = BackendStats(rssBytes: rss, gpuActiveBytes: active, gpuCacheBytes: cache)
       lock.unlock()
-    case .chunk(let id, _), .vectors(let id, _, _), .usage(let id, _, _):
+    case .responseStarted(let id, _, _), .chunk(let id, _), .vectors(let id, _, _),
+      .usage(let id, _, _):
       lock.lock()
       let cont = streams[id]
       lock.unlock()

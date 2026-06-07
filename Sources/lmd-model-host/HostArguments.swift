@@ -13,6 +13,12 @@ struct HostArguments: Equatable {
   let modelPath: String
   let kind: BackendKind
   let hostService: String
+  /// Absolute path to the SwiftLM binary. Required only for chat hosts.
+  let swiftLMBinaryPath: String?
+  /// Optional file path where SwiftLM child stdout and stderr are appended.
+  let swiftLMLogPath: String?
+  /// Optional context length forwarded to the SwiftLM child for chat hosts.
+  let contextLength: Int?
   /// Frame rate the model's preprocessor expects when given pre-sampled video
   /// frames. The broker knows this from the model descriptor's capabilities and
   /// passes it so the video host samples at the same rate the in-process backend
@@ -26,6 +32,9 @@ struct HostArguments: Equatable {
     var model: String?
     var kindRaw: String?
     var service: String?
+    var swiftLMBinaryPath: String?
+    var swiftLMLogPath: String?
+    var contextLength: Int?
     var videoSamplingFPS: Double?
     var index = 0
     while index + 1 < argv.count {
@@ -33,6 +42,9 @@ struct HostArguments: Equatable {
       case "--model": model = argv[index + 1]
       case "--kind": kindRaw = argv[index + 1]
       case "--host-service": service = argv[index + 1]
+      case "--swiftlm-binary": swiftLMBinaryPath = argv[index + 1]
+      case "--swiftlm-log-path": swiftLMLogPath = argv[index + 1]
+      case "--context-length": contextLength = Int(argv[index + 1])
       case "--video-sampling-fps": videoSamplingFPS = Double(argv[index + 1])
       default: break
       }
@@ -42,6 +54,13 @@ struct HostArguments: Equatable {
       return nil
     }
     return HostArguments(
-      modelPath: model, kind: kind, hostService: service, videoSamplingFPS: videoSamplingFPS)
+      modelPath: model,
+      kind: kind,
+      hostService: service,
+      swiftLMBinaryPath: swiftLMBinaryPath,
+      swiftLMLogPath: swiftLMLogPath,
+      contextLength: contextLength,
+      videoSamplingFPS: videoSamplingFPS
+    )
   }
 }

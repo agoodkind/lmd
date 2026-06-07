@@ -34,4 +34,20 @@ enum HostMemory {
       gpuCacheBytes: Int64(snapshot.cacheMemory)
     )
   }
+
+  /// Resident set size for a child process. GPU bytes are intentionally zero
+  /// because the helper cannot read another process's MLX allocator snapshot.
+  static func childProcessStats(processID: pid_t) -> BackendStats {
+    var info = proc_taskinfo()
+    let expectedSize = Int32(MemoryLayout<proc_taskinfo>.size)
+    let readSize = proc_pidinfo(
+      processID,
+      PROC_PIDTASKINFO,
+      0,
+      &info,
+      expectedSize
+    )
+    let rss = readSize == expectedSize ? Int64(info.pti_resident_size) : 0
+    return BackendStats(rssBytes: rss, gpuActiveBytes: 0, gpuCacheBytes: 0)
+  }
 }

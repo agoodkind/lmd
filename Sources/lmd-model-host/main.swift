@@ -3,10 +3,9 @@
 //  lmd-model-host
 //
 //  Dials the broker's host Mach service, identifies itself with the stdin
-//  spawn token, loads its model in-process, and serves requests for its kind.
-//  Embedding is served here in-process via SwiftLMEmbed; chat and video land in
-//  later phases and fail fast for now. Exits when the broker drops the session
-//  or closes stdin.
+//  spawn token, loads its model, and serves requests for its kind. Chat proxies
+//  through a child SwiftLM HTTP server owned by this helper. Exits when the
+//  broker drops the session or closes stdin.
 //
 
 import AppLogger
@@ -45,6 +44,27 @@ let embeddingHost: EmbeddingHost? = args.kind == .embedding
 // backend did, so there is no eager load before `ready`.
 let videoHost: VideoHost? = args.kind == .video
   ? VideoHost(modelPath: args.modelPath, videoSamplingFPS: args.videoSamplingFPS) : nil
+
+let chatHost: ChatHost?
+do {
+  chatHost = args.kind == .chat
+    ? try ChatHost(
+      modelPath: args.modelPath,
+      binaryPath: args.swiftLMBinaryPath,
+      logPath: args.swiftLMLogPath,
+      contextLength: args.contextLength
+    ) : nil
+} catch {
+  FileHandle.standardError.write(Data("lmd-model-host: chat init failed: \(error)\n".utf8))
+  exit(2)
+}
+
+let exitAfterShutdown: @Sendable (Int32) -> Void = { code in
+  Task {
+    await chatHost?.shutdown()
+    exit(code)
+  }
+}
 
 // Dial the broker. The broker is the listener; this child is the client. Each
 // request runs on its own Task so the synchronous message handler returns
@@ -87,17 +107,20 @@ do {
             }
           }
         case .chat:
-          box.send(
-            .failed(
-              requestID: request.requestID,
-              message: "\(request.kind.rawValue) serving lands in a later phase"))
+          guard let chatHost else {
+            box.send(.failed(requestID: request.requestID, message: "chat host not initialized"))
+            return nil
+          }
+          Task {
+            await chatHost.serve(request, send: box.send)
+          }
         }
         return nil
       }
     },
     cancellationHandler: { reason in
       log.notice("host.session_canceled reason=\(String(describing: reason), privacy: .public)")
-      exit(0)
+      exitAfterShutdown(0)
     }
   )
 } catch {
@@ -123,20 +146,43 @@ Task {
       exit(1)
     }
   }
+  if let chatHost {
+    do {
+      try await chatHost.load()
+    } catch {
+      FileHandle.standardError.write(Data("lmd-model-host: load failed: \(error)\n".utf8))
+      log.error("host.load_failed err=\(String(describing: error), privacy: .public)")
+      exitAfterShutdown(1)
+      return
+    }
+  }
   box.send(.ready)
   log.notice("host.ready model=\(args.modelPath, privacy: .public)")
 }
 
-// Push memory stats every 2 seconds: RSS plus MLX GPU active and cache bytes.
+// Push memory stats every 2 seconds. Chat reports child SwiftLM RSS and zero
+// GPU bytes because MLX allocator stats cannot be read across the process
+// boundary. Embedding and video report this helper's in-process MLX stats.
 let statsTimer = DispatchSource.makeTimerSource(queue: .global())
 statsTimer.schedule(deadline: .now() + 2, repeating: 2)
 statsTimer.setEventHandler {
-  let stats = HostMemory.currentStats()
-  box.send(
-    .stats(
-      rssBytes: stats.rssBytes,
-      gpuActiveBytes: stats.gpuActiveBytes,
-      gpuCacheBytes: stats.gpuCacheBytes))
+  if let chatHost {
+    Task {
+      let stats = await chatHost.stats()
+      box.send(
+        .stats(
+          rssBytes: stats.rssBytes,
+          gpuActiveBytes: stats.gpuActiveBytes,
+          gpuCacheBytes: stats.gpuCacheBytes))
+    }
+  } else {
+    let stats = HostMemory.currentStats()
+    box.send(
+      .stats(
+        rssBytes: stats.rssBytes,
+        gpuActiveBytes: stats.gpuActiveBytes,
+        gpuCacheBytes: stats.gpuCacheBytes))
+  }
 }
 statsTimer.resume()
 
@@ -144,7 +190,7 @@ statsTimer.resume()
 DispatchQueue.global().async {
   while readLine(strippingNewline: true) != nil {}
   log.notice("host.stdin_eof exiting")
-  exit(0)
+  exitAfterShutdown(0)
 }
 
 dispatchMain()

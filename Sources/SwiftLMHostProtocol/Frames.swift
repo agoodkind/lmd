@@ -50,12 +50,27 @@ public struct BackendRequest: Codable, Sendable, Equatable {
   /// The exact OpenAI JSON body the external client sent, forwarded verbatim.
   public let openAIBody: Data
   public let stream: Bool
+  /// The upstream OpenAI endpoint path for chat requests. nil for embedding and
+  /// video requests, whose endpoint is implied by their kind.
+  public let endpointPath: String?
+  /// Broker-supplied HTTP headers to preserve when the host proxies a chat
+  /// request to the child SwiftLM server. Empty for non-chat requests.
+  public let headers: [String: String]
 
-  public init(requestID: UUID, kind: BackendKind, openAIBody: Data, stream: Bool) {
+  public init(
+    requestID: UUID,
+    kind: BackendKind,
+    openAIBody: Data,
+    stream: Bool,
+    endpointPath: String? = nil,
+    headers: [String: String] = [:]
+  ) {
     self.requestID = requestID
     self.kind = kind
     self.openAIBody = openAIBody
     self.stream = stream
+    self.endpointPath = endpointPath
+    self.headers = headers
   }
 }
 
@@ -69,6 +84,8 @@ public enum BackendFrame: Codable, Sendable, Equatable {
   case hello(spawnToken: String)
   /// The model is resident and the host is ready to serve requests.
   case ready
+  /// HTTP response metadata for a chat request before body chunks follow.
+  case responseStarted(requestID: UUID, statusCode: Int, contentType: String)
   /// One streamed output chunk (an OpenAI SSE line for chat and video).
   case chunk(requestID: UUID, data: Data)
   /// Embedding vectors as a contiguous little-endian Float32 blob. The vector
