@@ -22,6 +22,8 @@ public protocol ModelServer: AnyObject, Sendable {
   var modelID: String { get }
   /// Admission estimate used before the model is resident.
   var sizeBytes: Int64 { get }
+  /// Whether the host process is still alive.
+  var isRunning: Bool { get }
   /// Launch the host process.
   func spawn() async throws
   /// Resolves when the host has reported `ready`.
@@ -40,5 +42,7 @@ public protocol ModelServer: AnyObject, Sendable {
 }
 
 extension ModelServer {
+  public var isRunning: Bool { true }
+
   public func applyPowerThrottle(_ level: ThrottleLevel) {}
 }

@@ -57,6 +57,12 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
     self.videoSamplingFPS = videoSamplingFPS
   }
 
+  var isRunning: Bool {
+    withLock {
+      process?.isRunning ?? false
+    }
+  }
+
   // Runs `body` under the lock from a synchronous scope. Swift 6 forbids
   // calling NSLock.lock()/unlock() directly from an async context, so the
   // async methods funnel their critical sections through this helper.
