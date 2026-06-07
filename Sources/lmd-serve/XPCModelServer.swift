@@ -27,6 +27,9 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
   private let hostBinaryPath: String
   private let hostService: String
   private let pending: PendingSpawns
+  private let swiftLMBinaryPath: String?
+  private let swiftLMLogPath: String?
+  private let contextLength: Int?
   // Sampling rate forwarded to a video host so it samples frames at the rate the
   // model's preprocessor expects. nil for non-video kinds.
   private let videoSamplingFPS: Double?
@@ -45,6 +48,9 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
     hostBinaryPath: String,
     hostService: String,
     pending: PendingSpawns,
+    swiftLMBinaryPath: String? = nil,
+    swiftLMLogPath: String? = nil,
+    contextLength: Int? = nil,
     videoSamplingFPS: Double? = nil
   ) {
     self.modelID = descriptor.id
@@ -54,6 +60,9 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
     self.hostBinaryPath = hostBinaryPath
     self.hostService = hostService
     self.pending = pending
+    self.swiftLMBinaryPath = swiftLMBinaryPath
+    self.swiftLMLogPath = swiftLMLogPath
+    self.contextLength = contextLength
     self.videoSamplingFPS = videoSamplingFPS
   }
 
@@ -131,6 +140,15 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
     ]
     if let videoSamplingFPS {
       arguments.append(contentsOf: ["--video-sampling-fps", String(videoSamplingFPS)])
+    }
+    if let swiftLMBinaryPath {
+      arguments.append(contentsOf: ["--swiftlm-binary", swiftLMBinaryPath])
+    }
+    if let swiftLMLogPath {
+      arguments.append(contentsOf: ["--swiftlm-log-path", swiftLMLogPath])
+    }
+    if let contextLength {
+      arguments.append(contentsOf: ["--context-length", String(contextLength)])
     }
     proc.arguments = arguments
     let stdinPipe = Pipe()

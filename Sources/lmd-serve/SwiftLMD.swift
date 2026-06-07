@@ -65,7 +65,7 @@ func publishRouterEvent(_ event: RouterLifecycleEvent) {
 // Routes the broker's existing `slog("...")` call sites through the
 // unified `os.Logger` at `.notice` level so operators tail via
 // `log stream --subsystem io.goodkind.lmd --info`. Kept as a helper
-// because `SwiftLMServer` still accepts a `(String) -> Void` sink.
+// because older lifecycle call sites still emit plain text status messages.
 //
 // Messages are marked `.public` because the broker does not handle
 // user prompt text through this channel. It only carries lifecycle
@@ -85,50 +85,6 @@ func resolveSiblingBinaryPath(_ name: String) -> String {
     return name
   }
   return executableURL.deletingLastPathComponent().appendingPathComponent(name).path
-}
-
-// MARK: - Live backend adapter
-
-final class LiveBackend: SwiftLMBackendProtocol, @unchecked Sendable {
-  let modelID: String
-  let port: Int
-  let sizeBytes: Int64
-  var isRunning: Bool { server.isRunning }
-  private let server: SwiftLMServer
-
-  init(
-    model: ModelDescriptor,
-    port: Int,
-    binaryPath: String,
-    logPath: String?,
-    loadConfig: ModelLoadConfig
-  ) {
-    self.modelID = model.id
-    self.port = port
-    self.sizeBytes = model.sizeBytes
-    self.server = SwiftLMServer(
-      model: model.path,
-      contextSize: loadConfig.contextLength,
-      config: SwiftLMServerConfig(
-        binaryPath: binaryPath,
-        port: port,
-        logFilePath: logPath
-      ),
-      log: { message in slog("server[\(model.id)]: \(message)") }
-    )
-  }
-
-  func launch() throws {
-    try server.start()
-    guard server.waitReady() else {
-      server.stop()
-      throw SwiftLMServerError.readyTimeout(model: modelID, seconds: 300)
-    }
-  }
-
-  func shutdown() {
-    server.stop()
-  }
 }
 
 // MARK: - App state
@@ -494,13 +450,20 @@ struct SwiftLMD {
       reserveBytes: reserveBytes,
       memoryProbe: memoryProbe,
       spawner: { model, port, loadConfig in
-        LiveBackend(
-          model: model,
-          port: port,
-          binaryPath: binary,
-          logPath: defaultLogPath,
-          loadConfig: loadConfig
+        let server = XPCModelServer(
+          descriptor: model,
+          kind: .chat,
+          hostBinaryPath: hostBinaryPath,
+          hostService: brokerHostServiceName,
+          pending: pendingSpawns,
+          swiftLMBinaryPath: binary,
+          swiftLMLogPath: defaultLogPath,
+          contextLength: loadConfig.contextLength
         )
+        hostServers.register(modelID: model.id, server: server)
+        return XPCChatBackend(server: server, port: port) {
+          hostServers.remove(modelID: model.id)
+        }
       },
       embeddingSpawner: { model, _ in
         // Embedding now runs inside an lmd-model-host child reached over XPC.
@@ -1581,7 +1544,7 @@ func handleChat(
   let result: BackendChatResult
   switch dispatchChatRequest(prepared) {
   case .swiftLMProxy:
-    result = try await swiftLMProxyResult(request: prepared, state: state, logContext: logContext)
+    result = try await xpcChatResult(request: prepared, state: state, logContext: logContext)
   case .videoBackend(let videoRequest):
     do {
       result = try await state.videoChatBackend.complete(videoRequest)
@@ -1653,17 +1616,17 @@ func handleChat(
   return renderBackendChatResult(canonical)
 }
 
-private func swiftLMProxyResult(
+private func xpcChatResult(
   request prepared: PreparedChatRequest,
   state: BrokerState,
   logContext: ChatProxyLogContext
 ) async throws -> BackendChatResult {
   let signpostState = signposter.beginInterval(
-    "chat.proxy",
+    "chat.xpc",
     id: signposter.makeSignpostID(),
     "request_id=\(logContext.requestIDString, privacy: .public) model=\(logContext.modelID, privacy: .public)"
   )
-  defer { signposter.endInterval("chat.proxy", signpostState) }
+  defer { signposter.endInterval("chat.xpc", signpostState) }
   let receivedContext = TraceContext(
     modelID: prepared.model.id,
     modelKind: .chat,
@@ -1793,8 +1756,37 @@ private func swiftLMProxyResult(
     return result
   }
 
-  // swiftlint:disable:next force_unwrapping
-  let upstreamURL = URL(string: "http://localhost:\(backend.port)\(prepared.endpoint.path)")!
+  guard let chatBackend = backend as? XPCChatBackend else {
+    await state.router.requestDone(modelID: prepared.model.id, requestID: logContext.requestID)
+    let errorMessage = "router returned non-XPC chat backend"
+    logChatRequestFailed(
+      logContext,
+      upstreamPort: backend.port,
+      upstreamPath: prepared.endpoint.path,
+      statusCode: 500,
+      stage: "route",
+      errorType: "internal_error",
+      errorMessage: errorMessage
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestFailed.rawValue,
+      context: receivedContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "stage": "route",
+          "status_code": "500",
+          "error_type": "internal_error",
+        ])
+    )
+    return backendErrorResult(
+      statusCode: 500,
+      message: errorMessage,
+      type: "internal_error"
+    )
+  }
+
   let routerInfo = await state.router.chatLoadInfo(modelID: prepared.model.id)
   let routedContext = TraceContext(
     modelID: prepared.model.id,
@@ -1870,166 +1862,20 @@ private func swiftLMProxyResult(
         "upstream_path": prepared.endpoint.path,
       ])
   )
-  var request = URLRequest(url: upstreamURL, timeoutInterval: 600)
-  request.httpMethod = "POST"
-  request.httpBody = prepared.bodyData
-  request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-  request.setValue(logContext.requestID.uuidString, forHTTPHeaderField: "X-LMD-Request-ID")
-  if let clientRequestID = logContext.clientRequestID {
-    request.setValue(clientRequestID, forHTTPHeaderField: "X-LM-Review-Request-ID")
-  }
-  if prepared.wantsStream {
-    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-  }
 
-  if prepared.wantsStream {
-    do {
-      let (bytes, resp) = try await URLSession.shared.bytes(for: request)
-      let status = (resp as? HTTPURLResponse)?.statusCode ?? 502
-      let contentType =
-        (resp as? HTTPURLResponse)?
-        .value(forHTTPHeaderField: "Content-Type") ?? "text/event-stream"
-      BackendTrace.notice(
-        phase: TracePhase.Broker.requestResponseSent.rawValue,
-        context: routedContext,
-        snapshot: .current(),
-        extras: chatTraceExtras(
-          for: logContext,
-          additional: [
-            "upstream_port": "\(backend.port)",
-            "upstream_path": prepared.endpoint.path,
-            "status_code": "\(status)",
-            "content_type": contentType,
-          ])
-      )
-      return .streaming(
-        statusCode: status,
-        contentType: contentType,
-        events: rawBackendStream(
-          bytes: bytes,
-          lifetimeToken: requestDoneToken,
-          onCompleted: {
-            logChatRequestCompleted(
-              logContext,
-              upstreamPort: backend.port,
-              upstreamPath: prepared.endpoint.path,
-              statusCode: status,
-              responseBodyBytes: nil
-            )
-            BackendTrace.notice(
-              phase: TracePhase.Broker.requestCompleted.rawValue,
-              context: routedContext,
-              snapshot: .current(),
-              extras: chatTraceExtras(
-                for: logContext,
-                additional: [
-                  "upstream_port": "\(backend.port)",
-                  "upstream_path": prepared.endpoint.path,
-                  "status_code": "\(status)",
-                ])
-            )
-          },
-          onFailed: { error in
-            let fields = safeErrorFields(error)
-            logChatRequestFailed(
-              logContext,
-              upstreamPort: backend.port,
-              upstreamPath: prepared.endpoint.path,
-              statusCode: status,
-              stage: "stream",
-              errorType: fields.type,
-              errorMessage: fields.message
-            )
-            BackendTrace.notice(
-              phase: TracePhase.Broker.requestFailed.rawValue,
-              context: routedContext,
-              snapshot: .current(),
-              extras: chatTraceExtras(
-                for: logContext,
-                additional: [
-                  "upstream_port": "\(backend.port)",
-                  "upstream_path": prepared.endpoint.path,
-                  "status_code": "\(status)",
-                  "stage": "stream",
-                  "error_type": fields.type,
-                ])
-            )
-          }
-        ),
-        appendDoneFrame: false,
-        lifetimeToken: requestDoneToken
-      )
-    } catch {
-      await requestDoneToken.finish()
-      let fields = safeErrorFields(error)
-      logChatRequestFailed(
-        logContext,
-        upstreamPort: backend.port,
-        upstreamPath: prepared.endpoint.path,
-        statusCode: nil,
-        stage: "upstream",
-        errorType: fields.type,
-        errorMessage: fields.message
-      )
-      BackendTrace.notice(
-        phase: TracePhase.Broker.requestFailed.rawValue,
-        context: routedContext,
-        snapshot: .current(),
-        extras: chatTraceExtras(
-          for: logContext,
-          additional: [
-            "upstream_port": "\(backend.port)",
-            "upstream_path": prepared.endpoint.path,
-            "stage": "upstream",
-            "error_type": fields.type,
-          ])
-      )
-      throw error
-    }
-  }
-
-  // Non-streaming path (buffered).
   do {
-    let (data, resp) = try await URLSession.shared.data(for: request)
-    let status = (resp as? HTTPURLResponse)?.statusCode ?? 502
-    await requestDoneToken.finish()
-    logChatRequestCompleted(
-      logContext,
+    let result = try await chatBackend.complete(
+      prepared,
+      requestID: logContext.requestID,
+      headers: chatUpstreamHeaders(for: logContext, wantsStream: prepared.wantsStream)
+    )
+    return await chatResultWithLifecycle(
+      result,
+      requestDoneToken: requestDoneToken,
+      logContext: logContext,
+      routedContext: routedContext,
       upstreamPort: backend.port,
-      upstreamPath: prepared.endpoint.path,
-      statusCode: status,
-      responseBodyBytes: data.count
-    )
-    BackendTrace.notice(
-      phase: TracePhase.Broker.requestCompleted.rawValue,
-      context: routedContext,
-      snapshot: .current(),
-      extras: chatTraceExtras(
-        for: logContext,
-        additional: [
-          "upstream_port": "\(backend.port)",
-          "upstream_path": prepared.endpoint.path,
-          "status_code": "\(status)",
-          "response_bytes": "\(data.count)",
-        ])
-    )
-    BackendTrace.notice(
-      phase: TracePhase.Broker.requestResponseSent.rawValue,
-      context: routedContext,
-      snapshot: .current(),
-      extras: chatTraceExtras(
-        for: logContext,
-        additional: [
-          "upstream_port": "\(backend.port)",
-          "upstream_path": prepared.endpoint.path,
-          "status_code": "\(status)",
-          "response_bytes": "\(data.count)",
-        ])
-    )
-    return .buffered(
-      statusCode: status,
-      contentType: "application/json",
-      body: data
+      upstreamPath: prepared.endpoint.path
     )
   } catch {
     await requestDoneToken.finish()
@@ -2060,36 +1906,160 @@ private func swiftLMProxyResult(
   }
 }
 
-private func rawBackendStream(
-  bytes: URLSession.AsyncBytes,
+private func chatUpstreamHeaders(
+  for context: ChatProxyLogContext,
+  wantsStream: Bool
+) -> [String: String] {
+  var headers = [
+    "Content-Type": "application/json",
+    "X-LMD-Request-ID": context.requestID.uuidString,
+  ]
+  if let clientRequestID = context.clientRequestID {
+    headers["X-LM-Review-Request-ID"] = clientRequestID
+  }
+  if wantsStream {
+    headers["Accept"] = "text/event-stream"
+  }
+  return headers
+}
+
+private func chatResultWithLifecycle(
+  _ result: BackendChatResult,
+  requestDoneToken lifetimeToken: BackendLifetimeToken,
+  logContext: ChatProxyLogContext,
+  routedContext: TraceContext,
+  upstreamPort: Int,
+  upstreamPath: String
+) async -> BackendChatResult {
+  switch result {
+  case .buffered(let statusCode, let contentType, let body):
+    await lifetimeToken.finish()
+    logChatRequestCompleted(
+      logContext,
+      upstreamPort: upstreamPort,
+      upstreamPath: upstreamPath,
+      statusCode: statusCode,
+      responseBodyBytes: body.count
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestCompleted.rawValue,
+      context: routedContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "upstream_port": "\(upstreamPort)",
+          "upstream_path": upstreamPath,
+          "status_code": "\(statusCode)",
+          "response_bytes": "\(body.count)",
+        ])
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestResponseSent.rawValue,
+      context: routedContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "upstream_port": "\(upstreamPort)",
+          "upstream_path": upstreamPath,
+          "status_code": "\(statusCode)",
+          "response_bytes": "\(body.count)",
+        ])
+    )
+    return .buffered(statusCode: statusCode, contentType: contentType, body: body)
+  case .streaming(
+    let statusCode, let contentType, let events, let appendDoneFrame, _):
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestResponseSent.rawValue,
+      context: routedContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "upstream_port": "\(upstreamPort)",
+          "upstream_path": upstreamPath,
+          "status_code": "\(statusCode)",
+          "content_type": contentType,
+        ])
+    )
+    let observedEvents = observedChatStream(
+      events: events,
+      lifetimeToken: lifetimeToken,
+      onCompleted: {
+        logChatRequestCompleted(
+          logContext,
+          upstreamPort: upstreamPort,
+          upstreamPath: upstreamPath,
+          statusCode: statusCode,
+          responseBodyBytes: nil
+        )
+        BackendTrace.notice(
+          phase: TracePhase.Broker.requestCompleted.rawValue,
+          context: routedContext,
+          snapshot: .current(),
+          extras: chatTraceExtras(
+            for: logContext,
+            additional: [
+              "upstream_port": "\(upstreamPort)",
+              "upstream_path": upstreamPath,
+              "status_code": "\(statusCode)",
+            ])
+        )
+      },
+      onFailed: { error in
+        let fields = safeErrorFields(error)
+        logChatRequestFailed(
+          logContext,
+          upstreamPort: upstreamPort,
+          upstreamPath: upstreamPath,
+          statusCode: statusCode,
+          stage: "stream",
+          errorType: fields.type,
+          errorMessage: fields.message
+        )
+        BackendTrace.notice(
+          phase: TracePhase.Broker.requestFailed.rawValue,
+          context: routedContext,
+          snapshot: .current(),
+          extras: chatTraceExtras(
+            for: logContext,
+            additional: [
+              "upstream_port": "\(upstreamPort)",
+              "upstream_path": upstreamPath,
+              "status_code": "\(statusCode)",
+              "stage": "stream",
+              "error_type": fields.type,
+            ])
+        )
+      }
+    )
+    return .streaming(
+      statusCode: statusCode,
+      contentType: contentType,
+      events: observedEvents,
+      appendDoneFrame: appendDoneFrame,
+      lifetimeToken: lifetimeToken
+    )
+  }
+}
+
+private func observedChatStream(
+  events: AsyncThrowingStream<BackendStreamEvent, Error>,
   lifetimeToken: BackendLifetimeToken,
   onCompleted: @escaping @Sendable () async -> Void = {},
   onFailed: @escaping @Sendable (Error) async -> Void = { _ in }
 ) -> AsyncThrowingStream<BackendStreamEvent, Error> {
   AsyncThrowingStream<BackendStreamEvent, Error> { continuation in
     let task = Task {
-      var iterator = bytes.makeAsyncIterator()
-      let chunkSize = 4096
       do {
-        while true {
+        for try await event in events {
           try Task.checkCancellation()
-          var rawBytes: [UInt8] = []
-          rawBytes.reserveCapacity(chunkSize)
-          while rawBytes.count < chunkSize {
-            try Task.checkCancellation()
-            guard let byte = try await iterator.next() else {
-              break
-            }
-            rawBytes.append(byte)
-          }
-          if rawBytes.isEmpty {
-            await lifetimeToken.finish()
-            await onCompleted()
-            continuation.finish()
-            return
-          }
-          continuation.yield(.rawBytes(Data(rawBytes)))
+          continuation.yield(event)
         }
+        await lifetimeToken.finish()
+        await onCompleted()
+        continuation.finish()
       } catch {
         await lifetimeToken.finish()
         await onFailed(error)
