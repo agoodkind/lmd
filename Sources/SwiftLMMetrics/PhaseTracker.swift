@@ -22,7 +22,7 @@ public struct PhaseTracker: Sendable {
   private let startedNanoseconds: UInt64
 
   public init(
-    sink: SnapshotSink = .shared,
+    sink: SnapshotSink = SwiftLMMetrics.sink,
     modelID: String,
     modelKind: String,
     requestID: UUID,
@@ -49,6 +49,13 @@ public struct PhaseTracker: Sendable {
       monotonicNanoseconds: now,
       attributes: attributes
     )
+    // Mirror the phase into the distributed-tracing tree as a child of the
+    // request span this tracker runs under. A no-op when no collector is set.
+    var spanAttributes = attributes
+    spanAttributes["model_id"] = modelID
+    spanAttributes["model_kind"] = modelKind
+    spanAttributes["request_id"] = requestID.uuidString
+    SwiftLMMetrics.addSpanEvent(phase, attributes: spanAttributes)
   }
 
   public func finish(attributes: [String: String] = [:]) {

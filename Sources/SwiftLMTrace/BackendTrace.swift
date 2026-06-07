@@ -129,7 +129,7 @@ public enum BackendTrace {
     attributes["mlx_active"] = "\(snap.active)"
     attributes["mlx_cache"] = "\(snap.cache)"
     attributes["mlx_peak"] = "\(snap.peak)"
-    SnapshotSink.shared.recordTraceEvent(
+    SwiftLMMetrics.sink.recordTraceEvent(
       phase: phase,
       level: level,
       modelID: context.modelID,
@@ -138,5 +138,16 @@ public enum BackendTrace {
       monotonicNanoseconds: monotonicNanoseconds,
       attributes: attributes
     )
+    // Only request-scoped phases join the distributed-tracing tree, so the
+    // helper trace in Tempo is one request span with its phase children. The
+    // span is a no-op when no collector is configured.
+    if let requestID = context.requestID {
+      var spanAttributes = attributes
+      spanAttributes["model_id"] = context.modelID
+      spanAttributes["model_kind"] = context.modelKind.rawValue
+      spanAttributes["request_id"] = requestID.uuidString
+      spanAttributes["level"] = level
+      SwiftLMMetrics.addSpanEvent(phase, attributes: spanAttributes)
+    }
   }
 }

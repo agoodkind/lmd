@@ -43,6 +43,17 @@ actor VideoHost {
   /// Decoding, frame sampling, generation, and serialization all happen here;
   /// any thrown error is mapped to a single typed `failed` frame.
   func frames(for request: BackendRequest) async -> [BackendFrame] {
+    await SwiftLMMetrics.withRequestSpan(
+      "video.request",
+      modelID: descriptor.id,
+      modelKind: "video",
+      requestID: request.requestID
+    ) {
+      await framesInSpan(for: request)
+    }
+  }
+
+  private func framesInSpan(for request: BackendRequest) async -> [BackendFrame] {
     let requestStartedAt = Date()
     let requestStartedNanoseconds = DispatchTime.now().uptimeNanoseconds
     let routeRequest = VideoChatRouteRequest(
@@ -84,7 +95,7 @@ actor VideoHost {
     attributes: [String: String]
   ) {
     let finishedNanoseconds = DispatchTime.now().uptimeNanoseconds
-    SnapshotSink.shared.recordRequestSpan(
+    SwiftLMMetrics.sink.recordRequestSpan(
       name: "video.request",
       modelID: descriptor.id,
       modelKind: "video",

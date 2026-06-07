@@ -65,6 +65,17 @@ actor EmbeddingHost {
   /// Decoding, the forward pass, and encoding all happen here; any thrown error
   /// is mapped to a single `failed` frame by the caller.
   func frames(for request: BackendRequest) async -> [BackendFrame] {
+    await SwiftLMMetrics.withRequestSpan(
+      "embedding.request",
+      modelID: modelPath,
+      modelKind: "embedding",
+      requestID: request.requestID
+    ) {
+      await framesInSpan(for: request)
+    }
+  }
+
+  private func framesInSpan(for request: BackendRequest) async -> [BackendFrame] {
     let requestStartedAt = Date()
     let requestStartedNanoseconds = DispatchTime.now().uptimeNanoseconds
     guard let backend else {
@@ -137,7 +148,7 @@ actor EmbeddingHost {
     attributes: [String: String]
   ) {
     let finishedNanoseconds = DispatchTime.now().uptimeNanoseconds
-    SnapshotSink.shared.recordRequestSpan(
+    SwiftLMMetrics.sink.recordRequestSpan(
       name: "embedding.request",
       modelID: modelPath,
       modelKind: "embedding",

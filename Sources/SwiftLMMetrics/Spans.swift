@@ -30,6 +30,7 @@ extension SwiftLMMetrics {
     modelKind: String,
     requestID: UUID?,
     attributes: [String: String] = [:],
+    isolation: isolated (any Actor)? = #isolation,
     _ body: () async throws -> T
   ) async rethrows -> T {
     try await withSpan(name, ofKind: .server) { span in

@@ -111,10 +111,17 @@ actor ChatHost {
     _ request: BackendRequest,
     send: @escaping @Sendable (BackendFrame) -> Void
   ) async {
-    do {
-      try await proxy(request, send: send)
-    } catch {
-      send(.failed(requestID: request.requestID, message: "\(error)"))
+    await SwiftLMMetrics.withRequestSpan(
+      "chat.request",
+      modelID: modelPath,
+      modelKind: "chat",
+      requestID: request.requestID
+    ) {
+      do {
+        try await proxy(request, send: send)
+      } catch {
+        send(.failed(requestID: request.requestID, message: "\(error)"))
+      }
     }
   }
 
@@ -343,22 +350,22 @@ private final class ChatRequestTiming {
     let now = DispatchTime.now().uptimeNanoseconds
     tokenEventCount += 1
     if let previousTokenNanoseconds {
-      SnapshotSink.shared.recordDuration(
-        name: "lmd_chat_inter_token_seconds",
-        seconds: Double(now - previousTokenNanoseconds) / 1_000_000_000,
+      SwiftLMMetrics.observeSeconds(
+        "lmd_chat_inter_token_seconds",
+        Double(now - previousTokenNanoseconds) / 1_000_000_000,
         labels: [
-          "model_id": modelPath,
-          "model_kind": "chat",
+          ("model_id", modelPath),
+          ("model_kind", "chat"),
         ]
       )
     } else {
       firstTokenNanoseconds = now
-      SnapshotSink.shared.recordDuration(
-        name: "lmd_chat_time_to_first_token_seconds",
-        seconds: Double(now - startedNanoseconds) / 1_000_000_000,
+      SwiftLMMetrics.observeSeconds(
+        "lmd_chat_time_to_first_token_seconds",
+        Double(now - startedNanoseconds) / 1_000_000_000,
         labels: [
-          "model_id": modelPath,
-          "model_kind": "chat",
+          ("model_id", modelPath),
+          ("model_kind", "chat"),
         ]
       )
       tracker.mark(
