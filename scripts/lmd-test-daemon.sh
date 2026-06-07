@@ -25,6 +25,11 @@
 #   LMD_TEST_DATA_DIR   data dir (default <repo>/.claude/tmp/lmd-test/data)
 #   LMD_SWIFTLM_BINARY  SwiftLM chat binary (default: read from production plist)
 #   LMD_TEST_KEEP_DATA  set to 1 so `down` keeps the data dir
+#   LMD_TEST_BATTERY_THROTTLE_PCT / _MILD_PCT / _RESUME_PCT
+#                       battery thresholds for the test daemon. Default 0/1/2
+#                       disables the PowerMonitor so the hard admission halt
+#                       never interrupts a test run; raise them (keeping
+#                       hard < mild < resume) to exercise the real throttle.
 #
 
 set -euo pipefail
@@ -38,6 +43,13 @@ readonly TEST_HOST_SERVICE="io.goodkind.lmd.host.test"
 readonly TEST_PORT="${LMD_TEST_PORT:-5401}"
 readonly GUI_DOMAIN="gui/$(id -u)"
 readonly HEALTH_TIMEOUT_SECONDS=30
+
+# Battery thresholds for the rendered test daemon. The defaults disable the
+# PowerMonitor (engage<=0) so the hard admission halt never interrupts a test run
+# on battery. Override to exercise the real throttle (keep hard < mild < resume).
+readonly TEST_BATTERY_THROTTLE_PCT="${LMD_TEST_BATTERY_THROTTLE_PCT:-0}"
+readonly TEST_BATTERY_MILD_PCT="${LMD_TEST_BATTERY_MILD_PCT:-1}"
+readonly TEST_BATTERY_RESUME_PCT="${LMD_TEST_BATTERY_RESUME_PCT:-2}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
@@ -129,6 +141,9 @@ render_plist() {
         -e "s|{{LMD_DATA_DIR}}|$data_dir|g" \
         -e "s|{{LMD_SWIFTLM_BINARY}}|$swiftlm_binary|g" \
         -e "s|{{STDERR_LOG}}|$stderr_log|g" \
+        -e "s|{{LMD_BATTERY_THROTTLE_PCT}}|$TEST_BATTERY_THROTTLE_PCT|g" \
+        -e "s|{{LMD_BATTERY_MILD_PCT}}|$TEST_BATTERY_MILD_PCT|g" \
+        -e "s|{{LMD_BATTERY_RESUME_PCT}}|$TEST_BATTERY_RESUME_PCT|g" \
         "$template" >"$out"
 }
 

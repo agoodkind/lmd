@@ -2,10 +2,10 @@
 <!--
     Template for an ISOLATED lmd-serve test LaunchAgent.
 
-    This is NOT installed by hand. scripts/lmd-test-daemon.sh renders the
-    {{PLACEHOLDERS}} below against the worktree's freshly built lmd-serve and
-    bootstraps the result, so a branch can be exercised end to end without ever
-    touching the production daemon.
+    This is NOT installed by hand. scripts/lmd-test-daemon.sh fills the
+    double-brace placeholders below against the worktree's freshly built
+    lmd-serve and bootstraps the result, so a branch can be exercised end to end
+    without ever touching the production daemon.
 
     Isolation from production (io.goodkind.lmd.serve on :5400):
       - distinct launchd Label and a distinct pair of Mach services, so launchd
@@ -14,9 +14,10 @@
       - LMD_HOST_SERVICE / LMD_CONTROL_SERVICE / LMD_LAUNCHD_LABEL tell the broker
         to register and expect the test names instead of the production ones.
 
-    The battery throttle is disabled here (LMD_BATTERY_THROTTLE_PCT=0 turns the
-    PowerMonitor off entirely), so the hard-level admission halt can never refuse
-    requests on a laptop running on battery during a test.
+    The battery thresholds are filled in by scripts/lmd-test-daemon.sh, which
+    defaults them so the PowerMonitor is disabled for a test run. That keeps the
+    hard-level admission halt from refusing requests on a laptop on battery; a
+    run can override the defaults to exercise the real throttle.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -52,15 +53,16 @@
         <key>LMD_EMBEDDING_MAX_CONCURRENCY</key>
         <string>4</string>
 
-        <!-- Battery throttle OFF: engage<=0 disables PowerMonitor, so the hard
-             admission halt never fires. mild/resume only need to satisfy the
-             ordering validation (hard < mild < resume). -->
+        <!-- Filled by lmd-test-daemon.sh. The default 0/1/2 disables the
+             PowerMonitor (engage<=0) for the duration of a test run; override
+             with LMD_TEST_BATTERY_* to exercise the real throttle. Values must
+             satisfy hard < mild < resume. -->
         <key>LMD_BATTERY_THROTTLE_PCT</key>
-        <string>0</string>
+        <string>{{LMD_BATTERY_THROTTLE_PCT}}</string>
         <key>LMD_BATTERY_MILD_PCT</key>
-        <string>1</string>
+        <string>{{LMD_BATTERY_MILD_PCT}}</string>
         <key>LMD_BATTERY_RESUME_PCT</key>
-        <string>2</string>
+        <string>{{LMD_BATTERY_RESUME_PCT}}</string>
 
         <key>LMD_DISABLE_XPC</key>
         <string>0</string>
