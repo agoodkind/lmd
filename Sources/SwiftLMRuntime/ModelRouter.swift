@@ -8,83 +8,63 @@
 
 import AppLogger
 import Foundation
-import SwiftLMBackend
 import SwiftLMCore
+import SwiftLMHostProtocol
 import SwiftLMTrace
 
 private let log = AppLogger.logger(category: "ModelRouter")
 
-// MARK: - Backend abstraction
-
-/// The minimum interface ``ModelRouter`` needs from a SwiftLM supervisor.
-public protocol SwiftLMBackendProtocol: AnyObject, Sendable {
-  var modelID: String { get }
-  var port: Int { get }
-  var sizeBytes: Int64 { get }
-  var isRunning: Bool { get }
-  func launch() throws
-  func shutdown()
-}
+private typealias RouteKind = SwiftLMTrace.BackendKind
+private typealias WireThrottleLevel = SwiftLMHostProtocol.ThrottleLevel
 
 // MARK: - Spawner
 
-public typealias BackendSpawner =
-  @Sendable (_ model: ModelDescriptor, _ port: Int, _ loadConfig: ModelLoadConfig) throws
-  -> SwiftLMBackendProtocol
-
-public typealias EmbeddingSpawner =
-  @Sendable (_ model: ModelDescriptor, _ loadConfig: ModelLoadConfig) async throws
-  -> EmbeddingBackendProtocol
+public typealias ModelServerSpawner =
+  @Sendable (_ model: ModelDescriptor, _ kind: SwiftLMTrace.BackendKind,
+    _ loadConfig: ModelLoadConfig) async throws -> ModelServer
 
 // MARK: - Router state
 
 private struct LoadedEntry: Sendable {
-  let backend: SwiftLMBackendProtocol
+  let server: ModelServer
+  let kind: RouteKind
   let loadID: UUID
   let backendObjectID: String
   let loadConfig: ModelLoadConfig
   var lastUsed: Date
   var inFlight: Int
-  init(backend: SwiftLMBackendProtocol, loadConfig: ModelLoadConfig) {
-    self.backend = backend
-    self.loadID = UUID()
-    self.backendObjectID = TraceContext.backendObjectID(of: backend)
-    self.loadConfig = loadConfig
-    self.lastUsed = Date()
-    self.inFlight = 0
-  }
-}
 
-private struct EmbeddingLoadedEntry: Sendable {
-  let backend: EmbeddingBackendProtocol
-  let loadID: UUID
-  let backendObjectID: String
-  let loadConfig: ModelLoadConfig
-  var lastUsed: Date
-  var inFlight: Int
-  init(backend: EmbeddingBackendProtocol, loadID: UUID, loadConfig: ModelLoadConfig) {
-    self.backend = backend
+  init(
+    server: ModelServer,
+    kind: RouteKind,
+    loadID: UUID = UUID(),
+    loadConfig: ModelLoadConfig
+  ) {
+    self.server = server
+    self.kind = kind
     self.loadID = loadID
-    self.backendObjectID = TraceContext.backendObjectID(of: backend)
+    self.backendObjectID = TraceContext.backendObjectID(of: server)
     self.loadConfig = loadConfig
     self.lastUsed = Date()
     self.inFlight = 0
   }
 }
 
-private final class EmbeddingLoadingEntry: Sendable {
+private final class LoadingEntry: Sendable {
   let id: UUID
-  let task: Task<EmbeddingBackendProtocol, Error>
+  let kind: RouteKind
+  let task: Task<ModelServer, Error>
 
-  init(task: Task<EmbeddingBackendProtocol, Error>) {
+  init(kind: RouteKind, task: Task<ModelServer, Error>) {
     self.id = UUID()
+    self.kind = kind
     self.task = task
   }
 }
 
-private enum EmbeddingRouteState: Sendable {
-  case loading(EmbeddingLoadingEntry)
-  case loaded(EmbeddingLoadedEntry)
+private enum RouteState: Sendable {
+  case loading(LoadingEntry)
+  case loaded(LoadedEntry)
 }
 
 /// A request waiting for a concurrency slot on a specific model. Lives only in
@@ -106,21 +86,21 @@ private enum UnloadDisposition {
 }
 
 public enum RouterLifecycleEvent: Sendable, Equatable {
-  case modelSpawned(modelID: String, port: Int)
-  case modelUnloaded(modelID: String, port: Int)
-  case modelEvicted(modelID: String, port: Int)
-  case embeddingSpawned(modelID: String)
-  case embeddingUnloaded(modelID: String)
-  case embeddingEvicted(modelID: String)
-  case embeddingLoadCancelled(modelID: String, loadID: String)
-  case backendLaunchFailed(modelID: String, errorDescription: String)
-  case embeddingBackendUnsupported(modelID: String, reason: String)
-  case embeddingLaunchFailed(modelID: String, errorDescription: String)
+  case modelSpawned(modelID: String, kind: SwiftLMTrace.BackendKind)
+  case modelUnloaded(modelID: String, kind: SwiftLMTrace.BackendKind)
+  case modelEvicted(modelID: String, kind: SwiftLMTrace.BackendKind)
+  case modelLoadCancelled(modelID: String, kind: SwiftLMTrace.BackendKind, loadID: String)
+  case backendLaunchFailed(
+    modelID: String,
+    kind: SwiftLMTrace.BackendKind,
+    errorDescription: String
+  )
 }
 
 // MARK: - ModelRouter
 
-/// Tracks loaded SwiftLM backends and embedding backends.
+/// Tracks loaded model servers and routes every backend kind through the same
+/// lifecycle, admission, concurrency, eviction, and idle-unload path.
 public actor ModelRouter {
   /// Bytes of system memory the router keeps free at all times. A load is
   /// admitted only when at least this much remains available afterward.
@@ -133,9 +113,7 @@ public actor ModelRouter {
   /// page-reclaim lag; tests set both small so they do not actually sleep.
   public let settleAttempts: Int
   public let settleIntervalNanos: UInt64
-  public let portRange: ClosedRange<Int>
-  public let spawner: BackendSpawner
-  public let embeddingSpawner: EmbeddingSpawner?
+  public let spawner: ModelServerSpawner
   public let chatMaxConcurrency: Int?
   /// The live embedding concurrency cap. Lowered by the battery throttle and
   /// restored to `configuredEmbeddingMaxConcurrency` when it releases.
@@ -147,7 +125,7 @@ public actor ModelRouter {
   /// Read by the embeddings handler, which paces a request before releasing its
   /// slot so consecutive embeds leave a GPU-idle gap.
   private var embeddingPacingNanos: UInt64 = 0
-  /// The active battery throttle level, applied to embedding backends as they
+  /// The active battery throttle level, applied to embedding servers as they
   /// load so a model spawned while throttled inherits the shrunken GPU cache.
   private var currentThrottleLevel: PowerThrottleLevel = .none
   /// True while the battery throttle is at `hard`, the stop level. New chat and
@@ -157,13 +135,11 @@ public actor ModelRouter {
 
   public let eventSink: @Sendable (RouterLifecycleEvent) -> Void
 
-  private var loaded: [String: LoadedEntry] = [:]
-  private var embeddingRoutes: [String: EmbeddingRouteState] = [:]
-  private var allocatedPorts: Set<Int> = []
+  private var routes: [String: RouteState] = [:]
 
-  /// FIFO waiters per model id, shared by chat and embedding routing. When a
-  /// concurrency slot frees, the matching request-done path wakes the oldest
-  /// waiter for that id, so contention queues rather than rejecting with a 429.
+  /// FIFO waiters per model id, shared by all backend kinds. When a concurrency
+  /// slot frees, the matching request-done path wakes the oldest waiter for
+  /// that id, so contention queues rather than rejecting with a 429.
   private var concurrencyWaiters: [String: [ConcurrencyWaiter]] = [:]
 
   /// How long a queued request waits for a slot before the router gives up and
@@ -173,9 +149,7 @@ public actor ModelRouter {
   public init(
     reserveBytes: Int64,
     memoryProbe: @escaping MemoryProbe,
-    portRange: ClosedRange<Int> = 5500...5599,
-    spawner: @escaping BackendSpawner,
-    embeddingSpawner: EmbeddingSpawner? = nil,
+    spawner: @escaping ModelServerSpawner,
     chatMaxConcurrency: Int? = nil,
     embeddingMaxConcurrency: Int? = nil,
     settleAttempts: Int = 6,
@@ -186,9 +160,7 @@ public actor ModelRouter {
     self.memoryProbe = memoryProbe
     self.settleAttempts = max(1, settleAttempts)
     self.settleIntervalNanos = settleIntervalMillis * 1_000_000
-    self.portRange = portRange
     self.spawner = spawner
-    self.embeddingSpawner = embeddingSpawner
     self.chatMaxConcurrency = positiveLimit(chatMaxConcurrency)
     let normalizedEmbeddingLimit = positiveLimit(embeddingMaxConcurrency)
     self.embeddingMaxConcurrency = normalizedEmbeddingLimit
@@ -315,48 +287,35 @@ public actor ModelRouter {
   }
 
   public func snapshot() -> Snapshot {
-    pruneStoppedChatBackends()
+    pruneStoppedServers()
     var total: Int64 = 0
-    var cands: [EvictionCandidate] = []
-    for entry in loaded.values {
-      total += entry.backend.sizeBytes
-      cands.append(
-        EvictionCandidate(
-          modelID: entry.backend.modelID,
-          sizeBytes: entry.backend.sizeBytes,
-          lastUsed: entry.lastUsed,
-          inFlightRequests: entry.inFlight,
-          isEmbedding: false,
-          loadConfig: entry.loadConfig
-        ))
-    }
-    for state in embeddingRoutes.values {
+    var candidates: [EvictionCandidate] = []
+    for state in routes.values {
       guard case .loaded(let entry) = state else {
         continue
       }
-      total += entry.backend.sizeBytes
-      cands.append(
+      total += entry.server.sizeBytes
+      candidates.append(
         EvictionCandidate(
-          modelID: entry.backend.modelID,
-          sizeBytes: entry.backend.sizeBytes,
+          modelID: entry.server.modelID,
+          sizeBytes: entry.server.sizeBytes,
           lastUsed: entry.lastUsed,
           inFlightRequests: entry.inFlight,
-          isEmbedding: true,
+          isEmbedding: entry.kind == .embedding,
           loadConfig: entry.loadConfig
         ))
     }
-    return Snapshot(loaded: cands, allocatedBytes: total)
+    return Snapshot(loaded: candidates, allocatedBytes: total)
   }
 
   // MARK: - Trace identity
 
-  /// Identity record for a single loaded backend (chat or embedding). Used by
-  /// the broker layer to attach `load_id` and `backend_obj` fields to its
-  /// per-request trace lines, and by the background sampler to enumerate
-  /// currently resident backends.
+  /// Identity record for a single loaded model server. Used by the broker layer
+  /// to attach `load_id` and `backend_obj` fields to per-request trace lines,
+  /// and by the background sampler to enumerate currently resident servers.
   public struct LoadedModelInfo: Sendable {
     public let modelID: String
-    public let kind: BackendKind
+    public let kind: SwiftLMTrace.BackendKind
     public let loadID: UUID
     public let backendObjectID: String
     public let sizeBytes: Int64
@@ -366,7 +325,7 @@ public actor ModelRouter {
 
     public init(
       modelID: String,
-      kind: BackendKind,
+      kind: SwiftLMTrace.BackendKind,
       loadID: UUID,
       backendObjectID: String,
       sizeBytes: Int64,
@@ -385,54 +344,45 @@ public actor ModelRouter {
     }
   }
 
-  /// Return `(loadID, backendObjectID)` for a loaded chat backend, or `nil`.
+  /// Return `(loadID, backendObjectID)` for a loaded model server, or `nil`.
+  public func loadInfo(
+    modelID: String,
+    kind: SwiftLMTrace.BackendKind
+  ) -> (loadID: UUID, backendObjectID: String)? {
+    pruneStoppedServers()
+    guard let state = routes[modelID], case .loaded(let entry) = state, entry.kind == kind else {
+      return nil
+    }
+    return (entry.loadID, entry.backendObjectID)
+  }
+
   public func chatLoadInfo(modelID: String) -> (loadID: UUID, backendObjectID: String)? {
-    pruneStoppedChatBackends()
-    guard let entry = loaded[modelID] else {
-      return nil
-    }
-    return (entry.loadID, entry.backendObjectID)
+    loadInfo(modelID: modelID, kind: .chat)
   }
 
-  /// Return `(loadID, backendObjectID)` for a loaded embedding backend, or `nil`.
-  ///
-  /// Returns `nil` for an embedding still in the `.loading` state because no
-  /// backend instance exists yet to identify.
   public func embeddingLoadInfo(modelID: String) -> (loadID: UUID, backendObjectID: String)? {
-    guard let state = embeddingRoutes[modelID], case .loaded(let entry) = state else {
-      return nil
-    }
-    return (entry.loadID, entry.backendObjectID)
+    loadInfo(modelID: modelID, kind: .embedding)
   }
 
-  /// Enumerate every currently resident backend.
+  public func videoLoadInfo(modelID: String) -> (loadID: UUID, backendObjectID: String)? {
+    loadInfo(modelID: modelID, kind: .video)
+  }
+
+  /// Enumerate every currently resident model server.
   public func loadedModelInfos() -> [LoadedModelInfo] {
-    pruneStoppedChatBackends()
+    pruneStoppedServers()
     var infos: [LoadedModelInfo] = []
-    for entry in loaded.values {
-      infos.append(
-        LoadedModelInfo(
-          modelID: entry.backend.modelID,
-          kind: .chat,
-          loadID: entry.loadID,
-          backendObjectID: entry.backendObjectID,
-          sizeBytes: entry.backend.sizeBytes,
-          lastUsed: entry.lastUsed,
-          inFlightRequests: entry.inFlight,
-          loadConfig: entry.loadConfig
-        ))
-    }
-    for state in embeddingRoutes.values {
+    for state in routes.values {
       guard case .loaded(let entry) = state else {
         continue
       }
       infos.append(
         LoadedModelInfo(
-          modelID: entry.backend.modelID,
-          kind: .embedding,
+          modelID: entry.server.modelID,
+          kind: entry.kind,
           loadID: entry.loadID,
           backendObjectID: entry.backendObjectID,
-          sizeBytes: entry.backend.sizeBytes,
+          sizeBytes: entry.server.sizeBytes,
           lastUsed: entry.lastUsed,
           inFlightRequests: entry.inFlight,
           loadConfig: entry.loadConfig
@@ -441,33 +391,32 @@ public actor ModelRouter {
     return infos
   }
 
-  // MARK: - Routing chat
+  // MARK: - Routing
 
   public enum RouteError: Error, Equatable {
-    case noFreePort
     case insufficientHeadroom(modelID: String, needing: Int64, availableBytes: Int64)
     case backendLaunchFailed(modelID: String)
     case concurrencyLimitExceeded(modelID: String, limit: Int)
     case loadConfigConflict(modelID: String)
     case wrongKindForChat(modelID: String)
     case wrongKindForEmbedding(modelID: String)
-    case embeddingSpawnerMissing
-    case unsupportedEmbeddingBackend(modelID: String, reason: String)
     case powerPaused(reason: String)
   }
 
   public func routeAndBegin(
     _ model: ModelDescriptor,
+    kind: SwiftLMTrace.BackendKind = .chat,
     loadConfig: ModelLoadConfig? = nil,
     requestID: UUID? = nil
-  ) async throws -> SwiftLMBackendProtocol {
+  ) async throws -> ModelServer {
     if powerHalted {
       throw RouteError.powerPaused(reason: "battery")
     }
-    pruneStoppedChatBackends()
+    pruneStoppedServers()
+    try validateRouteKind(model: model, kind: kind)
     BackendTrace.notice(
       phase: TracePhase.Router.routeBegin.rawValue,
-      context: TraceContext(modelID: model.id, modelKind: .chat, requestID: requestID),
+      context: TraceContext(modelID: model.id, modelKind: kind, requestID: requestID),
       snapshot: .current()
     )
     var resultLoadID: UUID? = nil
@@ -477,7 +426,7 @@ public actor ModelRouter {
         phase: TracePhase.Router.routeEnd.rawValue,
         context: TraceContext(
           modelID: model.id,
-          modelKind: .chat,
+          modelKind: kind,
           loadID: resultLoadID,
           backendObjectID: resultBackendObj,
           requestID: requestID
@@ -485,205 +434,168 @@ public actor ModelRouter {
         snapshot: .current()
       )
     }
-    guard model.kind != .embedding else {
-      throw RouteError.wrongKindForChat(modelID: model.id)
-    }
-    let effectiveLoadConfig = (loadConfig ?? .default).normalized(for: .chat)
-    chatAcquire: while var entry = loaded[model.id] {
-      if loadConfig != nil && entry.loadConfig != effectiveLoadConfig {
-        if entry.inFlight > 0 {
-          throw RouteError.loadConfigConflict(modelID: model.id)
-        }
-        unload(modelID: model.id, disposition: .unloaded)
-        break chatAcquire
-      }
-      if let chatMaxConcurrency, entry.inFlight >= chatMaxConcurrency {
-        // Queue instead of rejecting: wait for a slot to free, then re-check.
-        if await waitForConcurrencySlot(modelID: model.id) == false {
-          throw RouteError.concurrencyLimitExceeded(modelID: model.id, limit: chatMaxConcurrency)
-        }
-        continue chatAcquire
-      }
-      entry.lastUsed = Date()
-      entry.inFlight += 1
-      loaded[model.id] = entry
-      resultLoadID = entry.loadID
-      resultBackendObj = entry.backendObjectID
-      return entry.backend
-    }
+    let effectiveLoadConfig = (loadConfig ?? .default).normalized(for: loadConfigKind(kind))
 
-    try await ensureHeadroom(modelID: model.id, needing: model.sizeBytes)
-
-    guard let port = firstFreePort() else {
-      throw RouteError.noFreePort
-    }
-    allocatedPorts.insert(port)
-
-    let backend: SwiftLMBackendProtocol
-    do {
-      backend = try spawner(model, port, effectiveLoadConfig)
-      try backend.launch()
-    } catch {
-      allocatedPorts.remove(port)
-      let errorDescription = String(describing: error)
-      log.error(
-        "router.backend_launch_failed model=\(model.id, privacy: .public) err=\(errorDescription, privacy: .public)"
-      )
-      eventSink(.backendLaunchFailed(modelID: model.id, errorDescription: errorDescription))
-      throw RouteError.backendLaunchFailed(modelID: model.id)
-    }
-
-    var entry = LoadedEntry(backend: backend, loadConfig: effectiveLoadConfig)
-    entry.inFlight = 1
-    loaded[model.id] = entry
-    resultLoadID = entry.loadID
-    resultBackendObj = entry.backendObjectID
-    log.notice(
-      "router.model_spawned model=\(model.id, privacy: .public) port=\(port, privacy: .public)")
-    BackendTrace.notice(
-      phase: TracePhase.Router.modelSpawned.rawValue,
-      context: TraceContext(
-        modelID: model.id,
-        modelKind: .chat,
-        loadID: entry.loadID,
-        backendObjectID: entry.backendObjectID
-      ),
-      snapshot: .current(),
-      extras: ["port": "\(port)"]
-    )
-    eventSink(.modelSpawned(modelID: model.id, port: port))
-    return backend
-  }
-
-  private func pruneStoppedChatBackends() {
-    let stoppedEntries = loaded.filter { _, entry in
-      !entry.backend.isRunning
-    }
-    for (modelID, entry) in stoppedEntries {
-      let port = entry.backend.port
-      loaded.removeValue(forKey: modelID)
-      allocatedPorts.remove(port)
-      log.notice(
-        "router.model_pruned model=\(modelID, privacy: .public) port=\(port, privacy: .public) reason=backend_exited"
-      )
-      BackendTrace.notice(
-        phase: TracePhase.Router.modelUnloaded.rawValue,
-        context: TraceContext(
-          modelID: modelID,
-          modelKind: .chat,
-          loadID: entry.loadID,
-          backendObjectID: entry.backendObjectID
-        ),
-        snapshot: .current(),
-        extras: ["port": "\(port)", "reason": "backend_exited"]
-      )
-      eventSink(.modelUnloaded(modelID: modelID, port: port))
-    }
-  }
-
-  // MARK: - Routing embeddings
-
-  public func routeEmbeddingAndBegin(
-    _ model: ModelDescriptor,
-    loadConfig: ModelLoadConfig? = nil
-  ) async throws -> EmbeddingBackendProtocol {
-    if powerHalted {
-      throw RouteError.powerPaused(reason: "battery")
-    }
-    BackendTrace.notice(
-      phase: TracePhase.Router.routeBegin.rawValue,
-      context: TraceContext(modelID: model.id, modelKind: .embedding),
-      snapshot: .current()
-    )
-    var resultLoadID: UUID? = nil
-    var resultBackendObj: String? = nil
-    defer {
-      BackendTrace.notice(
-        phase: TracePhase.Router.routeEnd.rawValue,
-        context: TraceContext(
-          modelID: model.id,
-          modelKind: .embedding,
-          loadID: resultLoadID,
-          backendObjectID: resultBackendObj
-        ),
-        snapshot: .current()
-      )
-    }
-    guard model.kind == .embedding else {
-      throw RouteError.wrongKindForEmbedding(modelID: model.id)
-    }
-    guard let embeddingSpawner else {
-      throw RouteError.embeddingSpawnerMissing
-    }
-    let effectiveLoadConfig = (loadConfig ?? .default).normalized(for: .embedding)
-
-    embeddingAcquire: while let state = embeddingRoutes[model.id] {
+    routeAcquire: while let state = routes[model.id] {
       switch state {
       case .loaded(var entry):
+        if entry.kind != kind {
+          if entry.inFlight > 0 {
+            throw RouteError.loadConfigConflict(modelID: model.id)
+          }
+          unload(modelID: model.id, disposition: .unloaded)
+          break routeAcquire
+        }
         if loadConfig != nil && entry.loadConfig != effectiveLoadConfig {
           if entry.inFlight > 0 {
             throw RouteError.loadConfigConflict(modelID: model.id)
           }
           unload(modelID: model.id, disposition: .unloaded)
-          break embeddingAcquire
+          break routeAcquire
         }
-        if let embeddingMaxConcurrency, entry.inFlight >= embeddingMaxConcurrency {
-          // Queue instead of rejecting: wait for a slot to free, then re-check.
+        if let concurrencyLimit = concurrencyLimit(for: kind),
+          entry.inFlight >= concurrencyLimit
+        {
           if await waitForConcurrencySlot(modelID: model.id) == false {
             throw RouteError.concurrencyLimitExceeded(
               modelID: model.id,
-              limit: embeddingMaxConcurrency
+              limit: concurrencyLimit
             )
           }
-          continue embeddingAcquire
+          continue routeAcquire
         }
         entry.lastUsed = Date()
         entry.inFlight += 1
-        embeddingRoutes[model.id] = .loaded(entry)
+        routes[model.id] = .loaded(entry)
         resultLoadID = entry.loadID
         resultBackendObj = entry.backendObjectID
-        return entry.backend
+        return entry.server
       case .loading(let loading):
+        if loading.kind != kind {
+          throw RouteError.loadConfigConflict(modelID: model.id)
+        }
         log.debug(
-          "router.embedding_load_wait model=\(model.id, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)"
+          "router.load_wait model=\(model.id, privacy: .public) kind=\(kind.rawValue, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)"
         )
-        let backend = try await finishEmbeddingLoad(
+        let server = try await finishLoad(
           model: model,
+          kind: kind,
           loading: loading,
           loadConfig: effectiveLoadConfig
         )
-        if let info = embeddingLoadInfo(modelID: model.id) {
+        if let info = loadInfo(modelID: model.id, kind: kind) {
           resultLoadID = info.loadID
           resultBackendObj = info.backendObjectID
         }
-        return backend
+        return server
       }
     }
 
     try await ensureHeadroom(modelID: model.id, needing: model.sizeBytes)
 
     let loadTask = Task {
-      try await embeddingSpawner(model, effectiveLoadConfig)
+      try await spawner(model, kind, effectiveLoadConfig)
     }
-    let loading = EmbeddingLoadingEntry(task: loadTask)
-    embeddingRoutes[model.id] = .loading(loading)
-    let backend = try await finishEmbeddingLoad(
+    let loading = LoadingEntry(kind: kind, task: loadTask)
+    routes[model.id] = .loading(loading)
+    let server = try await finishLoad(
       model: model,
+      kind: kind,
       loading: loading,
       loadConfig: effectiveLoadConfig
     )
-    if let info = embeddingLoadInfo(modelID: model.id) {
+    if let info = loadInfo(modelID: model.id, kind: kind) {
       resultLoadID = info.loadID
       resultBackendObj = info.backendObjectID
     }
-    return backend
+    return server
   }
 
-  public func requestDone(modelID: String, requestID: UUID? = nil) {
-    guard var entry = loaded[modelID] else {
+  public func routeEmbeddingAndBegin(
+    _ model: ModelDescriptor,
+    loadConfig: ModelLoadConfig? = nil
+  ) async throws -> ModelServer {
+    try await routeAndBegin(model, kind: .embedding, loadConfig: loadConfig)
+  }
+
+  public func routeVideoAndBegin(
+    _ model: ModelDescriptor,
+    loadConfig: ModelLoadConfig? = nil,
+    requestID: UUID? = nil
+  ) async throws -> ModelServer {
+    try await routeAndBegin(model, kind: .video, loadConfig: loadConfig, requestID: requestID)
+  }
+
+  private func validateRouteKind(model: ModelDescriptor, kind: RouteKind) throws {
+    switch kind {
+    case .embedding:
+      guard model.kind == .embedding else {
+        throw RouteError.wrongKindForEmbedding(modelID: model.id)
+      }
+    case .chat, .video:
+      guard model.kind != .embedding else {
+        throw RouteError.wrongKindForChat(modelID: model.id)
+      }
+    }
+  }
+
+  private func loadConfigKind(_ kind: RouteKind) -> ModelKind {
+    switch kind {
+    case .embedding:
+      return .embedding
+    case .chat, .video:
+      return .chat
+    }
+  }
+
+  private func concurrencyLimit(for kind: RouteKind) -> Int? {
+    switch kind {
+    case .chat:
+      return chatMaxConcurrency
+    case .embedding:
+      return embeddingMaxConcurrency
+    case .video:
+      return nil
+    }
+  }
+
+  private func pruneStoppedServers() {
+    let stoppedEntries = routes.compactMap { modelID, state -> (String, LoadedEntry)? in
+      guard case .loaded(let entry) = state, !entry.server.isRunning else {
+        return nil
+      }
+      return (modelID, entry)
+    }
+    for (modelID, entry) in stoppedEntries {
+      routes.removeValue(forKey: modelID)
+      log.notice(
+        "router.model_pruned model=\(modelID, privacy: .public) kind=\(entry.kind.rawValue, privacy: .public) reason=server_exited"
+      )
+      BackendTrace.notice(
+        phase: TracePhase.Router.modelUnloaded.rawValue,
+        context: TraceContext(
+          modelID: modelID,
+          modelKind: entry.kind,
+          loadID: entry.loadID,
+          backendObjectID: entry.backendObjectID
+        ),
+        snapshot: .current(),
+        extras: ["reason": "server_exited"]
+      )
+      eventSink(.modelUnloaded(modelID: modelID, kind: entry.kind))
+    }
+  }
+
+  public func requestDone(
+    modelID: String,
+    kind: SwiftLMTrace.BackendKind = .chat,
+    requestID: UUID? = nil
+  ) {
+    guard let state = routes[modelID], case .loaded(var entry) = state, entry.kind == kind else {
       log.fault(
         """
-        router.request_done_unknown_chat_model model=\(modelID, privacy: .public) \
+        router.request_done_unknown_model model=\(modelID, privacy: .public) \
+        kind=\(kind.rawValue, privacy: .public) \
         request_id=\(requestID?.uuidString ?? "none", privacy: .public)
         """
       )
@@ -691,58 +603,59 @@ public actor ModelRouter {
     }
     if entry.inFlight > 0 { entry.inFlight -= 1 }
     entry.lastUsed = Date()
-    loaded[modelID] = entry
+    routes[modelID] = .loaded(entry)
     wakeNextConcurrencyWaiter(modelID: modelID)
-    log.notice(
-      """
-      router.request_done model=\(modelID, privacy: .public) \
-      request_id=\(requestID?.uuidString ?? "none", privacy: .public) \
-      in_flight=\(entry.inFlight, privacy: .public)
-      """
-    )
-    BackendTrace.notice(
-      phase: TracePhase.Router.requestDone.rawValue,
-      context: TraceContext(
-        modelID: modelID,
-        modelKind: .chat,
-        loadID: entry.loadID,
-        backendObjectID: entry.backendObjectID,
-        requestID: requestID
-      ),
-      snapshot: .current(),
-      extras: ["inflight": "\(entry.inFlight)"]
-    )
+    logRequestDone(entry: entry, requestID: requestID)
   }
 
   public func embeddingRequestDone(modelID: String) {
-    guard let state = embeddingRoutes[modelID] else {
-      log.fault("router.request_done_unknown_embedding_model model=\(modelID, privacy: .public)")
-      return
-    }
+    requestDone(modelID: modelID, kind: .embedding)
+  }
 
-    guard case .loaded(var entry) = state else {
-      log.fault("router.request_done_unknown_embedding_model model=\(modelID, privacy: .public)")
-      return
-    }
+  public func videoRequestDone(modelID: String, requestID: UUID? = nil) {
+    requestDone(modelID: modelID, kind: .video, requestID: requestID)
+  }
 
-    if entry.inFlight > 0 { entry.inFlight -= 1 }
-    entry.lastUsed = Date()
-    embeddingRoutes[modelID] = .loaded(entry)
-    wakeNextConcurrencyWaiter(modelID: modelID)
-    log.debug(
-      "router.embedding_request_done model=\(modelID, privacy: .public) in_flight=\(entry.inFlight, privacy: .public)"
-    )
-    BackendTrace.debug(
-      phase: TracePhase.Router.embeddingRequestDone.rawValue,
-      context: TraceContext(
-        modelID: modelID,
-        modelKind: .embedding,
-        loadID: entry.loadID,
-        backendObjectID: entry.backendObjectID
-      ),
-      snapshot: .current(),
-      extras: ["inflight": "\(entry.inFlight)"]
-    )
+  private func logRequestDone(entry: LoadedEntry, requestID: UUID?) {
+    switch entry.kind {
+    case .embedding:
+      log.debug(
+        "router.embedding_request_done model=\(entry.server.modelID, privacy: .public) in_flight=\(entry.inFlight, privacy: .public)"
+      )
+      BackendTrace.debug(
+        phase: TracePhase.Router.embeddingRequestDone.rawValue,
+        context: TraceContext(
+          modelID: entry.server.modelID,
+          modelKind: entry.kind,
+          loadID: entry.loadID,
+          backendObjectID: entry.backendObjectID,
+          requestID: requestID
+        ),
+        snapshot: .current(),
+        extras: ["inflight": "\(entry.inFlight)"]
+      )
+    case .chat, .video:
+      log.notice(
+        """
+        router.request_done model=\(entry.server.modelID, privacy: .public) \
+        kind=\(entry.kind.rawValue, privacy: .public) \
+        request_id=\(requestID?.uuidString ?? "none", privacy: .public) \
+        in_flight=\(entry.inFlight, privacy: .public)
+        """
+      )
+      BackendTrace.notice(
+        phase: TracePhase.Router.requestDone.rawValue,
+        context: TraceContext(
+          modelID: entry.server.modelID,
+          modelKind: entry.kind,
+          loadID: entry.loadID,
+          backendObjectID: entry.backendObjectID,
+          requestID: requestID
+        ),
+        snapshot: .current(),
+        extras: ["inflight": "\(entry.inFlight)"]
+      )
+    }
   }
 
   // MARK: - Concurrency queue
@@ -819,7 +732,7 @@ public actor ModelRouter {
   }
 
   /// Apply a battery throttle level: cap embedding concurrency, set inter-request
-  /// pacing, forward the level to every loaded embedding backend so it can shrink
+  /// pacing, forward the level to every loaded embedding server so it can shrink
   /// the GPU cache, and at `hard` halt admission so new chat and embedding
   /// requests are refused while in-flight requests drain. Concurrency is never
   /// raised above the configured ceiling, and `none` restores the configured cap
@@ -842,9 +755,10 @@ public actor ModelRouter {
     embeddingPacingNanos = pacingNanos
     currentThrottleLevel = level
     powerHalted = (level == .hard)
-    for state in embeddingRoutes.values {
-      if case .loaded(let entry) = state {
-        entry.backend.applyPowerThrottle(level)
+    let wireLevel = wireThrottleLevel(level)
+    for state in routes.values {
+      if case .loaded(let entry) = state, entry.kind == .embedding {
+        entry.server.applyPowerThrottle(wireLevel)
       }
     }
     log.notice(
@@ -866,6 +780,17 @@ public actor ModelRouter {
     return min(configured, ceiling)
   }
 
+  private func wireThrottleLevel(_ level: PowerThrottleLevel) -> WireThrottleLevel {
+    switch level {
+    case .none:
+      return .none
+    case .mild:
+      return .mild
+    case .hard:
+      return .hard
+    }
+  }
+
   public func unload(modelID: String) {
     unload(modelID: modelID, disposition: .unloaded)
   }
@@ -877,199 +802,161 @@ public actor ModelRouter {
   private func unload(modelID: String, disposition: UnloadDisposition) {
     // Release any queued waiters first so none hangs on a model going away.
     drainConcurrencyWaiters(modelID: modelID)
-    if let entry = loaded.removeValue(forKey: modelID) {
-      let port = entry.backend.port
-      allocatedPorts.remove(port)
-      entry.backend.shutdown()
-      let traceCtx = TraceContext(
+    guard let state = routes.removeValue(forKey: modelID) else {
+      return
+    }
+    switch state {
+    case .loaded(let entry):
+      entry.server.shutdown()
+      let traceContext = TraceContext(
         modelID: modelID,
-        modelKind: .chat,
+        modelKind: entry.kind,
         loadID: entry.loadID,
         backendObjectID: entry.backendObjectID
       )
       switch disposition {
       case .unloaded:
         log.notice(
-          "router.model_unloaded model=\(modelID, privacy: .public) port=\(port, privacy: .public)")
+          "router.model_unloaded model=\(modelID, privacy: .public) kind=\(entry.kind.rawValue, privacy: .public)"
+        )
         BackendTrace.notice(
           phase: TracePhase.Router.modelUnloaded.rawValue,
-          context: traceCtx,
+          context: traceContext,
           snapshot: .current(),
-          extras: ["port": "\(port)", "reason": "unloaded"]
+          extras: ["reason": "unloaded"]
         )
-        eventSink(.modelUnloaded(modelID: modelID, port: port))
+        eventSink(.modelUnloaded(modelID: modelID, kind: entry.kind))
       case .evicted:
         log.notice(
-          "router.model_evicted model=\(modelID, privacy: .public) port=\(port, privacy: .public)")
+          "router.model_evicted model=\(modelID, privacy: .public) kind=\(entry.kind.rawValue, privacy: .public)"
+        )
         BackendTrace.notice(
           phase: TracePhase.Router.modelEvicted.rawValue,
-          context: traceCtx,
+          context: traceContext,
           snapshot: .current(),
-          extras: ["port": "\(port)", "reason": "evicted"]
+          extras: ["reason": "evicted"]
         )
-        eventSink(.modelEvicted(modelID: modelID, port: port))
+        eventSink(.modelEvicted(modelID: modelID, kind: entry.kind))
       }
-      return
-    }
-    if let state = embeddingRoutes.removeValue(forKey: modelID) {
-      switch state {
-      case .loaded(let entry):
-        entry.backend.shutdown()
-        let traceCtx = TraceContext(
+    case .loading(let loading):
+      loading.task.cancel()
+      log.notice(
+        "router.load_cancelled model=\(modelID, privacy: .public) kind=\(loading.kind.rawValue, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)"
+      )
+      eventSink(
+        .modelLoadCancelled(
           modelID: modelID,
-          modelKind: .embedding,
-          loadID: entry.loadID,
-          backendObjectID: entry.backendObjectID
-        )
-        switch disposition {
-        case .unloaded:
-          log.notice("router.embedding_unloaded model=\(modelID, privacy: .public)")
-          BackendTrace.notice(
-            phase: TracePhase.Router.embeddingUnloaded.rawValue,
-            context: traceCtx,
-            snapshot: .current(),
-            extras: ["reason": "unloaded"]
-          )
-          eventSink(.embeddingUnloaded(modelID: modelID))
-        case .evicted:
-          log.notice("router.embedding_evicted model=\(modelID, privacy: .public)")
-          BackendTrace.notice(
-            phase: TracePhase.Router.embeddingEvicted.rawValue,
-            context: traceCtx,
-            snapshot: .current(),
-            extras: ["reason": "evicted"]
-          )
-          eventSink(.embeddingEvicted(modelID: modelID))
-        }
-      case .loading(let loading):
-        loading.task.cancel()
-        log.notice(
-          "router.embedding_load_cancelled model=\(modelID, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)"
-        )
-        eventSink(.embeddingLoadCancelled(modelID: modelID, loadID: loading.id.uuidString))
-      }
-      return
+          kind: loading.kind,
+          loadID: loading.id.uuidString
+        ))
     }
   }
 
   public func shutdownAll() {
-    let snap = snapshot()
-    let modelIDs = Set(snap.loaded.map(\.modelID)).union(embeddingRoutes.keys)
+    let modelIDs = Array(routes.keys)
     log.notice("router.shutdown_all count=\(modelIDs.count, privacy: .public)")
     for modelID in modelIDs {
       unload(modelID: modelID)
     }
   }
 
-  private func finishEmbeddingLoad(
+  private func finishLoad(
     model: ModelDescriptor,
-    loading: EmbeddingLoadingEntry,
+    kind: RouteKind,
+    loading: LoadingEntry,
     loadConfig: ModelLoadConfig
-  ) async throws -> EmbeddingBackendProtocol {
-    let backend: EmbeddingBackendProtocol
+  ) async throws -> ModelServer {
+    let server: ModelServer
     do {
-      backend = try await loading.task.value
-    } catch let error as UnsupportedEmbeddingBackendError {
-      let reason = error.description
-      if clearEmbeddingLoadingIfCurrent(modelID: model.id, loading: loading) {
-        log.error(
-          "router.embedding_backend_unsupported model=\(model.id, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public) err=\(reason, privacy: .public)"
-        )
-        eventSink(.embeddingBackendUnsupported(modelID: model.id, reason: reason))
-      }
-      throw RouteError.unsupportedEmbeddingBackend(modelID: model.id, reason: reason)
+      server = try await loading.task.value
     } catch {
       let errorDescription = String(describing: error)
-      if clearEmbeddingLoadingIfCurrent(modelID: model.id, loading: loading) {
+      if clearLoadingIfCurrent(modelID: model.id, loading: loading) {
         log.error(
-          "router.embedding_launch_failed model=\(model.id, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public) err=\(errorDescription, privacy: .public)"
+          "router.backend_launch_failed model=\(model.id, privacy: .public) kind=\(kind.rawValue, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public) err=\(errorDescription, privacy: .public)"
         )
-        eventSink(.embeddingLaunchFailed(modelID: model.id, errorDescription: errorDescription))
+        eventSink(
+          .backendLaunchFailed(
+            modelID: model.id,
+            kind: kind,
+            errorDescription: errorDescription
+          ))
       }
       throw RouteError.backendLaunchFailed(modelID: model.id)
     }
 
-    guard let state = embeddingRoutes[model.id] else {
-      backend.shutdown()
+    guard let state = routes[model.id] else {
+      server.shutdown()
       log.notice(
-        "router.embedding_load_discarded model=\(model.id, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public) reason=unloaded"
+        "router.load_discarded model=\(model.id, privacy: .public) kind=\(kind.rawValue, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public) reason=unloaded"
       )
       throw RouteError.backendLaunchFailed(modelID: model.id)
     }
 
     switch state {
     case .loaded(var entry):
-      // Another request already serves this model. Queue for a slot rather than
-      // rejecting, re-reading the entry after each wait since it may change.
-      while let embeddingMaxConcurrency, entry.inFlight >= embeddingMaxConcurrency {
+      while let concurrencyLimit = concurrencyLimit(for: kind),
+        entry.inFlight >= concurrencyLimit
+      {
         if await waitForConcurrencySlot(modelID: model.id) == false {
           throw RouteError.concurrencyLimitExceeded(
             modelID: model.id,
-            limit: embeddingMaxConcurrency
+            limit: concurrencyLimit
           )
         }
-        guard case .loaded(let refreshed)? = embeddingRoutes[model.id] else {
+        guard case .loaded(let refreshed)? = routes[model.id] else {
           throw RouteError.backendLaunchFailed(modelID: model.id)
         }
         entry = refreshed
       }
       entry.lastUsed = Date()
       entry.inFlight += 1
-      embeddingRoutes[model.id] = .loaded(entry)
-      return entry.backend
+      routes[model.id] = .loaded(entry)
+      return entry.server
     case .loading(let current) where current.id == loading.id:
-      var entry = EmbeddingLoadedEntry(
-        backend: backend,
+      var entry = LoadedEntry(
+        server: server,
+        kind: kind,
         loadID: loading.id,
         loadConfig: loadConfig
       )
       entry.inFlight = 1
-      embeddingRoutes[model.id] = .loaded(entry)
-      // A model spawned while throttled inherits the active throttle so its GPU
-      // cache is shrunk on load, not only on the next level change.
-      backend.applyPowerThrottle(currentThrottleLevel)
+      routes[model.id] = .loaded(entry)
+      if kind == .embedding {
+        server.applyPowerThrottle(wireThrottleLevel(currentThrottleLevel))
+      }
       log.notice(
-        "router.embedding_spawned model=\(model.id, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)"
+        "router.model_spawned model=\(model.id, privacy: .public) kind=\(kind.rawValue, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)"
       )
       BackendTrace.notice(
-        phase: TracePhase.Router.embeddingSpawned.rawValue,
+        phase: TracePhase.Router.modelSpawned.rawValue,
         context: TraceContext(
           modelID: model.id,
-          modelKind: .embedding,
+          modelKind: kind,
           loadID: entry.loadID,
           backendObjectID: entry.backendObjectID
         ),
         snapshot: .current()
       )
-      eventSink(.embeddingSpawned(modelID: model.id))
-      return backend
+      eventSink(.modelSpawned(modelID: model.id, kind: kind))
+      return server
     case .loading:
-      backend.shutdown()
+      server.shutdown()
       log.fault(
-        "router.embedding_load_stale model=\(model.id, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)"
+        "router.load_stale model=\(model.id, privacy: .public) kind=\(kind.rawValue, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)"
       )
       throw RouteError.backendLaunchFailed(modelID: model.id)
     }
   }
 
-  private func clearEmbeddingLoadingIfCurrent(
-    modelID: String,
-    loading: EmbeddingLoadingEntry
-  ) -> Bool {
-    guard let state = embeddingRoutes[modelID], case .loading(let current) = state,
+  private func clearLoadingIfCurrent(modelID: String, loading: LoadingEntry) -> Bool {
+    guard let state = routes[modelID], case .loading(let current) = state,
       current.id == loading.id
     else {
       return false
     }
-    embeddingRoutes.removeValue(forKey: modelID)
+    routes.removeValue(forKey: modelID)
     return true
-  }
-
-  private func firstFreePort() -> Int? {
-    for p in portRange where !allocatedPorts.contains(p) {
-      return p
-    }
-    return nil
   }
 }
 

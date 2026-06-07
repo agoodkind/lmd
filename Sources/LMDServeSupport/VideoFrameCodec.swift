@@ -137,12 +137,12 @@ public enum VideoFrameCodec {
   /// Decode a `failed` frame's message back into the original typed error, so
   /// the broker's chat-path catch ladder produces the same HTTP status. A
   /// message that is not a typed envelope (an older host or a non-codec sender)
-  /// surfaces as a generic backend failure carrying the raw text.
+  /// surfaces as a generic server failure carrying the raw text.
   static func decodeFailure(message: String) -> Error {
     guard let data = message.data(using: .utf8),
       let envelope = try? decoder.decode(VideoFailureEnvelope.self, from: data)
     else {
-      return XPCVideoChatBackendError.hostFailed(message: message)
+      return ModelServerVideoChatError.hostFailed(message: message)
     }
     switch envelope.category {
     case .notConfigured:
@@ -153,7 +153,7 @@ public enum VideoFrameCodec {
     case .requestBuild:
       return decodeRequestBuildError(envelope.message)
     case .generic:
-      return XPCVideoChatBackendError.hostFailed(message: envelope.message)
+      return ModelServerVideoChatError.hostFailed(message: envelope.message)
     }
   }
 

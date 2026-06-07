@@ -22,6 +22,7 @@ import SwiftLMBackend
 import SwiftLMControl
 import SwiftLMCore
 import SwiftLMEmbed
+import SwiftLMHostProtocol
 import SwiftLMMonitor
 import SwiftLMRuntime
 import SwiftLMTrace
@@ -87,6 +88,17 @@ func resolveSiblingBinaryPath(_ name: String) -> String {
   return executableURL.deletingLastPathComponent().appendingPathComponent(name).path
 }
 
+func hostBackendKind(_ kind: SwiftLMTrace.BackendKind) -> SwiftLMHostProtocol.BackendKind {
+  switch kind {
+  case .chat:
+    return .chat
+  case .embedding:
+    return .embedding
+  case .video:
+    return .video
+  }
+}
+
 // MARK: - App state
 
 final class LoadedAliasStore: @unchecked Sendable {
@@ -148,7 +160,6 @@ final class BrokerState: @unchecked Sendable {
   let catalog: ModelCatalog
   let router: ModelRouter
   let config: BrokerConfig
-  let videoChatBackend: VideoChatBackend
   let modelsByID: [String: ModelDescriptor]
   let downloadCoordinator: HubDownloadCoordinator
   let aliasStore: LoadedAliasStore
@@ -162,13 +173,11 @@ final class BrokerState: @unchecked Sendable {
     models: [ModelDescriptor],
     aliasStore: LoadedAliasStore,
     pendingSpawns: PendingSpawns,
-    hostServers: HostServerStore,
-    videoChatBackend: VideoChatBackend = NotConfiguredVideoChatBackend()
+    hostServers: HostServerStore
   ) {
     self.catalog = catalog
     self.router = router
     self.config = config
-    self.videoChatBackend = videoChatBackend
     self.downloadCoordinator = HubDownloadCoordinator()
     self.aliasStore = aliasStore
     self.pendingSpawns = pendingSpawns
@@ -449,43 +458,27 @@ struct SwiftLMD {
     let router = ModelRouter(
       reserveBytes: reserveBytes,
       memoryProbe: memoryProbe,
-      spawner: { model, port, loadConfig in
+      spawner: { model, kind, loadConfig in
         let server = XPCModelServer(
           descriptor: model,
-          kind: .chat,
+          kind: hostBackendKind(kind),
           hostBinaryPath: hostBinaryPath,
           hostService: brokerHostServiceName,
           pending: pendingSpawns,
-          swiftLMBinaryPath: binary,
-          swiftLMLogPath: defaultLogPath,
-          contextLength: loadConfig.contextLength
+          swiftLMBinaryPath: kind == .chat ? binary : nil,
+          swiftLMLogPath: kind == .chat ? defaultLogPath : nil,
+          contextLength: kind == .chat ? loadConfig.contextLength : nil,
+          videoSamplingFPS: kind == .video ? model.capabilities.videoSamplingFPS : nil
         )
         hostServers.register(modelID: model.id, server: server)
-        return XPCChatBackend(server: server, port: port) {
-          hostServers.remove(modelID: model.id)
-        }
-      },
-      embeddingSpawner: { model, _ in
-        // Embedding now runs inside an lmd-model-host child reached over XPC.
-        // Spawn the host, register it so its dial-in binds, and return the
-        // adapter so the router and HTTP handlers keep their existing
-        // EmbeddingBackendProtocol seam. The broker runs no embedding inference.
-        let server = XPCModelServer(
-          descriptor: model,
-          kind: .embedding,
-          hostBinaryPath: hostBinaryPath,
-          hostService: brokerHostServiceName,
-          pending: pendingSpawns
-        )
-        hostServers.register(modelID: model.id, server: server)
-        let backend = XPCEmbeddingBackend(server: server)
         do {
-          try await backend.launch()
+          try await server.spawn()
+          try await server.waitReady()
         } catch {
           hostServers.remove(modelID: model.id)
           throw error
         }
-        return backend
+        return server
       },
       chatMaxConcurrency: config.chatMaxConcurrency,
       embeddingMaxConcurrency: config.embeddingMaxConcurrency,
@@ -493,8 +486,7 @@ struct SwiftLMD {
         switch event {
         case .modelUnloaded(let modelID, _),
           .modelEvicted(let modelID, _),
-          .embeddingUnloaded(let modelID),
-          .embeddingEvicted(let modelID):
+          .modelLoadCancelled(let modelID, _, _):
           aliasStore.clear(modelID: modelID)
           hostServers.remove(modelID: modelID)
         default:
@@ -504,33 +496,6 @@ struct SwiftLMD {
       }
     )
 
-    // Video now runs inside an lmd-model-host child reached over XPC, the same
-    // mechanism embedding uses. The launcher spawns the video host, registers it
-    // so its dial-in binds, and waits for the model to be resident; the adapter
-    // forwards the verbatim OpenAI body and rebuilds the streamed frames into the
-    // same BackendChatResult the chat path already renders. The broker runs no
-    // video inference. The video sampling rate from the model's capabilities is
-    // passed to the host so it samples frames at the rate the model expects.
-    let videoChatBackend = XPCVideoChatBackend { model in
-      let server = XPCModelServer(
-        descriptor: model,
-        kind: .video,
-        hostBinaryPath: hostBinaryPath,
-        hostService: brokerHostServiceName,
-        pending: pendingSpawns,
-        videoSamplingFPS: model.capabilities.videoSamplingFPS
-      )
-      hostServers.register(modelID: model.id, server: server)
-      do {
-        try await server.spawn()
-        try await server.waitReady()
-      } catch {
-        hostServers.remove(modelID: model.id)
-        throw error
-      }
-      return server
-    }
-
     let state = BrokerState(
       catalog: catalog,
       router: router,
@@ -538,8 +503,7 @@ struct SwiftLMD {
       models: models,
       aliasStore: aliasStore,
       pendingSpawns: pendingSpawns,
-      hostServers: hostServers,
-      videoChatBackend: videoChatBackend
+      hostServers: hostServers
     )
 
     // React to memory pressure the instant the system reports it, ahead of the
@@ -983,9 +947,9 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
     extras: ["transport": "http", "input_count": "\(inputs.count)"]
   )
 
-  let backend: EmbeddingBackendProtocol
+  let server: ModelServer
   do {
-    backend = try await state.router.routeEmbeddingAndBegin(descriptor)
+    server = try await state.router.routeEmbeddingAndBegin(descriptor)
   } catch let err as ModelRouter.RouteError {
     log.error(
       "embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=http model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=route err=\(String(describing: err), privacy: .public)"
@@ -1024,24 +988,6 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
         status: .conflict,
         message: "embedding model is busy with a different load configuration",
         type: "load_config_conflict"
-      )
-    case .unsupportedEmbeddingBackend(_, let reason):
-      return errorResponse(
-        status: .badRequest,
-        message: reason,
-        type: "unsupported_embedding_backend"
-      )
-    case .embeddingSpawnerMissing:
-      return errorResponse(
-        status: .serviceUnavailable,
-        message: "embedding support is not configured",
-        type: "not_configured"
-      )
-    case .noFreePort:
-      return errorResponse(
-        status: .serviceUnavailable,
-        message: "no free port in pool",
-        type: "capacity_exceeded"
       )
     case .wrongKindForChat:
       return errorResponse(
@@ -1087,7 +1033,7 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
     vectors = try await TraceTaskLocal.$requestID.withValue(requestID) {
       try await TraceTaskLocal.$loadID.withValue(routerInfo?.loadID) {
         try await TraceTaskLocal.$backendObjectID.withValue(routerInfo?.backendObjectID) {
-          try await backend.embed(inputs: inputs)
+          try await embedWithModelServer(server: server, inputs: inputs, requestID: requestID)
         }
       }
     }
@@ -1344,7 +1290,7 @@ private func logChatRequestStarted(_ context: ChatProxyLogContext) {
 
 private func logChatRequestRouted(
   _ context: ChatProxyLogContext,
-  upstreamPort: Int,
+  upstreamPort: Int?,
   upstreamPath: String
 ) {
   log.notice(
@@ -1353,7 +1299,8 @@ private func logChatRequestRouted(
     client_request_id=\(context.clientRequestID ?? "none", privacy: .public) \
     endpoint=\(context.endpointPath, privacy: .public) stream=\(context.wantsStream, privacy: .public) \
     model=\(context.modelID, privacy: .public) model_path=\(context.modelPath, privacy: .public) \
-    upstream_port=\(upstreamPort, privacy: .public) upstream_path=\(upstreamPath, privacy: .public) \
+    upstream_port=\(upstreamPort.map(String.init) ?? "none", privacy: .public) \
+    upstream_path=\(upstreamPath, privacy: .public) \
     request_bytes=\(context.requestBodyBytes, privacy: .public)
     """
   )
@@ -1361,7 +1308,7 @@ private func logChatRequestRouted(
 
 private func logChatRequestDoneAck(
   _ context: ChatProxyLogContext,
-  upstreamPort: Int,
+  upstreamPort: Int?,
   upstreamPath: String
 ) {
   log.notice(
@@ -1370,7 +1317,8 @@ private func logChatRequestDoneAck(
     client_request_id=\(context.clientRequestID ?? "none", privacy: .public) \
     endpoint=\(context.endpointPath, privacy: .public) stream=\(context.wantsStream, privacy: .public) \
     model=\(context.modelID, privacy: .public) model_path=\(context.modelPath, privacy: .public) \
-    upstream_port=\(upstreamPort, privacy: .public) upstream_path=\(upstreamPath, privacy: .public) \
+    upstream_port=\(upstreamPort.map(String.init) ?? "none", privacy: .public) \
+    upstream_path=\(upstreamPath, privacy: .public) \
     duration_ms=\(elapsedMilliseconds(since: context.startedAt), privacy: .public)
     """
   )
@@ -1378,7 +1326,7 @@ private func logChatRequestDoneAck(
 
 private func logChatRequestCompleted(
   _ context: ChatProxyLogContext,
-  upstreamPort: Int,
+  upstreamPort: Int?,
   upstreamPath: String,
   statusCode: Int,
   responseBodyBytes: Int?
@@ -1390,7 +1338,8 @@ private func logChatRequestCompleted(
     client_request_id=\(context.clientRequestID ?? "none", privacy: .public) \
     endpoint=\(context.endpointPath, privacy: .public) stream=\(context.wantsStream, privacy: .public) \
     model=\(context.modelID, privacy: .public) model_path=\(context.modelPath, privacy: .public) \
-    upstream_port=\(upstreamPort, privacy: .public) upstream_path=\(upstreamPath, privacy: .public) \
+    upstream_port=\(upstreamPort.map(String.init) ?? "none", privacy: .public) \
+    upstream_path=\(upstreamPath, privacy: .public) \
     status_code=\(statusCode, privacy: .public) request_bytes=\(context.requestBodyBytes, privacy: .public) \
     response_bytes=\(responseBytes, privacy: .public) \
     duration_ms=\(elapsedMilliseconds(since: context.startedAt), privacy: .public)
@@ -1547,13 +1496,10 @@ func handleChat(
     result = try await xpcChatResult(request: prepared, state: state, logContext: logContext)
   case .videoBackend(let videoRequest):
     do {
-      result = try await state.videoChatBackend.complete(videoRequest)
-    } catch VideoChatBackendError.notConfigured {
-      result = backendErrorResult(
-        statusCode: 503,
-        message: "video chat backend is not configured",
-        type: "not_configured",
-        code: "not_configured"
+      result = try await xpcVideoChatResult(
+        request: videoRequest,
+        state: state,
+        logContext: logContext
       )
     } catch let backendError as VideoChatBackendError {
       switch backendError {
@@ -1616,6 +1562,162 @@ func handleChat(
   return renderBackendChatResult(canonical)
 }
 
+private func xpcVideoChatResult(
+  request videoRequest: VideoChatRouteRequest,
+  state: BrokerState,
+  logContext: ChatProxyLogContext
+) async throws -> BackendChatResult {
+  let signpostState = signposter.beginInterval(
+    "video.xpc",
+    id: signposter.makeSignpostID(),
+    "request_id=\(logContext.requestIDString, privacy: .public) model=\(logContext.modelID, privacy: .public)"
+  )
+  defer { signposter.endInterval("video.xpc", signpostState) }
+  let receivedContext = TraceContext(
+    modelID: videoRequest.model.id,
+    modelKind: .video,
+    requestID: logContext.requestID
+  )
+  logChatRequestStarted(logContext)
+  BackendTrace.notice(
+    phase: TracePhase.Broker.requestStarted.rawValue,
+    context: receivedContext,
+    snapshot: .current(),
+    extras: chatTraceExtras(for: logContext)
+  )
+
+  let server: ModelServer
+  do {
+    server = try await state.router.routeVideoAndBegin(
+      videoRequest.model,
+      requestID: logContext.requestID
+    )
+  } catch let err as ModelRouter.RouteError {
+    return videoRouteErrorResult(
+      error: err,
+      request: videoRequest,
+      logContext: logContext,
+      traceContext: receivedContext
+    )
+  }
+
+  let routerInfo = await state.router.videoLoadInfo(modelID: videoRequest.model.id)
+  let routedContext = TraceContext(
+    modelID: videoRequest.model.id,
+    modelKind: .video,
+    loadID: routerInfo?.loadID,
+    backendObjectID: routerInfo?.backendObjectID,
+    requestID: logContext.requestID
+  )
+  let requestDoneToken = BackendLifetimeToken {
+    await state.router.videoRequestDone(
+      modelID: videoRequest.model.id,
+      requestID: logContext.requestID
+    )
+    logChatRequestDoneAck(logContext, upstreamPort: nil, upstreamPath: videoRequest.endpoint.path)
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestDoneAck.rawValue,
+      context: routedContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "upstream_port": "none",
+          "upstream_path": videoRequest.endpoint.path,
+        ])
+    )
+  }
+  logChatRequestRouted(logContext, upstreamPort: nil, upstreamPath: videoRequest.endpoint.path)
+  BackendTrace.notice(
+    phase: TracePhase.Broker.requestRouted.rawValue,
+    context: routedContext,
+    snapshot: .current(),
+    extras: chatTraceExtras(
+      for: logContext,
+      additional: [
+        "upstream_port": "none",
+        "upstream_path": videoRequest.endpoint.path,
+      ])
+  )
+
+  do {
+    let result = try await completeVideoChatWithModelServer(
+      server: server,
+      request: videoRequest,
+      requestID: logContext.requestID
+    )
+    return await chatResultWithLifecycle(
+      result,
+      requestDoneToken: requestDoneToken,
+      logContext: logContext,
+      routedContext: routedContext,
+      upstreamPort: nil,
+      upstreamPath: videoRequest.endpoint.path
+    )
+  } catch {
+    await requestDoneToken.finish()
+    let fields = safeErrorFields(error)
+    logChatRequestFailed(
+      logContext,
+      upstreamPort: nil,
+      upstreamPath: videoRequest.endpoint.path,
+      statusCode: nil,
+      stage: "upstream",
+      errorType: fields.type,
+      errorMessage: fields.message
+    )
+    BackendTrace.notice(
+      phase: TracePhase.Broker.requestFailed.rawValue,
+      context: routedContext,
+      snapshot: .current(),
+      extras: chatTraceExtras(
+        for: logContext,
+        additional: [
+          "upstream_port": "none",
+          "upstream_path": videoRequest.endpoint.path,
+          "stage": "upstream",
+          "error_type": fields.type,
+        ])
+    )
+    throw error
+  }
+}
+
+private func videoRouteErrorResult(
+  error: ModelRouter.RouteError,
+  request: VideoChatRouteRequest,
+  logContext: ChatProxyLogContext,
+  traceContext: TraceContext
+) -> BackendChatResult {
+  let errorMessage = "video chat backend failed: \(error)"
+  logChatRequestFailed(
+    logContext,
+    upstreamPort: nil,
+    upstreamPath: request.endpoint.path,
+    statusCode: 503,
+    stage: "route",
+    errorType: "video_backend_failed",
+    errorMessage: errorMessage
+  )
+  BackendTrace.notice(
+    phase: TracePhase.Broker.requestFailed.rawValue,
+    context: traceContext,
+    snapshot: .current(),
+    extras: chatTraceExtras(
+      for: logContext,
+      additional: [
+        "stage": "route",
+        "status_code": "503",
+        "error_type": "video_backend_failed",
+      ])
+  )
+  return backendErrorResult(
+    statusCode: 503,
+    message: errorMessage,
+    type: "video_backend_failed"
+  )
+}
+
 private func xpcChatResult(
   request prepared: PreparedChatRequest,
   state: BrokerState,
@@ -1640,9 +1742,12 @@ private func xpcChatResult(
     extras: chatTraceExtras(for: logContext)
   )
 
-  let backend: SwiftLMBackendProtocol
+  let server: ModelServer
   do {
-    backend = try await state.router.routeAndBegin(prepared.model, requestID: logContext.requestID)
+    server = try await state.router.routeAndBegin(
+      prepared.model,
+      requestID: logContext.requestID
+    )
   } catch let err as ModelRouter.RouteError {
     let statusCode: Int
     let errorType: String
@@ -1654,15 +1759,6 @@ private func xpcChatResult(
       errorType = "capacity_exceeded"
       errorMessage =
         "not enough free memory to load \(prepared.model.displayName) while keeping the reserve"
-      result = backendErrorResult(
-        statusCode: 503,
-        message: errorMessage,
-        type: "capacity_exceeded"
-      )
-    case .noFreePort:
-      statusCode = 503
-      errorType = "capacity_exceeded"
-      errorMessage = "no free port in pool"
       result = backendErrorResult(
         statusCode: 503,
         message: errorMessage,
@@ -1695,15 +1791,6 @@ private func xpcChatResult(
         message: errorMessage,
         type: errorType
       )
-    case .unsupportedEmbeddingBackend:
-      statusCode = 500
-      errorType = "internal_error"
-      errorMessage = "router configuration error"
-      result = backendErrorResult(
-        statusCode: 500,
-        message: errorMessage,
-        type: "internal_error"
-      )
     case .wrongKindForChat:
       statusCode = 400
       errorType = "invalid_request_error"
@@ -1713,7 +1800,7 @@ private func xpcChatResult(
         message: errorMessage,
         type: "invalid_request_error"
       )
-    case .wrongKindForEmbedding, .embeddingSpawnerMissing:
+    case .wrongKindForEmbedding:
       statusCode = 500
       errorType = "internal_error"
       errorMessage = "router configuration error"
@@ -1756,37 +1843,6 @@ private func xpcChatResult(
     return result
   }
 
-  guard let chatBackend = backend as? XPCChatBackend else {
-    await state.router.requestDone(modelID: prepared.model.id, requestID: logContext.requestID)
-    let errorMessage = "router returned non-XPC chat backend"
-    logChatRequestFailed(
-      logContext,
-      upstreamPort: backend.port,
-      upstreamPath: prepared.endpoint.path,
-      statusCode: 500,
-      stage: "route",
-      errorType: "internal_error",
-      errorMessage: errorMessage
-    )
-    BackendTrace.notice(
-      phase: TracePhase.Broker.requestFailed.rawValue,
-      context: receivedContext,
-      snapshot: .current(),
-      extras: chatTraceExtras(
-        for: logContext,
-        additional: [
-          "stage": "route",
-          "status_code": "500",
-          "error_type": "internal_error",
-        ])
-    )
-    return backendErrorResult(
-      statusCode: 500,
-      message: errorMessage,
-      type: "internal_error"
-    )
-  }
-
   let routerInfo = await state.router.chatLoadInfo(modelID: prepared.model.id)
   let routedContext = TraceContext(
     modelID: prepared.model.id,
@@ -1798,7 +1854,7 @@ private func xpcChatResult(
   let requestDoneToken = BackendLifetimeToken {
     await state.router.requestDone(modelID: prepared.model.id, requestID: logContext.requestID)
     logChatRequestDoneAck(
-      logContext, upstreamPort: backend.port, upstreamPath: prepared.endpoint.path)
+      logContext, upstreamPort: nil, upstreamPath: prepared.endpoint.path)
     BackendTrace.notice(
       phase: TracePhase.Broker.requestDoneAck.rawValue,
       context: routedContext,
@@ -1806,7 +1862,7 @@ private func xpcChatResult(
       extras: chatTraceExtras(
         for: logContext,
         additional: [
-          "upstream_port": "\(backend.port)",
+          "upstream_port": "none",
           "upstream_path": prepared.endpoint.path,
         ])
     )
@@ -1823,7 +1879,7 @@ private func xpcChatResult(
     await requestDoneToken.finish()
     logChatRequestFailed(
       logContext,
-      upstreamPort: backend.port,
+      upstreamPort: nil,
       upstreamPath: prepared.endpoint.path,
       statusCode: 413,
       stage: "budget",
@@ -1837,7 +1893,7 @@ private func xpcChatResult(
       extras: chatTraceExtras(
         for: logContext,
         additional: [
-          "upstream_port": "\(backend.port)",
+          "upstream_port": "none",
           "upstream_path": prepared.endpoint.path,
           "stage": "budget",
           "status_code": "413",
@@ -1850,7 +1906,7 @@ private func xpcChatResult(
       type: "context_length_exceeded"
     )
   }
-  logChatRequestRouted(logContext, upstreamPort: backend.port, upstreamPath: prepared.endpoint.path)
+  logChatRequestRouted(logContext, upstreamPort: nil, upstreamPath: prepared.endpoint.path)
   BackendTrace.notice(
     phase: TracePhase.Broker.requestRouted.rawValue,
     context: routedContext,
@@ -1858,14 +1914,15 @@ private func xpcChatResult(
     extras: chatTraceExtras(
       for: logContext,
       additional: [
-        "upstream_port": "\(backend.port)",
+        "upstream_port": "none",
         "upstream_path": prepared.endpoint.path,
       ])
   )
 
   do {
-    let result = try await chatBackend.complete(
-      prepared,
+    let result = try await completeChatWithModelServer(
+      server: server,
+      request: prepared,
       requestID: logContext.requestID,
       headers: chatUpstreamHeaders(for: logContext, wantsStream: prepared.wantsStream)
     )
@@ -1874,7 +1931,7 @@ private func xpcChatResult(
       requestDoneToken: requestDoneToken,
       logContext: logContext,
       routedContext: routedContext,
-      upstreamPort: backend.port,
+      upstreamPort: nil,
       upstreamPath: prepared.endpoint.path
     )
   } catch {
@@ -1882,7 +1939,7 @@ private func xpcChatResult(
     let fields = safeErrorFields(error)
     logChatRequestFailed(
       logContext,
-      upstreamPort: backend.port,
+      upstreamPort: nil,
       upstreamPath: prepared.endpoint.path,
       statusCode: nil,
       stage: "upstream",
@@ -1896,7 +1953,7 @@ private func xpcChatResult(
       extras: chatTraceExtras(
         for: logContext,
         additional: [
-          "upstream_port": "\(backend.port)",
+          "upstream_port": "none",
           "upstream_path": prepared.endpoint.path,
           "stage": "upstream",
           "error_type": fields.type,
@@ -1928,9 +1985,10 @@ private func chatResultWithLifecycle(
   requestDoneToken lifetimeToken: BackendLifetimeToken,
   logContext: ChatProxyLogContext,
   routedContext: TraceContext,
-  upstreamPort: Int,
+  upstreamPort: Int?,
   upstreamPath: String
 ) async -> BackendChatResult {
+  let upstreamPortField = upstreamPort.map(String.init) ?? "none"
   switch result {
   case .buffered(let statusCode, let contentType, let body):
     await lifetimeToken.finish()
@@ -1948,7 +2006,7 @@ private func chatResultWithLifecycle(
       extras: chatTraceExtras(
         for: logContext,
         additional: [
-          "upstream_port": "\(upstreamPort)",
+          "upstream_port": upstreamPortField,
           "upstream_path": upstreamPath,
           "status_code": "\(statusCode)",
           "response_bytes": "\(body.count)",
@@ -1961,7 +2019,7 @@ private func chatResultWithLifecycle(
       extras: chatTraceExtras(
         for: logContext,
         additional: [
-          "upstream_port": "\(upstreamPort)",
+          "upstream_port": upstreamPortField,
           "upstream_path": upstreamPath,
           "status_code": "\(statusCode)",
           "response_bytes": "\(body.count)",
@@ -1977,7 +2035,7 @@ private func chatResultWithLifecycle(
       extras: chatTraceExtras(
         for: logContext,
         additional: [
-          "upstream_port": "\(upstreamPort)",
+          "upstream_port": upstreamPortField,
           "upstream_path": upstreamPath,
           "status_code": "\(statusCode)",
           "content_type": contentType,
@@ -2001,7 +2059,7 @@ private func chatResultWithLifecycle(
           extras: chatTraceExtras(
             for: logContext,
             additional: [
-              "upstream_port": "\(upstreamPort)",
+              "upstream_port": upstreamPortField,
               "upstream_path": upstreamPath,
               "status_code": "\(statusCode)",
             ])
@@ -2025,7 +2083,7 @@ private func chatResultWithLifecycle(
           extras: chatTraceExtras(
             for: logContext,
             additional: [
-              "upstream_port": "\(upstreamPort)",
+              "upstream_port": upstreamPortField,
               "upstream_path": upstreamPath,
               "status_code": "\(statusCode)",
               "stage": "stream",

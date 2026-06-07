@@ -45,74 +45,39 @@ public struct BrokerEvent: Sendable, Hashable, Codable {
 
   public init(routerEvent: RouterLifecycleEvent, ts: Date = Date()) {
     switch routerEvent {
-    case .modelSpawned(let modelID, let port):
+    case .modelSpawned(let modelID, let kind):
       self.init(
         kind: .modelLoaded,
         model: modelID,
-        message: "spawned model=\(modelID) port=\(port)",
+        message: "spawned \(kind.rawValue) model=\(modelID)",
         ts: ts
       )
-    case .modelUnloaded(let modelID, let port):
+    case .modelUnloaded(let modelID, let kind):
       self.init(
         kind: .modelUnloaded,
         model: modelID,
-        message: "unloaded model=\(modelID) port=\(port)",
+        message: "unloaded \(kind.rawValue) model=\(modelID)",
         ts: ts
       )
-    case .modelEvicted(let modelID, let port):
+    case .modelEvicted(let modelID, let kind):
       self.init(
         kind: .modelEvicted,
         model: modelID,
-        message: "evicted model=\(modelID) port=\(port)",
+        message: "evicted \(kind.rawValue) model=\(modelID)",
         ts: ts
       )
-    case .embeddingSpawned(let modelID):
-      self.init(
-        kind: .modelLoaded,
-        model: modelID,
-        message: "spawned embedding model=\(modelID)",
-        ts: ts
-      )
-    case .embeddingUnloaded(let modelID):
-      self.init(
-        kind: .modelUnloaded,
-        model: modelID,
-        message: "unloaded embedding model=\(modelID)",
-        ts: ts
-      )
-    case .embeddingEvicted(let modelID):
-      self.init(
-        kind: .modelEvicted,
-        model: modelID,
-        message: "evicted embedding model=\(modelID)",
-        ts: ts
-      )
-    case .embeddingLoadCancelled(let modelID, let loadID):
+    case .modelLoadCancelled(let modelID, let kind, let loadID):
       self.init(
         kind: .note,
         model: modelID,
-        message: "cancelled embedding load model=\(modelID) load_id=\(loadID)",
+        message: "cancelled \(kind.rawValue) load model=\(modelID) load_id=\(loadID)",
         ts: ts
       )
-    case .backendLaunchFailed(let modelID, let errorDescription):
+    case .backendLaunchFailed(let modelID, let kind, let errorDescription):
       self.init(
         kind: .note,
         model: modelID,
-        message: "backend launch failed model=\(modelID) err=\(errorDescription)",
-        ts: ts
-      )
-    case .embeddingBackendUnsupported(let modelID, let reason):
-      self.init(
-        kind: .note,
-        model: modelID,
-        message: "embedding backend unsupported model=\(modelID) err=\(reason)",
-        ts: ts
-      )
-    case .embeddingLaunchFailed(let modelID, let errorDescription):
-      self.init(
-        kind: .note,
-        model: modelID,
-        message: "embedding launch failed model=\(modelID) err=\(errorDescription)",
+        message: "\(kind.rawValue) backend launch failed model=\(modelID) err=\(errorDescription)",
         ts: ts
       )
     }

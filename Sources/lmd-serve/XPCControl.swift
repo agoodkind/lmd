@@ -20,6 +20,7 @@
 
 import AppLogger
 import Foundation
+import LMDServeSupport
 import SwiftLMBackend
 import SwiftLMControl
 import SwiftLMCore
@@ -231,9 +232,9 @@ private final class SessionHandler: @unchecked Sendable {
       extras: ["transport": "xpc", "input_count": "\(inputs.count)"]
     )
 
-    let backend: EmbeddingBackendProtocol
+    let server: ModelServer
     do {
-      backend = try await state.router.routeEmbeddingAndBegin(descriptor)
+      server = try await state.router.routeEmbeddingAndBegin(descriptor)
     } catch {
       log.error(
         "embedding.request_failed request_id=\(requestIDString, privacy: .public) transport=xpc model=\(descriptor.id, privacy: .public) count=\(inputs.count, privacy: .public) stage=route err=\(String(describing: error), privacy: .public)"
@@ -270,7 +271,7 @@ private final class SessionHandler: @unchecked Sendable {
       let vectors = try await TraceTaskLocal.$requestID.withValue(requestID) {
         try await TraceTaskLocal.$loadID.withValue(routerInfo?.loadID) {
           try await TraceTaskLocal.$backendObjectID.withValue(routerInfo?.backendObjectID) {
-            try await backend.embed(inputs: inputs)
+            try await embedWithModelServer(server: server, inputs: inputs, requestID: requestID)
           }
         }
       }
