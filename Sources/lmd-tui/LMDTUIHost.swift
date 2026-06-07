@@ -95,12 +95,26 @@ func latestLibraryEntries() -> [LibraryEntry] {
 
 // MARK: - Boot
 
+/// Fetch the merged broker metrics snapshot over XPC (no HTTP port). Returns the
+/// raw JSON the `perf` tab decodes, or nil when the broker is unreachable.
+func latestMetricsData() -> Data? {
+  let result = runBlocking { try await broker.metrics() }
+  switch result {
+  case .success(let data):
+    return data
+  case .failure(let err):
+    log.error("tui.metrics_failed err=\(String(describing: err), privacy: .public)")
+    return nil
+  }
+}
+
 // Use explicit KeyParser + MouseParser inputs; tests never see raw stdin.
 let monitor = MonitorTab()
 let library = LibraryTab()
 let bench = BenchTab()
 let events = EventsTab()
-let router = TabRouter(tabs: [monitor, library, bench, events])
+let perf = MetricsTab()
+let router = TabRouter(tabs: [monitor, library, bench, events, perf])
 
 let sigInt = DispatchSource.makeSignalSource(signal: SIGINT)
 let sigTerm = DispatchSource.makeSignalSource(signal: SIGTERM)
@@ -274,6 +288,11 @@ public enum LMDTUIHost {
 
     monitor.snapshot = latestMonitorSnapshot()
     library.entries = latestLibraryEntries()
+    if let metricsData = latestMetricsData() {
+      perf.update(from: metricsData)
+    } else {
+      perf.markUnavailable()
+    }
     Screen.clearViewport()
     renderFrame()
 
@@ -293,9 +312,15 @@ public enum LMDTUIHost {
         Thread.sleep(forTimeInterval: 2.0)
         let snap = latestMonitorSnapshot()
         let entries = latestLibraryEntries()
+        let metricsData = latestMetricsData()
         stateLock.lock()
         monitor.snapshot = snap
         library.entries = entries
+        if let metricsData {
+          perf.update(from: metricsData)
+        } else {
+          perf.markUnavailable()
+        }
         stateLock.unlock()
         renderFrame()
       }
