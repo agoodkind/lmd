@@ -9,7 +9,14 @@ final class FramesTests: XCTestCase {
 
   func testBackendRequestRoundTrips() throws {
     let id = UUID()
-    let req = BackendRequest(requestID: id, kind: .embedding, openAIBody: Data([1, 2, 3]), stream: false)
+    let req = BackendRequest(
+      requestID: id,
+      kind: .chat,
+      openAIBody: Data([1, 2, 3]),
+      stream: true,
+      endpointPath: "/v1/chat/completions",
+      headers: ["X-LMD-Request-ID": id.uuidString]
+    )
     XCTAssertEqual(try roundTrip(req), req)
   }
 
@@ -18,6 +25,7 @@ final class FramesTests: XCTestCase {
     let frames: [BackendFrame] = [
       .hello(spawnToken: "tok-123"),
       .ready,
+      .responseStarted(requestID: id, statusCode: 200, contentType: "text/event-stream"),
       .chunk(requestID: id, data: Data("data: {}\n\n".utf8)),
       .vectors(requestID: id, dims: 2, payload: Data([0, 0, 0, 0, 0, 0, 128, 63])),
       .usage(requestID: id, promptTokens: 9, completionTokens: 2),

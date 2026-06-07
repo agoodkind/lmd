@@ -13,6 +13,9 @@ final class HostArgumentsTests: XCTestCase {
     XCTAssertEqual(args?.modelPath, "/models/arctic")
     XCTAssertEqual(args?.kind, .embedding)
     XCTAssertEqual(args?.hostService, "io.goodkind.lmd.host")
+    XCTAssertNil(args?.swiftLMBinaryPath)
+    XCTAssertNil(args?.swiftLMLogPath)
+    XCTAssertNil(args?.contextLength)
     XCTAssertNil(args?.videoSamplingFPS)
   }
 
@@ -26,6 +29,22 @@ final class HostArgumentsTests: XCTestCase {
     XCTAssertEqual(args?.modelPath, "/models/qwen-vl")
     XCTAssertEqual(args?.kind, .video)
     XCTAssertEqual(args?.videoSamplingFPS, 2.0)
+  }
+
+  func testParsesChatSwiftLMFields() throws {
+    let args = HostArguments.parse([
+      "--model", "/models/qwen",
+      "--kind", "chat",
+      "--host-service", "io.goodkind.lmd.host",
+      "--swiftlm-binary", "/usr/local/bin/SwiftLM",
+      "--swiftlm-log-path", "/tmp/swiftlm.log",
+      "--context-length", "8192",
+    ])
+    XCTAssertEqual(args?.modelPath, "/models/qwen")
+    XCTAssertEqual(args?.kind, .chat)
+    XCTAssertEqual(args?.swiftLMBinaryPath, "/usr/local/bin/SwiftLM")
+    XCTAssertEqual(args?.swiftLMLogPath, "/tmp/swiftlm.log")
+    XCTAssertEqual(args?.contextLength, 8192)
   }
 
   func testRejectsUnknownKind() {
