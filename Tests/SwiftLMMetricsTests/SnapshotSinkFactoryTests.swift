@@ -38,7 +38,8 @@ final class SnapshotSinkFactoryTests: XCTestCase {
 
   func testCounterFactoryAccumulates() {
     let sink = configuredSink()
-    let handler = sink.makeCounter(label: "lmd_requests_total", dimensions: [("model_kind", "chat")])
+    let handler = sink.makeCounter(
+      label: "lmd_requests_total", dimensions: [("model_kind", "chat")])
     handler.increment(by: 3)
     handler.increment(by: 4)
 
@@ -122,7 +123,8 @@ final class SnapshotSinkFactoryTests: XCTestCase {
   func testMergeRoundTripsThroughPrometheus() {
     let sink = configuredSink(sourceID: "broker")
     sink.makeMeter(label: "lmd_broker_loaded_models", dimensions: []).set(2.0)
-    sink.makeCounter(label: "lmd_tokens_total", dimensions: [("model_kind", "chat")]).increment(by: 5)
+    sink.makeCounter(label: "lmd_tokens_total", dimensions: [("model_kind", "chat")])
+      .increment(by: 5)
 
     let merged = MetricsJSON.merge([sink.snapshot()])
     XCTAssertEqual(merged.sources.count, 1)
