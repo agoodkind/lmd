@@ -616,24 +616,64 @@ final class DevTool {
   }
 
   private func test() throws {
-    try tuistInstallAndGenerate()
+    // Run the suite via SwiftPM instead of `tuist test`. Tuist's static-framework
+    // SPM integration fails to propagate internal C-target module maps (EventSource
+    // -> async-http-client / swift-nio / _NumericsShims) on Xcode 26, which breaks
+    // only the static-framework test build; the SwiftPM executable build is fine,
+    // so `swift test` sidesteps it. The static base is required by the Swift Macro
+    // targets, so it cannot be flipped. swift-mk's SWIFT_TEST_MODE=spm is the
+    // framework-owned form of this once LMD routes through swift-mk.
+    //
+    // SwiftPM cannot compile the Metal shaders, so it never produces mlx-swift's
+    // metallib and an MLX test crashes with "Failed to load the default metallib".
+    // The metallib is built by xcodebuild (the same step the product build uses),
+    // then colocated next to the test runner where mlx's loader looks first, and the
+    // tests run with --skip-build so that staging is not wiped by a rebuild.
+    let configuration = "Debug"
+    try buildMetallib(configuration: configuration)
     var env = ProcessInfo.processInfo.environment
     env["LMD_BINARY_DIR"] = releaseBuildDirectory().path
     try runPassthrough(
-      tuistExecutable(),
-      [
-        "test",
-        "LMDTests",
-        "--configuration",
-        "Debug",
-        "--platform",
-        "macos",
-        "--no-selective-testing",
-        "--inspect-mode",
-        "off",
-      ],
+      "swift",
+      ["build", "--build-tests", "-c", swiftPackageConfiguration(configuration)],
       environment: env
     )
+    try stageMetallibForSwiftTest(configuration: configuration)
+    try runPassthrough(
+      "swift",
+      ["test", "--skip-build", "-c", swiftPackageConfiguration(configuration)],
+      environment: env
+    )
+  }
+
+  /// Colocate mlx-swift's metallib next to the SwiftPM test runner so MLX tests
+  /// find it at runtime. mlx's loader (Cmlx device.cpp) tries `<binary_dir>/mlx.metallib`
+  /// first, so the xcodebuild-produced `default.metallib` is copied there under each
+  /// built `.xctest` bundle. SwiftPM never builds the metallib itself, so without this
+  /// every MLX test aborts with "Failed to load the default metallib".
+  private func stageMetallibForSwiftTest(configuration: String) throws {
+    let metallib =
+      derivedProductsDirectory(configuration: configuration)
+      .appendingPathComponent("mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib")
+    guard fileManager.fileExists(atPath: metallib.path) else {
+      throw ToolError.failure(
+        "metallib not found at \(metallib.path); the xcodebuild metallib step must run first")
+    }
+    // .build/debug is a symlink to .build/<triple>/debug; resolve it so the
+    // directory listing does not fail with "Not a directory".
+    let binDirectory =
+      swiftPackageBuildDirectory(configuration: configuration).resolvingSymlinksInPath()
+    let entries = try fileManager.contentsOfDirectory(
+      at: binDirectory, includingPropertiesForKeys: nil)
+    var staged = 0
+    for entry in entries where entry.pathExtension == "xctest" {
+      let runnerDirectory = entry.appendingPathComponent("Contents/MacOS")
+      try fileManager.createDirectory(at: runnerDirectory, withIntermediateDirectories: true)
+      try copyReplacingItem(
+        at: metallib, to: runnerDirectory.appendingPathComponent("mlx.metallib"))
+      staged += 1
+    }
+    try writeLine("  staged mlx.metallib next to \(staged) test runner(s)")
   }
 
   private func snapshotUpdate() throws {
