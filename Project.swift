@@ -128,6 +128,10 @@ let project = Project(
       dependencies: []
     ),
     frameworkTarget(
+      "SwiftLMHostProtocol",
+      dependencies: []
+    ),
+    frameworkTarget(
       "SwiftLMTrace",
       dependencies: [
         .target(name: "AppLogger"),
@@ -163,8 +167,8 @@ let project = Project(
       dependencies: [
         .target(name: "AppLogger"),
         .target(name: "SwiftLMCore"),
-        .target(name: "SwiftLMBackend"),
         .target(name: "SwiftLMTrace"),
+        .target(name: "SwiftLMHostProtocol"),
         .external(name: "SMCFanXPCClient"),
       ]
     ),
@@ -237,6 +241,8 @@ let project = Project(
         .target(name: "AppLogger"),
         .target(name: "SwiftLMCore"),
         .target(name: "SwiftLMBackend"),
+        .target(name: "SwiftLMRuntime"),
+        .target(name: "SwiftLMHostProtocol"),
         .external(name: "Hummingbird"),
         .external(name: "MLXLMCommon"),
       ]
@@ -262,12 +268,12 @@ let project = Project(
       dependencies: [
         .target(name: "AppLogger"),
         .target(name: "SwiftLMCore"),
-        .target(name: "SwiftLMBackend"),
         .target(name: "SwiftLMEmbed"),
         .target(name: "SwiftLMRuntime"),
         .target(name: "SwiftLMMonitor"),
         .target(name: "SwiftLMControl"),
         .target(name: "SwiftLMTrace"),
+        .target(name: "SwiftLMHostProtocol"),
         .target(name: "LMDServeSupport"),
         .external(name: "Hummingbird"),
         .external(name: "NIOTransportServices"),
@@ -308,7 +314,8 @@ let project = Project(
       dependencies: [
         .target(name: "SwiftLMRuntime"),
         .target(name: "SwiftLMCore"),
-        .target(name: "SwiftLMBackend"),
+        .target(name: "SwiftLMHostProtocol"),
+        .target(name: "SwiftLMTrace"),
       ]
     ),
     testTarget(

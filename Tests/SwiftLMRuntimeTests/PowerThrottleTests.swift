@@ -6,22 +6,22 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import SwiftLMHostProtocol
 import XCTest
 
-@testable import SwiftLMBackend
 @testable import SwiftLMCore
 @testable import SwiftLMRuntime
 
-private final class RecordingEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sendable {
+private final class RecordingModelServer: ModelServer, @unchecked Sendable {
   let modelID: String
   let sizeBytes: Int64
   private let lock = NSLock()
-  private var lastLevel: PowerThrottleLevel = .none
+  private var levels: [ThrottleLevel] = []
 
-  var appliedLevel: PowerThrottleLevel {
+  var appliedLevels: [ThrottleLevel] {
     lock.lock()
     defer { lock.unlock() }
-    return lastLevel
+    return levels
   }
 
   init(modelID: String, sizeBytes: Int64) {
@@ -29,14 +29,27 @@ private final class RecordingEmbeddingBackend: EmbeddingBackendProtocol, @unchec
     self.sizeBytes = sizeBytes
   }
 
-  func launch() async throws {}
-  func shutdown() {}
-  func embed(inputs: [String]) async throws -> [[Float]] { inputs.map { _ in [Float(0)] } }
-  func applyPowerThrottle(_ level: PowerThrottleLevel) {
+  func spawn() async throws {}
+  func waitReady() async throws {}
+
+  func send(_ request: BackendRequest) -> AsyncThrowingStream<BackendFrame, Error> {
+    AsyncThrowingStream { continuation in
+      continuation.yield(.done(requestID: request.requestID))
+      continuation.finish()
+    }
+  }
+
+  func stats() async -> BackendStats {
+    BackendStats(rssBytes: 0, gpuActiveBytes: 0, gpuCacheBytes: 0)
+  }
+
+  func applyPowerThrottle(_ level: ThrottleLevel) {
     lock.lock()
-    lastLevel = level
+    levels.append(level)
     lock.unlock()
   }
+
+  func shutdown() {}
 }
 
 final class RouterPowerThrottleTests: XCTestCase {
@@ -94,21 +107,20 @@ final class RouterPowerThrottleTests: XCTestCase {
     XCTAssertNil(restored)
   }
 
-  func testBackendSpawnedWhileThrottledInheritsLevel() async throws {
-    // Use mild: it forwards the level to a spawned backend without halting
+  func testServerSpawnedWhileThrottledInheritsLevel() async throws {
+    // Use mild: it forwards the level to a spawned server without halting
     // admission. (hard halts, so a model cannot be routed while it is active.)
-    let backend = RecordingEmbeddingBackend(modelID: "/tmp/embed", sizeBytes: 0)
+    let server = RecordingModelServer(modelID: "/tmp/embed", sizeBytes: 0)
     let router = ModelRouter(
       reserveBytes: 0,
       memoryProbe: { MemoryReading(availableBytes: .max, underPressure: false) },
-      spawner: { _, _, _ in fatalError("spawner unused in throttle tests") },
-      embeddingSpawner: { _, _ in backend }
+      spawner: { _, _, _ in server }
     )
     await router.applyPowerThrottle(.mild)
     let model = ModelDescriptor(
       id: "/tmp/embed", displayName: "embed", path: "/tmp/embed", sizeBytes: 0, kind: .embedding)
     _ = try await router.routeEmbeddingAndBegin(model)
-    XCTAssertEqual(backend.appliedLevel, .mild)
+    XCTAssertEqual(server.appliedLevels, [.mild])
   }
 
   // MARK: - Halt (refuse new, drain in-flight)
@@ -150,8 +162,7 @@ final class RouterPowerThrottleTests: XCTestCase {
     let router = ModelRouter(
       reserveBytes: 0,
       memoryProbe: { MemoryReading(availableBytes: .max, underPressure: false) },
-      spawner: { _, _, _ in fatalError("spawner unused in throttle tests") },
-      embeddingSpawner: { _, _ in fatalError("embeddingSpawner must not run while halted") }
+      spawner: { _, _, _ in fatalError("spawner must not run while halted") }
     )
     await router.applyPowerThrottle(.hard)
     let model = ModelDescriptor(

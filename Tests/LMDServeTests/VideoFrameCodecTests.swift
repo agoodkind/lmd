@@ -120,8 +120,8 @@ final class VideoFrameCodecTests: XCTestCase {
     let frame = VideoFrameCodec.encodeFailure(Boom(), requestID: requestID)
     await assertDecodeThrows(frame) { error in
       guard
-        case XPCVideoChatBackendError.hostFailed(let message)? = error
-          as? XPCVideoChatBackendError
+        case ModelServerVideoChatError.hostFailed(let message)? = error
+          as? ModelServerVideoChatError
       else {
         return XCTFail("expected hostFailed, got \(error)")
       }

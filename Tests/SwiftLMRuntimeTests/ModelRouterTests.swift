@@ -6,74 +6,113 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import SwiftLMHostProtocol
+import SwiftLMTrace
 import XCTest
 
-@testable import SwiftLMBackend
 @testable import SwiftLMCore
 @testable import SwiftLMRuntime
 
-/// Minimal fake backend that records lifecycle calls without spawning a process.
-private final class FakeBackend: SwiftLMBackendProtocol, @unchecked Sendable {
+/// Minimal fake server that records lifecycle calls without spawning a process.
+private final class FakeModelServer: ModelServer, @unchecked Sendable {
   let modelID: String
-  let port: Int
   let sizeBytes: Int64
-  var launched = false
-  var stopped = false
-  var running = false
-  var isRunning: Bool { running && !stopped }
+  let kind: SwiftLMTrace.BackendKind
 
-  init(modelID: String, port: Int, sizeBytes: Int64) {
+  private let lock = NSLock()
+  private var stopped = false
+  private var running = false
+  private var spawned = false
+  private var throttleLevels: [ThrottleLevel] = []
+
+  var didSpawn: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return spawned
+  }
+
+  var didStop: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return stopped
+  }
+
+  var isRunning: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return running && !stopped
+  }
+
+  var appliedThrottleLevels: [ThrottleLevel] {
+    lock.lock()
+    defer { lock.unlock() }
+    return throttleLevels
+  }
+
+  init(modelID: String, kind: SwiftLMTrace.BackendKind, sizeBytes: Int64) {
     self.modelID = modelID
-    self.port = port
+    self.kind = kind
     self.sizeBytes = sizeBytes
   }
 
-  func launch() throws {
-    launched = true
+  func spawn() async throws {
+    lock.lock()
+    spawned = true
     running = true
+    lock.unlock()
   }
+
+  func waitReady() async throws {}
+
+  func send(_ request: BackendRequest) -> AsyncThrowingStream<BackendFrame, Error> {
+    AsyncThrowingStream { continuation in
+      continuation.yield(.done(requestID: request.requestID))
+      continuation.finish()
+    }
+  }
+
+  func stats() async -> BackendStats {
+    BackendStats(rssBytes: 0, gpuActiveBytes: 0, gpuCacheBytes: 0)
+  }
+
+  func applyPowerThrottle(_ level: ThrottleLevel) {
+    lock.lock()
+    throttleLevels.append(level)
+    lock.unlock()
+  }
+
   func shutdown() {
+    lock.lock()
     stopped = true
     running = false
+    lock.unlock()
+  }
+
+  func markStoppedExternally() {
+    lock.lock()
+    running = false
+    lock.unlock()
   }
 }
 
-private final class FakeEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sendable {
-  let modelID: String
-  let sizeBytes: Int64
-  var stopped = false
-
-  init(modelID: String, sizeBytes: Int64) {
-    self.modelID = modelID
-    self.sizeBytes = sizeBytes
-  }
-
-  func launch() async throws {}
-  func shutdown() { stopped = true }
-  func embed(inputs: [String]) async throws -> [[Float]] {
-    inputs.map { _ in [0.0] }
-  }
-}
-
-enum TestEmbeddingError: Error {
+enum TestModelServerError: Error {
   case failed
 }
 
 /// A probe that always reports abundant memory and no pressure. Used by tests
-/// that exercise routing and ports rather than the headroom guard.
+/// that exercise routing behavior rather than the headroom guard.
 private let abundantMemoryProbe: MemoryProbe = {
   MemoryReading(availableBytes: 1 << 50, underPressure: false)
 }
 
-/// Models system memory as a function of the fake backends still running, plus
+/// Models system memory as a function of the fake servers still running, plus
 /// an adjustable external-consumption knob and a pressure flag. Unloading a fake
-/// (which sets it stopped) frees its bytes, so the router's re-measure after
-/// eviction sees memory recover, exactly as it would against the real system.
+/// frees its bytes, so the router's re-measure after eviction sees memory
+/// recover, exactly as it would against the real system.
 private final class MemoryModel: @unchecked Sendable {
   let totalBytes: Int64
   private let lock = NSLock()
-  private var chat: [FakeBackend] = []
-  private var embed: [FakeEmbeddingBackend] = []
+  private var servers: [FakeModelServer] = []
   private var externalUsedBytes: Int64 = 0
   private var pressure = false
 
@@ -81,15 +120,9 @@ private final class MemoryModel: @unchecked Sendable {
     self.totalBytes = totalGB * 1_073_741_824
   }
 
-  func registerChat(_ backend: FakeBackend) {
+  func register(_ server: FakeModelServer) {
     lock.lock()
-    chat.append(backend)
-    lock.unlock()
-  }
-
-  func registerEmbed(_ backend: FakeEmbeddingBackend) {
-    lock.lock()
-    embed.append(backend)
+    servers.append(server)
     lock.unlock()
   }
 
@@ -110,11 +143,8 @@ private final class MemoryModel: @unchecked Sendable {
       lock.lock()
       defer { lock.unlock() }
       var used = externalUsedBytes
-      for backend in chat where backend.isRunning {
-        used += backend.sizeBytes
-      }
-      for backend in embed where !backend.stopped {
-        used += backend.sizeBytes
+      for server in servers where server.isRunning {
+        used += server.sizeBytes
       }
       return MemoryReading(availableBytes: max(0, totalBytes - used), underPressure: pressure)
     }
@@ -128,19 +158,13 @@ final class ModelRouterTests: XCTestCase {
     reserveGB: Int64 = 0,
     model: MemoryModel? = nil,
     eventSink: @escaping @Sendable (RouterLifecycleEvent) -> Void = { _ in }
-  ) -> (ModelRouter, () -> [FakeBackend]) {
+  ) -> (ModelRouter, () -> [FakeModelServer]) {
     let created = FakesBox()
-    let spawner: BackendSpawner = { model2, port, _ in
-      let fake = FakeBackend(modelID: model2.id, port: port, sizeBytes: model2.sizeBytes)
-      created.append(fake)
-      model?.registerChat(fake)
-      return fake
-    }
+    let spawner = makeRecordingSpawner(created: created, memory: model)
     let probe: MemoryProbe = model?.probe() ?? abundantMemoryProbe
     let router = ModelRouter(
       reserveBytes: reserveGB * gb,
       memoryProbe: probe,
-      portRange: 5500...5502,
       spawner: spawner,
       settleAttempts: 3,
       settleIntervalMillis: 1,
@@ -164,16 +188,15 @@ final class ModelRouterTests: XCTestCase {
     )
   }
 
-  func testFirstRouteSpawnsBackend() async throws {
+  func testFirstRouteSpawnsServer() async throws {
     let (router, created) = makeRouter()
-    let backend = try await router.routeAndBegin(desc("A", 20))
-    XCTAssertEqual(backend.modelID, "A")
-    XCTAssertEqual(backend.port, 5500)
+    let server = try await router.routeAndBegin(desc("A", 20))
+    XCTAssertEqual(server.modelID, "A")
     XCTAssertEqual(created().count, 1)
-    XCTAssertTrue(created().first?.launched ?? false)
+    XCTAssertTrue(created().first?.didSpawn ?? false)
   }
 
-  func testRepeatedRouteReusesBackend() async throws {
+  func testRepeatedRouteReusesServer() async throws {
     let (router, created) = makeRouter()
     _ = try await router.routeAndBegin(desc("A", 20))
     _ = try await router.routeAndBegin(desc("A", 20))
@@ -181,25 +204,23 @@ final class ModelRouterTests: XCTestCase {
     XCTAssertEqual(created().count, 1, "should only spawn once for the same model id")
   }
 
-  func testRepeatedRoutePrunesStoppedBackend() async throws {
+  func testRepeatedRoutePrunesStoppedServer() async throws {
     let (router, created) = makeRouter()
     let first = try await router.routeAndBegin(desc("A", 20))
     await router.requestDone(modelID: "A")
-    created()[0].running = false
+    created()[0].markStoppedExternally()
 
     let second = try await router.routeAndBegin(desc("A", 20))
 
-    XCTAssertEqual(first.port, 5500)
-    XCTAssertEqual(second.port, 5500)
-    XCTAssertEqual(created().count, 2, "stopped backend should be replaced")
+    XCTAssertTrue(first !== second)
+    XCTAssertEqual(created().count, 2, "stopped server should be replaced")
   }
 
-  func testSecondModelAllocatesSecondPort() async throws {
+  func testSecondModelSpawnsSecondServer() async throws {
     let (router, created) = makeRouter()
     let a = try await router.routeAndBegin(desc("A", 20))
     let b = try await router.routeAndBegin(desc("B", 20))
-    XCTAssertEqual(a.port, 5500)
-    XCTAssertEqual(b.port, 5501)
+    XCTAssertFalse(a === b)
     XCTAssertEqual(created().count, 2)
   }
 
@@ -208,7 +229,7 @@ final class ModelRouterTests: XCTestCase {
     let (router, created) = makeRouter(reserveGB: 20, model: memory)
     _ = try await router.routeAndBegin(desc("A", 40))
     XCTAssertEqual(created().count, 1)
-    XCTAssertFalse(created()[0].stopped, "no eviction when memory is already safe")
+    XCTAssertFalse(created()[0].didStop, "no eviction when memory is already safe")
   }
 
   func testEvictsOldestIdleWhenHeadroomExceeded() async throws {
@@ -221,9 +242,9 @@ final class ModelRouterTests: XCTestCase {
     let c = try await router.routeAndBegin(desc("C", 40))
     await router.requestDone(modelID: "C")
     XCTAssertEqual(created().count, 3)
-    XCTAssertTrue(created()[0].stopped, "A should be evicted")
-    XCTAssertFalse(created()[1].stopped, "B should still be alive")
-    XCTAssertFalse(created()[2].stopped, "C should still be alive")
+    XCTAssertTrue(created()[0].didStop, "A should be evicted")
+    XCTAssertFalse(created()[1].didStop, "B should still be alive")
+    XCTAssertFalse(created()[2].didStop, "C should still be alive")
     _ = a
     _ = b
     _ = c
@@ -236,14 +257,15 @@ final class ModelRouterTests: XCTestCase {
     await router.requestDone(modelID: "A")
     _ = try await router.routeAndBegin(desc("B", 30))
     XCTAssertEqual(created().count, 2)
-    XCTAssertTrue(created()[0].stopped, "idle A is unloaded to make room")
-    XCTAssertFalse(created()[1].stopped, "B loads once memory recovers")
+    XCTAssertTrue(created()[0].didStop, "idle A is unloaded to make room")
+    XCTAssertFalse(created()[1].didStop, "B loads once memory recovers")
   }
 
   func testRefusesWhenEvictingAllIdleStillInsufficient() async throws {
     let memory = MemoryModel(totalGB: 60)
     let (router, created) = makeRouter(reserveGB: 20, model: memory)
-    // A stays busy (no requestDone), so it can never be evicted.
+    // A stays busy because no requestDone call releases it, so it can never be
+    // evicted.
     _ = try await router.routeAndBegin(desc("A", 40))
     do {
       _ = try await router.routeAndBegin(desc("B", 30))
@@ -254,7 +276,7 @@ final class ModelRouterTests: XCTestCase {
         return
       }
     }
-    XCTAssertFalse(created()[0].stopped, "busy model is never evicted")
+    XCTAssertFalse(created()[0].didStop, "busy model is never evicted")
   }
 
   func testPressureForcesEvictionEvenWhenBytesFine() async throws {
@@ -265,8 +287,8 @@ final class ModelRouterTests: XCTestCase {
     // Byte count alone leaves plenty of room, but the system reports pressure.
     memory.setUnderPressure(true)
     _ = try await router.routeAndBegin(desc("B", 10))
-    XCTAssertTrue(created()[0].stopped, "pressure forces the idle model to unload")
-    XCTAssertFalse(created()[1].stopped, "B still loads after relief")
+    XCTAssertTrue(created()[0].didStop, "pressure forces the idle model to unload")
+    XCTAssertFalse(created()[1].didStop, "B still loads after relief")
   }
 
   func testEnforceHeadroomFreesIdleUnderExternalPressure() async throws {
@@ -278,7 +300,7 @@ final class ModelRouterTests: XCTestCase {
     // memory below the reserve with no load event to trigger the check.
     memory.setExternalUsed(gb: 70)
     await router.enforceHeadroom()
-    XCTAssertTrue(created()[0].stopped, "idle A is unloaded to restore the reserve")
+    XCTAssertTrue(created()[0].didStop, "idle A is unloaded to restore the reserve")
   }
 
   func testThrowsWhenCannotFit() async throws {
@@ -295,23 +317,25 @@ final class ModelRouterTests: XCTestCase {
     }
   }
 
-  func testShutdownAllStopsEveryBackend() async throws {
+  func testShutdownAllStopsEveryServer() async throws {
     let (router, created) = makeRouter()
     _ = try await router.routeAndBegin(desc("A", 10))
     _ = try await router.routeAndBegin(desc("B", 10))
     await router.requestDone(modelID: "A")
     await router.requestDone(modelID: "B")
     await router.shutdownAll()
-    XCTAssertTrue(created().allSatisfy { $0.stopped })
+    XCTAssertTrue(created().allSatisfy(\.didStop))
   }
 
-  func testUnloadsFreePorts() async throws {
-    let (router, _) = makeRouter()
+  func testUnloadAllowsNextServerToLoad() async throws {
+    let (router, created) = makeRouter()
     _ = try await router.routeAndBegin(desc("A", 10))
     await router.requestDone(modelID: "A")
     await router.unload(modelID: "A")
-    let next = try await router.routeAndBegin(desc("B", 10))
-    XCTAssertEqual(next.port, 5500)
+    _ = try await router.routeAndBegin(desc("B", 10))
+    XCTAssertEqual(created().count, 2)
+    XCTAssertTrue(created()[0].didStop)
+    XCTAssertFalse(created()[1].didStop)
   }
 
   func testRouterPublishesTypedLifecycleEvents() async throws {
@@ -327,8 +351,8 @@ final class ModelRouterTests: XCTestCase {
     XCTAssertEqual(
       events.getAll(),
       [
-        .modelSpawned(modelID: "A", port: 5500),
-        .modelUnloaded(modelID: "A", port: 5500),
+        .modelSpawned(modelID: "A", kind: .chat),
+        .modelUnloaded(modelID: "A", kind: .chat),
       ]
     )
   }
@@ -348,14 +372,14 @@ final class ModelRouterTests: XCTestCase {
     await router.requestDone(modelID: "B")
     _ = try await router.routeAndBegin(desc("C", 40))
 
-    XCTAssertTrue(created()[0].stopped)
+    XCTAssertTrue(created()[0].didStop)
     XCTAssertEqual(
       events.getAll(),
       [
-        .modelSpawned(modelID: "A", port: 5500),
-        .modelSpawned(modelID: "B", port: 5501),
-        .modelEvicted(modelID: "A", port: 5500),
-        .modelSpawned(modelID: "C", port: 5500),
+        .modelSpawned(modelID: "A", kind: .chat),
+        .modelSpawned(modelID: "B", kind: .chat),
+        .modelEvicted(modelID: "A", kind: .chat),
+        .modelSpawned(modelID: "C", kind: .chat),
       ]
     )
   }
@@ -364,21 +388,11 @@ final class ModelRouterTests: XCTestCase {
     let events = RouterEventsBox()
     let memory = MemoryModel(totalGB: 80)
     let embeddingModel = embeddingDesc("embed", 40)
-    let embeddingBackend = FakeEmbeddingBackend(
-      modelID: embeddingModel.id,
-      sizeBytes: embeddingModel.sizeBytes
-    )
+    let spawner = makeRecordingSpawner(memory: memory)
     let router = ModelRouter(
       reserveBytes: 0,
       memoryProbe: memory.probe(),
-      portRange: 5500...5502,
-      spawner: { model, port, _ in
-        FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
-      },
-      embeddingSpawner: { _, _ in
-        memory.registerEmbed(embeddingBackend)
-        return embeddingBackend
-      },
+      spawner: spawner,
       settleAttempts: 3,
       settleIntervalMillis: 1,
       eventSink: { event in
@@ -390,24 +404,26 @@ final class ModelRouterTests: XCTestCase {
     await router.embeddingRequestDone(modelID: embeddingModel.id)
     _ = try await router.routeAndBegin(desc("chat", 50))
 
-    XCTAssertTrue(embeddingBackend.stopped)
+    let snapshot = await router.snapshot()
+    XCTAssertEqual(snapshot.loaded.map(\.modelID), ["chat"])
     XCTAssertEqual(
       events.getAll(),
       [
-        .embeddingSpawned(modelID: "embed"),
-        .embeddingEvicted(modelID: "embed"),
-        .modelSpawned(modelID: "chat", port: 5500),
+        .modelSpawned(modelID: "embed", kind: .embedding),
+        .modelEvicted(modelID: "embed", kind: .embedding),
+        .modelSpawned(modelID: "chat", kind: .chat),
       ]
     )
   }
 
   func testBrokerEventMapsRouterEvictionsToModelEvictedKind() {
-    let modelEvent = BrokerEvent(routerEvent: .modelEvicted(modelID: "A", port: 5500))
+    let modelEvent = BrokerEvent(routerEvent: .modelEvicted(modelID: "A", kind: .chat))
     XCTAssertEqual(modelEvent.kind, .modelEvicted)
     XCTAssertEqual(modelEvent.model, "A")
-    XCTAssertEqual(modelEvent.message, "evicted model=A port=5500")
+    XCTAssertEqual(modelEvent.message, "evicted chat model=A")
 
-    let embeddingEvent = BrokerEvent(routerEvent: .embeddingEvicted(modelID: "embed"))
+    let embeddingEvent = BrokerEvent(
+      routerEvent: .modelEvicted(modelID: "embed", kind: .embedding))
     XCTAssertEqual(embeddingEvent.kind, .modelEvicted)
     XCTAssertEqual(embeddingEvent.model, "embed")
     XCTAssertEqual(embeddingEvent.message, "evicted embedding model=embed")
@@ -415,25 +431,23 @@ final class ModelRouterTests: XCTestCase {
 
   func testConcurrentEmbeddingRoutesShareLoadingTask() async throws {
     let model = embeddingDesc("embed", 10)
-    let embeddingBackend = FakeEmbeddingBackend(modelID: model.id, sizeBytes: model.sizeBytes)
-    let delayedSpawner = DelayedEmbeddingSpawner(backend: embeddingBackend)
+    let embeddingServer = FakeModelServer(
+      modelID: model.id, kind: .embedding, sizeBytes: model.sizeBytes)
+    let delayedSpawner = DelayedModelServerSpawner(server: embeddingServer)
     let router = ModelRouter(
       reserveBytes: 0,
       memoryProbe: abundantMemoryProbe,
-      spawner: { model, port, _ in
-        FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
-      },
-      embeddingSpawner: delayedSpawner.makeSpawner()
+      spawner: delayedSpawner.makeSpawner()
     )
 
-    async let firstBackend = router.routeEmbeddingAndBegin(model)
+    async let firstServer = router.routeEmbeddingAndBegin(model)
     await delayedSpawner.waitUntilStarted()
-    async let secondBackend = router.routeEmbeddingAndBegin(model)
+    async let secondServer = router.routeEmbeddingAndBegin(model)
     await Task.yield()
     await delayedSpawner.release()
 
-    let routedBackends = try await [firstBackend, secondBackend]
-    XCTAssertTrue(routedBackends[0] === routedBackends[1])
+    let routedServers = try await [firstServer, secondServer]
+    XCTAssertTrue(routedServers[0] === routedServers[1])
     let delayedSpawnCount = await delayedSpawner.spawnCount()
     XCTAssertEqual(delayedSpawnCount, 1)
 
@@ -444,15 +458,13 @@ final class ModelRouterTests: XCTestCase {
 
   func testEmbeddingLoadFailureClearsLoadingStateForRetry() async throws {
     let model = embeddingDesc("embed", 10)
-    let embeddingBackend = FakeEmbeddingBackend(modelID: model.id, sizeBytes: model.sizeBytes)
-    let retrySpawner = RetryEmbeddingSpawner(backend: embeddingBackend)
+    let embeddingServer = FakeModelServer(
+      modelID: model.id, kind: .embedding, sizeBytes: model.sizeBytes)
+    let retrySpawner = RetryModelServerSpawner(server: embeddingServer)
     let router = ModelRouter(
       reserveBytes: 0,
       memoryProbe: abundantMemoryProbe,
-      spawner: { model, port, _ in
-        FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
-      },
-      embeddingSpawner: retrySpawner.makeSpawner()
+      spawner: retrySpawner.makeSpawner()
     )
 
     do {
@@ -465,8 +477,8 @@ final class ModelRouterTests: XCTestCase {
       }
     }
 
-    let routedBackend = try await router.routeEmbeddingAndBegin(model)
-    XCTAssertTrue(routedBackend === embeddingBackend)
+    let routedServer = try await router.routeEmbeddingAndBegin(model)
+    XCTAssertTrue(routedServer === embeddingServer)
     let retrySpawnCount = await retrySpawner.spawnCount()
     XCTAssertEqual(retrySpawnCount, 2)
   }
@@ -477,9 +489,7 @@ final class ModelRouterTests: XCTestCase {
     ModelRouter(
       reserveBytes: 0,
       memoryProbe: abundantMemoryProbe,
-      spawner: { model, port, _ in
-        FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
-      },
+      spawner: makeRecordingSpawner(),
       chatMaxConcurrency: chatMaxConcurrency
     )
   }
@@ -488,12 +498,7 @@ final class ModelRouterTests: XCTestCase {
     ModelRouter(
       reserveBytes: 0,
       memoryProbe: abundantMemoryProbe,
-      spawner: { model, port, _ in
-        FakeBackend(modelID: model.id, port: port, sizeBytes: model.sizeBytes)
-      },
-      embeddingSpawner: { model, _ in
-        FakeEmbeddingBackend(modelID: model.id, sizeBytes: model.sizeBytes)
-      },
+      spawner: makeRecordingSpawner(),
       embeddingMaxConcurrency: embeddingMaxConcurrency
     )
   }
@@ -645,20 +650,20 @@ private func acquireThenRecord(
   }
 }
 
-private actor DelayedEmbeddingSpawner {
-  private let backend: FakeEmbeddingBackend
+private actor DelayedModelServerSpawner {
+  private let server: FakeModelServer
   private var startedContinuation: CheckedContinuation<Void, Never>?
   private var releaseContinuation: CheckedContinuation<Void, Never>?
   private var hasStarted = false
   private var count = 0
 
-  init(backend: FakeEmbeddingBackend) {
-    self.backend = backend
+  init(server: FakeModelServer) {
+    self.server = server
   }
 
-  nonisolated func makeSpawner() -> EmbeddingSpawner {
-    { model, _ in
-      try await self.spawn(model: model)
+  nonisolated func makeSpawner() -> ModelServerSpawner {
+    { model, kind, _ in
+      try await self.spawn(model: model, kind: kind)
     }
   }
 
@@ -680,7 +685,10 @@ private actor DelayedEmbeddingSpawner {
     count
   }
 
-  private func spawn(model: ModelDescriptor) async throws -> EmbeddingBackendProtocol {
+  private func spawn(
+    model _: ModelDescriptor,
+    kind _: SwiftLMTrace.BackendKind
+  ) async throws -> ModelServer {
     count += 1
     hasStarted = true
     startedContinuation?.resume()
@@ -688,21 +696,23 @@ private actor DelayedEmbeddingSpawner {
     await withCheckedContinuation { continuation in
       releaseContinuation = continuation
     }
-    return backend
+    try await server.spawn()
+    try await server.waitReady()
+    return server
   }
 }
 
-private actor RetryEmbeddingSpawner {
-  private let backend: FakeEmbeddingBackend
+private actor RetryModelServerSpawner {
+  private let server: FakeModelServer
   private var count = 0
 
-  init(backend: FakeEmbeddingBackend) {
-    self.backend = backend
+  init(server: FakeModelServer) {
+    self.server = server
   }
 
-  nonisolated func makeSpawner() -> EmbeddingSpawner {
-    { model, _ in
-      try await self.spawn(model: model)
+  nonisolated func makeSpawner() -> ModelServerSpawner {
+    { model, kind, _ in
+      try await self.spawn(model: model, kind: kind)
     }
   }
 
@@ -710,25 +720,44 @@ private actor RetryEmbeddingSpawner {
     count
   }
 
-  private func spawn(model: ModelDescriptor) async throws -> EmbeddingBackendProtocol {
+  private func spawn(
+    model _: ModelDescriptor,
+    kind _: SwiftLMTrace.BackendKind
+  ) async throws -> ModelServer {
     count += 1
     if count == 1 {
-      throw TestEmbeddingError.failed
+      throw TestModelServerError.failed
     }
-    return backend
+    try await server.spawn()
+    try await server.waitReady()
+    return server
+  }
+}
+
+private func makeRecordingSpawner(
+  created: FakesBox? = nil,
+  memory: MemoryModel? = nil
+) -> ModelServerSpawner {
+  { model, kind, _ in
+    let server = FakeModelServer(modelID: model.id, kind: kind, sizeBytes: model.sizeBytes)
+    created?.append(server)
+    memory?.register(server)
+    try await server.spawn()
+    try await server.waitReady()
+    return server
   }
 }
 
 /// Small thread-safe list wrapper used to observe spawner output from outside.
 private final class FakesBox: @unchecked Sendable {
-  private var items: [FakeBackend] = []
+  private var items: [FakeModelServer] = []
   private let lock = NSLock()
-  func append(_ item: FakeBackend) {
+  func append(_ item: FakeModelServer) {
     lock.lock()
     items.append(item)
     lock.unlock()
   }
-  func getAll() -> [FakeBackend] {
+  func getAll() -> [FakeModelServer] {
     lock.lock()
     defer { lock.unlock() }
     return items

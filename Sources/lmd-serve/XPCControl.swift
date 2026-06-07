@@ -21,7 +21,6 @@
 import AppLogger
 import Foundation
 import LMDServeSupport
-import SwiftLMBackend
 import SwiftLMControl
 import SwiftLMCore
 import SwiftLMRuntime

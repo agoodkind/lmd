@@ -102,7 +102,6 @@ let package = Package(
       dependencies: [
         "AppLogger",
         "SwiftLMCore",
-        "SwiftLMBackend",
         "SwiftLMTrace",
         "SwiftLMHostProtocol",
         .product(name: "SMCFanXPCClient", package: "macos-smc-fan"),
@@ -193,7 +192,6 @@ let package = Package(
       dependencies: [
         "AppLogger",
         "SwiftLMCore",
-        "SwiftLMBackend",
         "SwiftLMEmbed",
         "SwiftLMRuntime",
         "SwiftLMMonitor",
@@ -247,7 +245,7 @@ let package = Package(
     ),
     .testTarget(
       name: "SwiftLMRuntimeTests",
-      dependencies: ["SwiftLMRuntime", "SwiftLMCore", "SwiftLMBackend"],
+      dependencies: ["SwiftLMRuntime", "SwiftLMCore", "SwiftLMHostProtocol", "SwiftLMTrace"],
       path: "Tests/SwiftLMRuntimeTests",
       swiftSettings: strictConcurrency
     ),

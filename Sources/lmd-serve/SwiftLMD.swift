@@ -18,7 +18,6 @@ import Foundation
 import HTTPTypes
 import Hummingbird
 import LMDServeSupport
-import SwiftLMBackend
 import SwiftLMControl
 import SwiftLMCore
 import SwiftLMEmbed
