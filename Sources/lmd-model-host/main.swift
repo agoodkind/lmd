@@ -36,24 +36,35 @@ let box = SessionBox()
 
 // The embedding backend, loaded after dial-in. nil for non-embedding kinds,
 // which routes their requests to their own host below.
-let embeddingHost: EmbeddingHost? = args.kind == .embedding
-  ? EmbeddingHost(modelPath: args.modelPath) : nil
+let embeddingHost: EmbeddingHost?
+if args.kind == .embedding {
+  embeddingHost = EmbeddingHost(modelPath: args.modelPath)
+} else {
+  embeddingHost = nil
+}
 
 // The video backend. nil for non-video kinds. Unlike embedding it loads the VLM
 // model lazily on the first request, the same as the broker's former in-process
 // backend did, so there is no eager load before `ready`.
-let videoHost: VideoHost? = args.kind == .video
-  ? VideoHost(modelPath: args.modelPath, videoSamplingFPS: args.videoSamplingFPS) : nil
+let videoHost: VideoHost?
+if args.kind == .video {
+  videoHost = VideoHost(modelPath: args.modelPath, videoSamplingFPS: args.videoSamplingFPS)
+} else {
+  videoHost = nil
+}
 
 let chatHost: ChatHost?
 do {
-  chatHost = args.kind == .chat
-    ? try ChatHost(
+  if args.kind == .chat {
+    chatHost = try ChatHost(
       modelPath: args.modelPath,
       binaryPath: args.swiftLMBinaryPath,
       logPath: args.swiftLMLogPath,
       contextLength: args.contextLength
-    ) : nil
+    )
+  } else {
+    chatHost = nil
+  }
 } catch {
   FileHandle.standardError.write(Data("lmd-model-host: chat init failed: \(error)\n".utf8))
   exit(2)
