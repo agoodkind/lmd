@@ -21,7 +21,13 @@ import SwiftLMRuntime
 /// Mach service name registered by the LaunchAgent and the only way
 /// in-process Swift callers locate the broker. Bumping this string is a
 /// breaking change for installed plists.
-public let brokerXPCServiceName = "io.goodkind.lmd.control"
+///
+/// `LMD_CONTROL_SERVICE` overrides it so an isolated test LaunchAgent can
+/// register a distinct Mach service (`io.goodkind.lmd.control.test`) and run
+/// alongside the production daemon. Unset in production, where it defaults to
+/// the canonical name, so the production daemon and CLI are unaffected.
+public let brokerXPCServiceName =
+  ProcessInfo.processInfo.environment["LMD_CONTROL_SERVICE"] ?? "io.goodkind.lmd.control"
 
 // MARK: - Request
 

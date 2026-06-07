@@ -59,7 +59,7 @@ func startXPCControl(state: BrokerState) throws -> XPCListener {
   // lmd-serve-2026-04-19-14{2832,2942,3007}.ips, which all faulted in
   // `_assertionFailure` from `startXPCControl` under parentProc=xctest.
   let env = ProcessInfo.processInfo.environment
-  let expectedLabel = "io.goodkind.lmd.serve"
+  let expectedLabel = brokerLaunchdLabel
   guard env["XPC_SERVICE_NAME"] == expectedLabel else {
     let observed = env["XPC_SERVICE_NAME"] ?? "<unset>"
     log.notice(

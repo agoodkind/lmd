@@ -14,7 +14,23 @@ import LMDServeSupport
 import SwiftLMHostProtocol
 import XPC
 
-let brokerHostServiceName = "io.goodkind.lmd.host"
+/// Mach service the model-host children dial in on. `LMD_HOST_SERVICE` overrides
+/// it (default `io.goodkind.lmd.host`) so an isolated test LaunchAgent registers
+/// a distinct service and never collides with the production daemon. The same
+/// value is forwarded to children as `--host-service`, so the listener and the
+/// spawned children always agree.
+let brokerHostServiceName =
+  ProcessInfo.processInfo.environment["LMD_HOST_SERVICE"] ?? "io.goodkind.lmd.host"
+
+/// The launchd LaunchAgent label this broker expects as its process identity.
+/// launchd sets `XPC_SERVICE_NAME` to the plist `Label`; both XPC listeners
+/// refuse to start unless it matches, since `XPCListener(service:)` traps when
+/// the Mach service is not bootstrapped by launchd. `LMD_LAUNCHD_LABEL` overrides
+/// the expected label (default `io.goodkind.lmd.serve`) so an isolated test agent
+/// labeled `io.goodkind.lmd.serve.test` passes the same guard.
+let brokerLaunchdLabel =
+  ProcessInfo.processInfo.environment["LMD_LAUNCHD_LABEL"] ?? "io.goodkind.lmd.serve"
+
 private let log = AppLogger.logger(category: "HostListener")
 
 /// Looks up the live XPCModelServer for a model id so a dial-in binds to it.
@@ -28,7 +44,7 @@ func startHostListener(
   registry: HostServerRegistry
 ) throws -> XPCListener {
   let env = ProcessInfo.processInfo.environment
-  guard env["XPC_SERVICE_NAME"] == "io.goodkind.lmd.serve" else {
+  guard env["XPC_SERVICE_NAME"] == brokerLaunchdLabel else {
     throw XPCListenerSkippedError(
       reason: "XPC_SERVICE_NAME=\(env["XPC_SERVICE_NAME"] ?? "<unset>")")
   }
