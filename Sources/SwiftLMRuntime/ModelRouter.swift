@@ -150,6 +150,10 @@ public actor ModelRouter {
   /// The active battery throttle level, applied to embedding backends as they
   /// load so a model spawned while throttled inherits the shrunken GPU cache.
   private var currentThrottleLevel: PowerThrottleLevel = .none
+  /// True while the battery throttle is at `hard`, the stop level. New chat and
+  /// embedding requests are refused with `RouteError.powerPaused`; in-flight
+  /// requests already past the admission guard finish normally.
+  private var powerHalted = false
 
   public let eventSink: @Sendable (RouterLifecycleEvent) -> Void
 
@@ -449,6 +453,7 @@ public actor ModelRouter {
     case wrongKindForEmbedding(modelID: String)
     case embeddingSpawnerMissing
     case unsupportedEmbeddingBackend(modelID: String, reason: String)
+    case powerPaused(reason: String)
   }
 
   public func routeAndBegin(
@@ -456,6 +461,9 @@ public actor ModelRouter {
     loadConfig: ModelLoadConfig? = nil,
     requestID: UUID? = nil
   ) async throws -> SwiftLMBackendProtocol {
+    if powerHalted {
+      throw RouteError.powerPaused(reason: "battery")
+    }
     pruneStoppedChatBackends()
     BackendTrace.notice(
       phase: TracePhase.Router.routeBegin.rawValue,
@@ -579,6 +587,9 @@ public actor ModelRouter {
     _ model: ModelDescriptor,
     loadConfig: ModelLoadConfig? = nil
   ) async throws -> EmbeddingBackendProtocol {
+    if powerHalted {
+      throw RouteError.powerPaused(reason: "battery")
+    }
     BackendTrace.notice(
       phase: TracePhase.Router.routeBegin.rawValue,
       context: TraceContext(modelID: model.id, modelKind: .embedding),
@@ -801,10 +812,18 @@ public actor ModelRouter {
     embeddingPacingNanos
   }
 
+  /// True while the battery throttle is at `hard` and the router refuses new
+  /// work. Exposed for tests and diagnostics.
+  public func isPowerHalted() -> Bool {
+    powerHalted
+  }
+
   /// Apply a battery throttle level: cap embedding concurrency, set inter-request
-  /// pacing, and forward the level to every loaded embedding backend so it can
-  /// shrink the GPU cache. Concurrency is never raised above the configured
-  /// ceiling, and `none` restores the configured cap with zero pacing.
+  /// pacing, forward the level to every loaded embedding backend so it can shrink
+  /// the GPU cache, and at `hard` halt admission so new chat and embedding
+  /// requests are refused while in-flight requests drain. Concurrency is never
+  /// raised above the configured ceiling, and `none` restores the configured cap
+  /// with zero pacing and clears the halt.
   public func applyPowerThrottle(_ level: PowerThrottleLevel) {
     let concurrency: Int?
     let pacingNanos: UInt64
@@ -822,6 +841,7 @@ public actor ModelRouter {
     embeddingMaxConcurrency = concurrency
     embeddingPacingNanos = pacingNanos
     currentThrottleLevel = level
+    powerHalted = (level == .hard)
     for state in embeddingRoutes.values {
       if case .loaded(let entry) = state {
         entry.backend.applyPowerThrottle(level)
@@ -830,6 +850,7 @@ public actor ModelRouter {
     log.notice(
       """
       router.power_throttle_applied level=\(level.rawValue, privacy: .public) \
+      halted=\(self.powerHalted, privacy: .public) \
       embedding_concurrency=\(concurrency ?? -1, privacy: .public) \
       pacing_ms=\(pacingNanos / 1_000_000, privacy: .public)
       """

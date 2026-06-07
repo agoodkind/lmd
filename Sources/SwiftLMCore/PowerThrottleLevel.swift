@@ -6,12 +6,14 @@
 //  Copyright © 2026, all rights reserved.
 //
 
-/// Graded embedding throttle level applied in response to battery pressure.
+/// Graded throttle level applied in response to battery pressure.
 ///
-/// `none` is the unthrottled steady state. `mild` and `hard` progressively cap
-/// embedding concurrency, add inter-request pacing, and (at `hard`) shrink the
-/// MLX allocator cache. `PowerMonitor` computes the level from battery charge
-/// and discharge rate; `ModelRouter` and the embedding backends apply it.
+/// `none` is the unthrottled steady state. `mild` caps embedding concurrency and
+/// adds inter-request pacing as a lead-in slow-down. `hard` is the stop: it
+/// applies the strongest embedding caps, shrinks the MLX allocator cache, and
+/// makes `ModelRouter` refuse new chat and embedding requests with HTTP 503
+/// while in-flight requests drain. `PowerMonitor` computes the level from
+/// battery charge; `ModelRouter` and the embedding backends apply it.
 public enum PowerThrottleLevel: Int, Sendable, Equatable {
   case none = 0
   case mild = 1

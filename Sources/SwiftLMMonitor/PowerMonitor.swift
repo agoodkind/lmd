@@ -14,15 +14,15 @@ private let log = AppLogger.logger(category: "PowerMonitor")
 
 // MARK: - Power monitor
 
-/// Watches battery charge and reports a throttle ``Level`` with a wide
-/// engage/resume hysteresis band, so the level cannot flap.
+/// Watches battery charge and reports a graded throttle ``Level``.
 ///
-/// It engages the throttle when charge falls to `engagePct` and holds it until
-/// charge recovers all the way to `resumePct`. Anywhere in the band between the
-/// two thresholds it holds the current level, so a battery hovering or slowly
-/// recharging never bounces the throttle on and off. This is a Schmitt trigger:
-/// one low threshold to turn on, one high threshold to turn off, a large dead
-/// band in between.
+/// There are three levels. `mild` is a plain threshold band: it applies while
+/// charge sits in `engagePct < charge <= mildEngagePct` and turns off above
+/// `mildEngagePct`, with no memory. `hard` is the stop level and is the only one
+/// with hysteresis: it engages at `charge <= engagePct` and holds all the way
+/// until charge recovers to `resumePct`, so a battery hovering or slowly
+/// recharging never bounces the stop on and off. While `hard` is held it
+/// overrides `mild`.
 ///
 /// This type stays in `SwiftLMMonitor`, which depends only on `AppLogger`, so it
 /// keeps its own `Level` enum; the broker translates it to the shared
@@ -30,20 +30,31 @@ private let log = AppLogger.logger(category: "PowerMonitor")
 public final class PowerMonitor: @unchecked Sendable {
   public enum Level: Int, Sendable, Equatable {
     case none = 0
-    case hard = 1
+    case mild = 1
+    case hard = 2
   }
 
   public struct Config: Sendable {
-    /// Engage the throttle when charge is at or below this percent. Zero
+    /// Engage the `hard` stop when charge is at or below this percent. Zero
     /// disables the monitor.
     public let engagePct: Int
-    /// Release the throttle only once charge recovers to or above this percent.
-    /// The gap from `engagePct` to `resumePct` is the anti-flap dead band.
+    /// Engage `mild` when charge is at or below this percent (but above
+    /// `engagePct`). Must sit above `engagePct` and below `resumePct`.
+    public let mildEngagePct: Int
+    /// Release `hard` only once charge recovers to or above this percent. The
+    /// gap from `engagePct` to `resumePct` is the anti-flap dead band for the
+    /// stop.
     public let resumePct: Int
     public let intervalSeconds: Double
 
-    public init(engagePct: Int, resumePct: Int, intervalSeconds: Double = 15) {
+    public init(
+      engagePct: Int,
+      mildEngagePct: Int,
+      resumePct: Int,
+      intervalSeconds: Double = 15
+    ) {
       self.engagePct = engagePct
+      self.mildEngagePct = mildEngagePct
       self.resumePct = resumePct
       self.intervalSeconds = intervalSeconds
     }
@@ -97,6 +108,7 @@ public final class PowerMonitor: @unchecked Sendable {
     log.notice(
       """
       power.monitor_started engage_pct=\(self.config.engagePct, privacy: .public) \
+      mild_pct=\(self.config.mildEngagePct, privacy: .public) \
       resume_pct=\(self.config.resumePct, privacy: .public)
       """
     )
@@ -150,18 +162,28 @@ public final class PowerMonitor: @unchecked Sendable {
 
   // MARK: - Pure level computation (tested directly)
 
-  /// Schmitt trigger: engage at or below `engagePct`, release at or above
-  /// `resumePct`, and hold the current level anywhere in the band between. The
-  /// wide band is the whole anti-flap mechanism: the charge must cross all the
-  /// way from one threshold to the other before the level changes.
+  /// Compute the next level from the live charge and the previous level.
+  ///
+  /// `hard` is the only level with hysteresis: once engaged at `engagePct` it
+  /// holds until charge climbs back to `resumePct`, which is the whole anti-flap
+  /// mechanism for the stop, and it overrides `mild` while held. `mild` is a
+  /// plain band with no memory, so outside a hard hold the level follows the
+  /// live charge: `hard` at or below `engagePct`, `mild` at or below
+  /// `mildEngagePct`, otherwise `none`.
   static func nextLevel(percent: Int, config: Config, previous: Level) -> Level {
+    if previous == .hard {
+      if percent >= config.resumePct {
+        return .none
+      }
+      return .hard
+    }
     if percent <= config.engagePct {
       return .hard
     }
-    if percent >= config.resumePct {
-      return .none
+    if percent <= config.mildEngagePct {
+      return .mild
     }
-    return previous
+    return .none
   }
 
   deinit {

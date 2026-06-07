@@ -476,13 +476,15 @@ struct SwiftLMD {
       }
     }
 
-    // Battery throttle: a wide engage/resume band so the level never flaps. It
-    // engages the embedding throttle once charge falls to LMD_BATTERY_THROTTLE_PCT
-    // (default 20) and holds it until charge recovers to LMD_BATTERY_RESUME_PCT
-    // (default 80), letting the battery recharge a full cycle before releasing.
-    // Mirrors the memory-pressure monitor above.
+    // Battery throttle: graded levels with a single wide release. `mild` is a
+    // plain band that slows embeddings while charge sits in LMD_BATTERY_MILD_PCT
+    // (default 35) down to LMD_BATTERY_THROTTLE_PCT (default 20). `hard` is the
+    // stop: at LMD_BATTERY_THROTTLE_PCT or below it refuses new chat and
+    // embedding requests, and it holds until charge recovers to
+    // LMD_BATTERY_RESUME_PCT (default 80). Mirrors the memory-pressure monitor.
     let powerConfig = PowerMonitor.Config(
       engagePct: config.batteryThrottlePct,
+      mildEngagePct: config.batteryMildPct,
       resumePct: config.batteryResumePct
     )
     let powerMonitor = PowerMonitor(config: powerConfig) {
@@ -493,6 +495,8 @@ struct SwiftLMD {
       switch level {
       case .none:
         throttle = .none
+      case .mild:
+        throttle = .mild
       case .hard:
         throttle = .hard
       }
@@ -955,6 +959,12 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
         status: .badRequest,
         message: "model is not an embedding model",
         type: "invalid_request_error"
+      )
+    case .powerPaused(let reason):
+      return errorResponse(
+        status: .serviceUnavailable,
+        message: "service paused to preserve battery (\(reason))",
+        type: "service_paused"
       )
     }
   }
@@ -1616,6 +1626,15 @@ private func swiftLMProxyResult(
         statusCode: 500,
         message: errorMessage,
         type: "internal_error"
+      )
+    case .powerPaused(let reason):
+      statusCode = 503
+      errorType = "service_paused"
+      errorMessage = "service paused to preserve battery (\(reason))"
+      result = backendErrorResult(
+        statusCode: 503,
+        message: errorMessage,
+        type: "service_paused"
       )
     }
     logChatRequestFailed(
