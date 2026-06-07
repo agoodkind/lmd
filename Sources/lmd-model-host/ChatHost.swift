@@ -48,12 +48,16 @@ actor ChatHost {
   private let contextLength: Int?
   private var server: SwiftLMServer?
   private var port: Int?
+  /// Published whenever the SwiftLM child PID changes (nonzero on spawn, 0 on
+  /// stop), so the host process can reap the child from a signal handler.
+  private let onChildPIDChange: @Sendable (pid_t) -> Void
 
   init(
     modelPath: String,
     binaryPath: String?,
     logPath: String?,
-    contextLength: Int?
+    contextLength: Int?,
+    onChildPIDChange: @escaping @Sendable (pid_t) -> Void = { _ in }
   ) throws {
     guard let binaryPath, !binaryPath.isEmpty else {
       throw ChatHostError.missingSwiftLMBinaryPath
@@ -62,6 +66,7 @@ actor ChatHost {
     self.binaryPath = binaryPath
     self.logPath = logPath
     self.contextLength = contextLength
+    self.onChildPIDChange = onChildPIDChange
   }
 
   func load() throws {
@@ -80,8 +85,12 @@ actor ChatHost {
       }
     )
     try childServer.start()
+    // Publish the PID as soon as the child exists so a signal arriving mid-load
+    // still reaps it.
+    onChildPIDChange(childServer.process?.processIdentifier ?? 0)
     guard childServer.waitReady() else {
-      childServer.stop()
+      childServer.terminateNow()
+      onChildPIDChange(0)
       throw ChatHostError.swiftLMReadyTimeout(
         model: modelPath,
         seconds: config.readyTimeout
@@ -95,9 +104,10 @@ actor ChatHost {
   }
 
   func shutdown() {
-    server?.stop()
+    server?.terminateNow()
     server = nil
     port = nil
+    onChildPIDChange(0)
   }
 
   func stats() -> BackendStats {

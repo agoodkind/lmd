@@ -205,6 +205,21 @@ public final class SwiftLMServer {
     logSink("swiftlm-server stopped model=\(model)")
   }
 
+  /// Kill the process immediately with SIGKILL, skipping the graceful wait.
+  /// Used on eviction and signal-driven shutdown, where reclaiming the model's
+  /// memory fast matters more than a clean drain, and where a 30 s wait would
+  /// exceed the broker's grace window and orphan the child.
+  public func terminateNow() {
+    guard let p = process else { return }
+    if p.isRunning {
+      kill(p.processIdentifier, SIGKILL)
+    }
+    stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+    stderrPipe?.fileHandleForReading.readabilityHandler = nil
+    process = nil
+    log.notice("server.terminated_now model=\(self.model, privacy: .public)")
+  }
+
   /// True while the underlying process is alive.
   public var isRunning: Bool {
     process?.isRunning ?? false
