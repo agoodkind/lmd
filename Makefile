@@ -10,7 +10,7 @@ TARGET ?=
 CONFIG ?= Debug
 LMD_DEV := TUIST="$(TUIST)" swift Tools/lmd-dev.swift
 
-.PHONY: help toolchain preflight build debug test lint format install install-debug \
+.PHONY: help toolchain preflight build debug test test-integration lint format install install-debug \
         uninstall clean run-serve run-tui run-bench stop-serve start-serve restart-serve \
         snapshot-update log-audit log-smoke tui-qa smoke video-smoke \
         sign notarize notary-setup dist ci-import-cert ci-sign ci-notarize \
@@ -33,6 +33,9 @@ debug:
 
 test:
 	@$(LMD_DEV) test
+
+test-integration:
+	@$(LMD_DEV) test-integration
 
 clean:
 	@$(LMD_DEV) clean

@@ -2,13 +2,12 @@
 //  EmbeddingsRouteTests.swift
 //  IntegrationTests
 //
-//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-04-19.
-//  Copyright © 2026, all rights reserved.
-//
-//  Spawns a release `lmd-serve`, POSTs `/v1/embeddings` with two inputs, and
-//  checks `/swiftlmd/loaded` lists `kind: embedding`. Skips when no embedding
-//  model exists on disk, when `lmd-serve` is missing, or when `LMD_SWIFTLM_BINARY`
-//  is not executable (broker startup requirement).
+//  Drives `/v1/embeddings` against the isolated launchd test daemon that
+//  `scripts/lmd-test-daemon.sh` brings up (via `make test-integration`),
+//  addressed through `LMD_TEST_BASE_URL`. Skips when that variable is unset so
+//  the default `make test` stays headless and never spawns a broker. Confirms
+//  `/v1/models` lists the embedding model and `/swiftlmd/loaded` reports
+//  `kind: embedding`.
 //
 
 import Foundation
@@ -18,21 +17,19 @@ import XCTest
 
 final class EmbeddingsRouteTests: XCTestCase {
   func testEmbeddingsBatchAgainstRunningBroker() async throws {
-    let swiftLM =
-      ProcessInfo.processInfo.environment["LMD_SWIFTLM_BINARY"]
-      ?? "\(NSHomeDirectory())/Sites/SwiftLM/.build/arm64-apple-macosx/release/SwiftLM"
-    if !FileManager.default.isExecutableFile(atPath: swiftLM) {
-      throw XCTSkip("SwiftLM binary not executable at \(swiftLM); set LMD_SWIFTLM_BINARY")
+    guard let base = ProcessInfo.processInfo.environment["LMD_TEST_BASE_URL"],
+      !base.isEmpty
+    else {
+      throw XCTSkip(
+        "set LMD_TEST_BASE_URL to drive the launchd test daemon; run via `make test-integration`")
     }
 
-    let brokerBin = try resolveBrokerBinary()
     let catalogRoot = "\(NSHomeDirectory())/.lmstudio/models"
     guard FileManager.default.fileExists(atPath: catalogRoot) else {
       throw XCTSkip("no LM Studio models directory at \(catalogRoot)")
     }
 
-    let embeddingModel = findEmbeddingModel(under: catalogRoot)
-    guard let embModel = embeddingModel else {
+    guard let embModel = findEmbeddingModel(under: catalogRoot) else {
       throw XCTSkip(
         "no embedding model found under \(catalogRoot); add one (for example Snowflake snowflake-arctic-embed-l)"
       )
@@ -40,28 +37,9 @@ final class EmbeddingsRouteTests: XCTestCase {
 
     let slug = embModel.slug ?? embModel.displayName
     let expectedDimension = expectedEmbeddingDimension(for: embModel)
-    let port = 5400 + Int.random(in: 50...250)
-    let host = "localhost"
 
-    let proc = Process()
-    proc.executableURL = brokerBin
-    proc.arguments = []
-    proc.currentDirectoryURL = try brokerWorkingDirectory(for: brokerBin)
-    proc.environment = buildBrokerEnvironment(
-      host: host, port: port, swiftLM: swiftLM)
-
-    try proc.run()
-    defer {
-      proc.terminate()
-      _ = waitForProcessExit(proc, timeout: 3.0)
-    }
-
-    let base = "http://\(host):\(port)"
     try await waitForHealth(url: "\(base)/health", deadlineSeconds: 45)
-    try await assertModelsRouteListsEmbedding(
-      baseURL: base,
-      slug: slug
-    )
+    try await assertModelsRouteListsEmbedding(baseURL: base, slug: slug)
 
     let embPayload: [String: Any] = [
       "model": slug,
@@ -108,84 +86,6 @@ final class EmbeddingsRouteTests: XCTestCase {
   }
 
   // MARK: - Helpers
-
-  private func resolveBrokerBinary() throws -> URL {
-    let env = ProcessInfo.processInfo.environment
-    let baseDir: URL
-    if let override = env["LMD_BINARY_DIR"], !override.isEmpty {
-      baseDir = URL(fileURLWithPath: override)
-    } else {
-      baseDir = try repoRoot()
-        .appendingPathComponent(".build", isDirectory: true)
-        .appendingPathComponent("release", isDirectory: true)
-    }
-    let debugDir = try repoRoot()
-      .appendingPathComponent(".build", isDirectory: true)
-      .appendingPathComponent("debug", isDirectory: true)
-    let debugBin = debugDir.appendingPathComponent("lmd-serve")
-    if FileManager.default.isExecutableFile(atPath: debugBin.path) {
-      return debugBin
-    }
-    let releaseBin = baseDir.appendingPathComponent("lmd-serve")
-    if FileManager.default.isExecutableFile(atPath: releaseBin.path) {
-      return releaseBin
-    }
-    throw XCTSkip(
-      "lmd-serve not found. Run `swift build -c release` or `swift build`, or set LMD_BINARY_DIR."
-    )
-  }
-
-  private func brokerWorkingDirectory(for brokerBinary: URL) throws -> URL {
-    let root = try repoRoot()
-    let configuration = brokerBinary.path.contains("/release/") ? "Release" : "Debug"
-    let productsDirectory =
-      root
-      .appendingPathComponent("Products", isDirectory: true)
-      .appendingPathComponent("Build", isDirectory: true)
-      .appendingPathComponent(configuration, isDirectory: true)
-    let metallib = productsDirectory.appendingPathComponent("default.metallib")
-    if FileManager.default.fileExists(atPath: metallib.path) {
-      return productsDirectory
-    }
-    return brokerBinary.deletingLastPathComponent()
-  }
-
-  private func repoRoot() throws -> URL {
-    var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-    while dir.path != "/" {
-      if FileManager.default.fileExists(
-        atPath: dir.appendingPathComponent("Package.swift").path
-      ) {
-        return dir
-      }
-      dir = dir.deletingLastPathComponent()
-    }
-    throw XCTSkip("could not locate Package.swift above \(#filePath)")
-  }
-
-  private func buildBrokerEnvironment(host: String, port: Int, swiftLM: String) -> [String: String]
-  {
-    var env = ProcessInfo.processInfo.environment
-    env["LMD_HOST"] = host
-    env["LMD_PORT"] = "\(port)"
-    env["LMD_SWIFTLM_BINARY"] = swiftLM
-    env["LMD_DISABLE_XPC"] = "1"
-    env["LMD_IDLE_MINUTES"] = "120"
-    env["LMD_EMBEDDING_IDLE_MINUTES"] = "120"
-    // The broker now fails fast unless every configuration key is defined.
-    env["LMD_RESERVE_GB"] = "20"
-    env["LMD_CHAT_MAX_CONCURRENCY"] = "4"
-    env["LMD_EMBEDDING_MAX_CONCURRENCY"] = "4"
-    env["LMD_BATTERY_THROTTLE_PCT"] = "20"
-    env["LMD_BATTERY_MILD_PCT"] = "35"
-    env["LMD_BATTERY_RESUME_PCT"] = "80"
-    env["LMD_DATA_DIR"] = NSTemporaryDirectory()
-    env["LMD_SAMPLE_INTERVAL"] = "15"
-    env["LMD_PROMPT_CACHE_MAX_TOKENS"] = ""
-    env["LMD_PROMPT_CACHE_ENABLED"] = "true"
-    env["LMD_MLX_CACHE_LIMIT_GB"] = "2"
-    return env
-  }
 
   private func findEmbeddingModel(under root: String) -> ModelDescriptor? {
     let catalog = ModelCatalog(roots: [root])
@@ -274,13 +174,4 @@ final class EmbeddingsRouteTests: XCTestCase {
       task.resume()
     }
   }
-}
-
-private func waitForProcessExit(_ proc: Process, timeout: TimeInterval) -> Bool {
-  let deadline = Date().addingTimeInterval(timeout)
-  while proc.isRunning {
-    if Date() >= deadline { return false }
-    Thread.sleep(forTimeInterval: 0.05)
-  }
-  return true
 }

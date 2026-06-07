@@ -319,6 +319,8 @@ final class DevTool {
       try build(configuration: "Debug")
     case "test":
       try test()
+    case "test-integration":
+      try testIntegration()
     case "snapshot-update":
       try snapshotUpdate()
     case "clean":
@@ -422,6 +424,7 @@ final class DevTool {
         debug                   build every product binary in Debug
         install [Release|Debug] build and copy to PREFIX/bin (default Release)
         test                    run Tuist test for LMDTests
+        test-integration        run integration tests against the isolated launchd test daemon
         smoke                   build and run the Swift HTTP smoke test
         video-smoke             build and require real video acceptance via LMD_VIDEO_SAMPLE_FILE
         log-audit               enforce first-party logging rules
@@ -642,6 +645,44 @@ final class DevTool {
     try runPassthrough(
       "swift",
       ["test", "--skip-build", "-c", swiftPackageConfiguration(configuration)],
+      environment: env
+    )
+  }
+
+  /// Run the integration suite against the isolated launchd test daemon.
+  ///
+  /// The plain `test` target skips the broker-backed integration tests so the
+  /// unit run stays headless. This target builds the product binaries, brings up
+  /// `scripts/lmd-test-daemon.sh` (an isolated daemon on :5401 with `.test` Mach
+  /// services and its own data dir, so production on :5400 is never touched),
+  /// points the tests at it via `LMD_TEST_BASE_URL` and `LMD_CONTROL_SERVICE`,
+  /// runs them, then tears the daemon down whatever the outcome.
+  private func testIntegration() throws {
+    let configuration = "Debug"
+    try build(configuration: configuration)
+    var env = ProcessInfo.processInfo.environment
+    env["LMD_BINARY_DIR"] = releaseBuildDirectory().path
+    try runPassthrough(
+      "swift",
+      ["build", "--build-tests", "-c", swiftPackageConfiguration(configuration)],
+      environment: env
+    )
+    try stageMetallibForSwiftTest(configuration: configuration)
+
+    let harness = repoRoot.appendingPathComponent("scripts/lmd-test-daemon.sh").path
+    try runPassthrough(harness, ["up"])
+    defer { try? runPassthrough(harness, ["down"]) }
+
+    env["LMD_INTEGRATION"] = "1"
+    env["LMD_XPC_USE_LAUNCHD_DAEMON"] = "1"
+    env["LMD_CONTROL_SERVICE"] = "io.goodkind.lmd.control.test"
+    env["LMD_TEST_BASE_URL"] = "http://localhost:5401"
+    try runPassthrough(
+      "swift",
+      [
+        "test", "--skip-build", "-c", swiftPackageConfiguration(configuration),
+        "--filter", "IntegrationTests.(EmbeddingsRouteTests|XPCBrokerTests|HostSpawnTests)",
+      ],
       environment: env
     )
   }
