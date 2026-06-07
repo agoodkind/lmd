@@ -23,20 +23,43 @@
 import CoreMetrics
 import Foundation
 import Instrumentation
+import Logging
 import OTel
 import ServiceLifecycle
 
 public enum SwiftLMMetricsOTel {
+  /// Owns the running OTLP exporter services in a ServiceGroup. The group runs
+  /// in a detached task for the life of the process; `shutdownAndFlush` triggers
+  /// graceful shutdown so the last batch of metrics and spans is exported before
+  /// a short-lived helper calls `exit`.
+  public final class ExportRunner: @unchecked Sendable {
+    private let group: ServiceGroup
+    private let runTask: Task<Void, Never>
+
+    init(services: [any Service], logger: Logger) {
+      let group = ServiceGroup(configuration: .init(services: services, logger: logger))
+      self.group = group
+      self.runTask = Task { try? await group.run() }
+    }
+
+    /// Trigger graceful shutdown and await the exporters' final flush. Safe to
+    /// call once before process exit.
+    public func shutdownAndFlush() async {
+      await group.triggerGracefulShutdown()
+      await runTask.value
+    }
+  }
+
   /// Result of installing the OTLP export arm. `factory` is nil when export is
   /// disabled (no endpoint) or misconfigured; pass it to
-  /// `SwiftLMMetrics.bootstrap(extraFactories:)`. `services` are the exporter
-  /// background services the caller must run in a ServiceGroup and shut down
-  /// before process exit so the final batch of metrics and spans flushes.
+  /// `SwiftLMMetrics.bootstrap(extraFactories:)`. `runner` owns the running
+  /// exporter services; a long-lived broker keeps it alive, and a short-lived
+  /// helper calls `runner.shutdownAndFlush()` before `exit`.
   public struct Installation: Sendable {
     public let factory: (any CoreMetrics.MetricsFactory)?
-    public let services: [any Service]
+    public let runner: ExportRunner?
 
-    public static let disabled = Installation(factory: nil, services: [])
+    public static let disabled = Installation(factory: nil, runner: nil)
   }
 
   /// Build the OTLP metrics factory and install the tracer, gated on
@@ -67,7 +90,11 @@ public enum SwiftLMMetricsOTel {
       InstrumentationSystem.bootstrap(tracingBackend.factory)
 
       let services: [any Service] = [metricsBackend.service, tracingBackend.service]
-      return Installation(factory: metricsBackend.factory, services: services)
+      let runner = ExportRunner(
+        services: services,
+        logger: Logger(label: "lmd.otel.\(serviceName)")
+      )
+      return Installation(factory: metricsBackend.factory, runner: runner)
     } catch {
       return .disabled
     }

@@ -27,6 +27,12 @@ import SwiftLMMonitor
 import SwiftLMRuntime
 import SwiftLMTrace
 
+// The OTLP export arm is SwiftPM-only; the Tuist project omits it (and swift-otel's
+// C-module tree) so generation stays clean. The guard compiles it out there.
+#if canImport(SwiftLMMetricsOTel)
+  import SwiftLMMetricsOTel
+#endif
+
 // File-scope os.Logger. `@main` mode forbids top-level expressions, so
 // the `AppLogger.bootstrap` call lives inside `SwiftLMD.main()` below.
 // The `log` handle itself is a constant and is safe to create at file
@@ -241,23 +247,11 @@ struct ChatCompletionRequest: Codable {
 func brokerMetricsSnapshot(state: BrokerState) async -> MergedMetricsSnapshot {
   let routerSnapshot = await state.router.snapshot()
   let reading = await state.router.memoryReading()
-  SnapshotSink.shared.setGauge(
-    name: "lmd_broker_loaded_models",
-    value: Double(routerSnapshot.loaded.count)
-  )
-  SnapshotSink.shared.setGauge(
-    name: "lmd_broker_allocated_bytes",
-    value: Double(routerSnapshot.allocatedBytes)
-  )
-  SnapshotSink.shared.setGauge(
-    name: "lmd_broker_available_bytes",
-    value: Double(reading.availableBytes)
-  )
-  SnapshotSink.shared.setGauge(
-    name: "lmd_broker_memory_under_pressure",
-    value: reading.underPressure ? 1 : 0
-  )
-  let snapshots = [SnapshotSink.shared.snapshot()] + state.hostServers.metricsSnapshots()
+  SwiftLMMetrics.setGauge("lmd_broker_loaded_models", Double(routerSnapshot.loaded.count))
+  SwiftLMMetrics.setGauge("lmd_broker_allocated_bytes", Double(routerSnapshot.allocatedBytes))
+  SwiftLMMetrics.setGauge("lmd_broker_available_bytes", Double(reading.availableBytes))
+  SwiftLMMetrics.setGauge("lmd_broker_memory_under_pressure", reading.underPressure ? 1 : 0)
+  let snapshots = [SwiftLMMetrics.sink.snapshot()] + state.hostServers.metricsSnapshots()
   return MetricsJSON.merge(snapshots)
 }
 
@@ -433,7 +427,25 @@ func performModelUnload(
 struct SwiftLMD {
   static func main() async throws {
     AppLogger.bootstrap(subsystem: "io.goodkind.lmd")
-    SwiftLMMetrics.bootstrap(process: "lmd-serve", sourceID: "broker")
+    // Install the OTLP export arm before bootstrapping the metrics plane, since
+    // the multiplex is fixed at the first bootstrap. Gated on
+    // OTEL_EXPORTER_OTLP_ENDPOINT; a no-op (and no extra factory) when unset.
+    #if canImport(SwiftLMMetricsOTel)
+      let otelExport = SwiftLMMetricsOTel.installExportIfEnabled(
+        serviceName: "lmd-serve",
+        sourceID: "broker"
+      )
+      SwiftLMMetrics.bootstrap(
+        process: "lmd-serve",
+        sourceID: "broker",
+        extraFactories: otelExport.factory.map { [$0] } ?? []
+      )
+      // The broker is a long-lived daemon, so the exporter services run for the
+      // process lifetime; pin the runner so it is not torn down early.
+      _ = otelExport.runner
+    #else
+      SwiftLMMetrics.bootstrap(process: "lmd-serve", sourceID: "broker")
+    #endif
     slog("swiftlmd v\(SwiftLMCore.version) starting")
 
     // Resolve configuration once, through the single typed seam. A missing or

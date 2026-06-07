@@ -14,6 +14,13 @@ import SwiftLMHostProtocol
 import SwiftLMMetrics
 import XPC
 
+// The OTLP export arm is SwiftPM-only. lmd-model-host builds only under SwiftPM,
+// so this is always available here; the guard keeps the call site uniform with
+// lmd-serve, where the Tuist project compiles it out.
+#if canImport(SwiftLMMetricsOTel)
+  import SwiftLMMetricsOTel
+#endif
+
 AppLogger.bootstrap(subsystem: "io.goodkind.lmd")
 private let log = AppLogger.logger(category: "ModelHost")
 
@@ -29,12 +36,29 @@ guard let tokenLine = readLine(strippingNewline: true), !tokenLine.isEmpty else 
 }
 let spawnToken = tokenLine
 
-SwiftLMMetrics.bootstrap(
-  process: "lmd-model-host",
-  sourceID: "host:\(args.kind.rawValue):\(args.modelPath)",
-  modelID: args.modelPath,
-  modelKind: args.kind.rawValue
-)
+let hostSourceID = "host:\(args.kind.rawValue):\(args.modelPath)"
+// Install the OTLP export arm before bootstrapping the metrics plane, since the
+// multiplex is fixed at the first bootstrap. Gated on OTEL_EXPORTER_OTLP_ENDPOINT.
+#if canImport(SwiftLMMetricsOTel)
+  let otelExport = SwiftLMMetricsOTel.installExportIfEnabled(
+    serviceName: "lmd-model-host",
+    sourceID: hostSourceID
+  )
+  SwiftLMMetrics.bootstrap(
+    process: "lmd-model-host",
+    sourceID: hostSourceID,
+    modelID: args.modelPath,
+    modelKind: args.kind.rawValue,
+    extraFactories: otelExport.factory.map { [$0] } ?? []
+  )
+#else
+  SwiftLMMetrics.bootstrap(
+    process: "lmd-model-host",
+    sourceID: hostSourceID,
+    modelID: args.modelPath,
+    modelKind: args.kind.rawValue
+  )
+#endif
 
 // A box so the session reference is available to the request handler closure.
 final class SessionBox: @unchecked Sendable {
@@ -43,7 +67,7 @@ final class SessionBox: @unchecked Sendable {
 
   func sendMetricsSnapshot() {
     do {
-      send(.metricsSnapshot(try SnapshotSink.shared.encodedSnapshot()))
+      send(.metricsSnapshot(try SwiftLMMetrics.sink.encodedSnapshot()))
     } catch {
       log.error("host.metrics_snapshot_failed err=\(String(describing: error), privacy: .public)")
     }
@@ -90,6 +114,11 @@ do {
 let exitAfterShutdown: @Sendable (Int32) -> Void = { code in
   Task {
     await chatHost?.shutdown()
+    // Flush the last batch of metrics and spans before the short-lived helper
+    // exits, or the collector never sees the final request's telemetry.
+    #if canImport(SwiftLMMetricsOTel)
+      await otelExport.runner?.shutdownAndFlush()
+    #endif
     exit(code)
   }
 }
