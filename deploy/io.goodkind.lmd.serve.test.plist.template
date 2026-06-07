@@ -91,6 +91,19 @@
 
         <key>LMD_TRACE_DISABLE_MLX_SNAPSHOT</key>
         <string>0</string>
+
+        <!-- OTLP export, filled by scripts/lmd-test-daemon.sh from the caller's
+             OTEL_EXPORTER_OTLP_ENDPOINT. Empty (the default) disables export, so
+             the broker and its spawned hosts stay on the in-process plane unless
+             a run points them at a collector. The hosts inherit these from the
+             broker's environment at spawn time. -->
+        <key>OTEL_EXPORTER_OTLP_ENDPOINT</key>
+        <string>{{OTEL_EXPORTER_OTLP_ENDPOINT}}</string>
+        <key>OTEL_EXPORTER_OTLP_PROTOCOL</key>
+        <string>{{OTEL_EXPORTER_OTLP_PROTOCOL}}</string>
+        <key>OTEL_METRIC_EXPORT_INTERVAL</key>
+        <string>{{OTEL_METRIC_EXPORT_INTERVAL}}</string>
+
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>

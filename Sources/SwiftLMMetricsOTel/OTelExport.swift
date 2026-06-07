@@ -74,7 +74,11 @@ public enum SwiftLMMetricsOTel {
     serviceName: String,
     sourceID: String
   ) -> Installation {
-    guard ProcessInfo.processInfo.environment["OTEL_EXPORTER_OTLP_ENDPOINT"] != nil else {
+    // Treat both an absent and an empty endpoint as disabled, so a LaunchAgent
+    // plist can carry the key defaulted to "" and only enable export when a
+    // deployment sets a real endpoint.
+    let endpoint = ProcessInfo.processInfo.environment["OTEL_EXPORTER_OTLP_ENDPOINT"]
+    guard let endpoint, !endpoint.isEmpty else {
       return .disabled
     }
     do {

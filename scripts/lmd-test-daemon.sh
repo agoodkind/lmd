@@ -51,6 +51,13 @@ readonly TEST_BATTERY_THROTTLE_PCT="${LMD_TEST_BATTERY_THROTTLE_PCT:-0}"
 readonly TEST_BATTERY_MILD_PCT="${LMD_TEST_BATTERY_MILD_PCT:-1}"
 readonly TEST_BATTERY_RESUME_PCT="${LMD_TEST_BATTERY_RESUME_PCT:-2}"
 
+# OTLP export for the test daemon, baked into the rendered plist. Empty endpoint
+# (the default) leaves export disabled; set OTEL_EXPORTER_OTLP_ENDPOINT in the
+# caller's environment to point the broker and its spawned hosts at a collector.
+readonly TEST_OTEL_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+readonly TEST_OTEL_PROTOCOL="${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}"
+readonly TEST_OTEL_METRIC_INTERVAL="${OTEL_METRIC_EXPORT_INTERVAL:-2000}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 
@@ -144,6 +151,9 @@ render_plist() {
         -e "s|{{LMD_BATTERY_THROTTLE_PCT}}|$TEST_BATTERY_THROTTLE_PCT|g" \
         -e "s|{{LMD_BATTERY_MILD_PCT}}|$TEST_BATTERY_MILD_PCT|g" \
         -e "s|{{LMD_BATTERY_RESUME_PCT}}|$TEST_BATTERY_RESUME_PCT|g" \
+        -e "s|{{OTEL_EXPORTER_OTLP_ENDPOINT}}|$TEST_OTEL_ENDPOINT|g" \
+        -e "s|{{OTEL_EXPORTER_OTLP_PROTOCOL}}|$TEST_OTEL_PROTOCOL|g" \
+        -e "s|{{OTEL_METRIC_EXPORT_INTERVAL}}|$TEST_OTEL_METRIC_INTERVAL|g" \
         "$template" >"$out"
 }
 
