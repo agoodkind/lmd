@@ -19,33 +19,24 @@ private final class FakeModelServer: ModelServer, @unchecked Sendable {
   let sizeBytes: Int64
   let kind: SwiftLMTrace.BackendKind
 
-  private let lock = NSLock()
   private var stopped = false
   private var running = false
   private var spawned = false
   private var throttleLevels: [ThrottleLevel] = []
 
   var didSpawn: Bool {
-    lock.lock()
-    defer { lock.unlock() }
     return spawned
   }
 
   var didStop: Bool {
-    lock.lock()
-    defer { lock.unlock() }
     return stopped
   }
 
   var isRunning: Bool {
-    lock.lock()
-    defer { lock.unlock() }
     return running && !stopped
   }
 
   var appliedThrottleLevels: [ThrottleLevel] {
-    lock.lock()
-    defer { lock.unlock() }
     return throttleLevels
   }
 
@@ -56,10 +47,8 @@ private final class FakeModelServer: ModelServer, @unchecked Sendable {
   }
 
   func spawn() async throws {
-    lock.lock()
     spawned = true
     running = true
-    lock.unlock()
   }
 
   func waitReady() async throws {}
@@ -76,22 +65,16 @@ private final class FakeModelServer: ModelServer, @unchecked Sendable {
   }
 
   func applyPowerThrottle(_ level: ThrottleLevel) {
-    lock.lock()
     throttleLevels.append(level)
-    lock.unlock()
   }
 
   func shutdown() {
-    lock.lock()
     stopped = true
     running = false
-    lock.unlock()
   }
 
   func markStoppedExternally() {
-    lock.lock()
     running = false
-    lock.unlock()
   }
 }
 
