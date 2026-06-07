@@ -19,11 +19,12 @@ private typealias WireThrottleLevel = SwiftLMHostProtocol.ThrottleLevel
 
 // MARK: - Spawner
 
-public typealias ModelServerSpawner = @Sendable (
-  _ model: ModelDescriptor,
-  _ kind: SwiftLMTrace.BackendKind,
-  _ loadConfig: ModelLoadConfig
-) async throws -> ModelServer
+public typealias ModelServerSpawner =
+  @Sendable (
+    _ model: ModelDescriptor,
+    _ kind: SwiftLMTrace.BackendKind,
+    _ loadConfig: ModelLoadConfig
+  ) async throws -> ModelServer
 
 // MARK: - Router state
 
