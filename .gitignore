@@ -16,3 +16,9 @@ Tuist/.build/
 
 config/signing.env
 Products/
+
+# swift-mk scratch (fetched modules, built binary, logs)
+.make/
+
+# Editors (personal / machine-specific)
+.vscode/
