@@ -49,6 +49,7 @@ public enum PrometheusExposition {
 
   private static func escape(_ value: String) -> String {
     let slash = "\\"
+
     return value
       .replacingOccurrences(of: slash, with: slash + slash)
       .replacingOccurrences(of: Self.quote, with: slash + Self.quote)
