@@ -35,7 +35,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.23.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.12.0"),
     .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
-    .package(url: "https://github.com/agoodkind/mlx-swift-lm.git", revision: "3e1052721d436bf5611d0632dc3ee88994d60dea"),
+    .package(url: "https://github.com/agoodkind/mlx-swift-lm.git", revision: "1869eaa3f0ae86fcd440ff67fe1b0988e00a787b"),
     .package(url: "https://github.com/agoodkind/mlx-swift.git", branch: "main"),
     .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
     .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.3.2"),
