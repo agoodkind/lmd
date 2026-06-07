@@ -19,6 +19,7 @@ import AppLogger
 import Darwin
 import Foundation
 import os
+import SwiftLMMetrics
 
 public enum BackendTrace {
   /// Single backing logger for the entire trace plane. Filter with
@@ -32,10 +33,20 @@ public enum BackendTrace {
     snapshot: MemorySnapshot? = nil,
     extras: [String: String] = [:]
   ) {
+    let timestamp = monoNanos()
     let message = format(
       phase: phase,
       context: context,
       snapshot: snapshot,
+      monotonicNanoseconds: timestamp,
+      extras: extras
+    )
+    recordSnapshotEvent(
+      phase: phase,
+      level: "notice",
+      context: context,
+      snapshot: snapshot,
+      monotonicNanoseconds: timestamp,
       extras: extras
     )
     logger.notice("\(message, privacy: .public)")
@@ -49,10 +60,20 @@ public enum BackendTrace {
     snapshot: MemorySnapshot? = nil,
     extras: [String: String] = [:]
   ) {
+    let timestamp = monoNanos()
     let message = format(
       phase: phase,
       context: context,
       snapshot: snapshot,
+      monotonicNanoseconds: timestamp,
+      extras: extras
+    )
+    recordSnapshotEvent(
+      phase: phase,
+      level: "debug",
+      context: context,
+      snapshot: snapshot,
+      monotonicNanoseconds: timestamp,
       extras: extras
     )
     logger.debug("\(message, privacy: .public)")
@@ -65,12 +86,13 @@ public enum BackendTrace {
     phase: String,
     context: TraceContext,
     snapshot: MemorySnapshot? = nil,
+    monotonicNanoseconds: UInt64? = nil,
     extras: [String: String] = [:]
   ) -> String {
     let snap = snapshot ?? MemorySnapshot.zero
     var parts: [String] = []
     parts.append("phase=\(phase)")
-    parts.append("ts_mono=\(monoNanos())")
+    parts.append("ts_mono=\(monotonicNanoseconds ?? monoNanos())")
     parts.append("model=\(context.modelID)")
     parts.append("model_kind=\(context.modelKind.rawValue)")
     parts.append("load_id=\(context.loadID?.uuidString ?? "none")")
@@ -90,5 +112,31 @@ public enum BackendTrace {
   /// stream remain meaningful.
   private static func monoNanos() -> UInt64 {
     clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+  }
+
+  private static func recordSnapshotEvent(
+    phase: String,
+    level: String,
+    context: TraceContext,
+    snapshot: MemorySnapshot?,
+    monotonicNanoseconds: UInt64,
+    extras: [String: String]
+  ) {
+    let snap = snapshot ?? MemorySnapshot.zero
+    var attributes = extras
+    attributes["load_id"] = context.loadID?.uuidString ?? "none"
+    attributes["backend_obj"] = context.backendObjectID ?? "none"
+    attributes["mlx_active"] = "\(snap.active)"
+    attributes["mlx_cache"] = "\(snap.cache)"
+    attributes["mlx_peak"] = "\(snap.peak)"
+    SnapshotSink.shared.recordTraceEvent(
+      phase: phase,
+      level: level,
+      modelID: context.modelID,
+      modelKind: context.modelKind.rawValue,
+      requestID: context.requestID?.uuidString,
+      monotonicNanoseconds: monotonicNanoseconds,
+      attributes: attributes
+    )
   }
 }

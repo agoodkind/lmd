@@ -11,6 +11,7 @@
 import AppLogger
 import Foundation
 import LMDServeSupport
+import SwiftLMMetrics
 import SwiftLMCore
 import SwiftLMHostProtocol
 import SwiftLMRuntime
@@ -38,6 +39,7 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
   private var process: Process?
   private var session: XPCSession?
   private var lastStats = BackendStats(rssBytes: 0, gpuActiveBytes: 0, gpuCacheBytes: 0)
+  private var lastMetricsSnapshot: MetricsSnapshot?
   private var readyContinuation: CheckedContinuation<Void, Error>?
   private var isReady = false
   private var streams: [UUID: AsyncThrowingStream<BackendFrame, Error>.Continuation] = [:]
@@ -119,8 +121,19 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
       lock.unlock()
       cont?.yield(frame)
       cont?.finish()
-    case .hello, .metricsSnapshot:
-      break  // hello handled at bind time; metrics handled by the metrics task
+    case .metricsSnapshot(let data):
+      do {
+        let snapshot = try MetricsJSON.decodeSnapshot(data)
+        lock.lock()
+        lastMetricsSnapshot = snapshot
+        lock.unlock()
+      } catch {
+        log.error(
+          "host.metrics_snapshot_decode_failed model=\(self.modelID, privacy: .public) err=\(String(describing: error), privacy: .public)"
+        )
+      }
+    case .hello:
+      break
     }
   }
 
@@ -195,6 +208,10 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
 
   func stats() async -> BackendStats {
     withLock { lastStats }
+  }
+
+  func metricsSnapshot() -> MetricsSnapshot? {
+    withLock { lastMetricsSnapshot }
   }
 
   // Forward a battery throttle level to the host as an out-of-band control

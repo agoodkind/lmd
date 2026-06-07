@@ -267,13 +267,11 @@ private final class SessionHandler: @unchecked Sendable {
     )
 
     do {
-      let vectors = try await TraceTaskLocal.$requestID.withValue(requestID) {
-        try await TraceTaskLocal.$loadID.withValue(routerInfo?.loadID) {
-          try await TraceTaskLocal.$backendObjectID.withValue(routerInfo?.backendObjectID) {
-            try await embedWithModelServer(server: server, inputs: inputs, requestID: requestID)
-          }
-        }
-      }
+      let vectors = try await embedWithModelServer(
+        server: server,
+        inputs: inputs,
+        requestID: requestID
+      )
       await state.router.embeddingRequestDone(modelID: descriptor.id)
       BackendTrace.notice(
         phase: TracePhase.Broker.requestDoneAck.rawValue,

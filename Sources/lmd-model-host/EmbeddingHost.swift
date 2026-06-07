@@ -9,11 +9,14 @@
 //  `done`, or a single `failed` frame on any error.
 //
 
+import Dispatch
 import Foundation
 import SwiftLMBackend
 import SwiftLMCore
 import SwiftLMEmbed
 import SwiftLMHostProtocol
+import SwiftLMMetrics
+import SwiftLMTrace
 
 /// In-process embedding serving for `lmd-model-host`. Holds the loaded backend
 /// and turns a `BackendRequest` into the broker-facing frame sequence.
@@ -62,22 +65,61 @@ actor EmbeddingHost {
   /// Decoding, the forward pass, and encoding all happen here; any thrown error
   /// is mapped to a single `failed` frame by the caller.
   func frames(for request: BackendRequest) async -> [BackendFrame] {
+    let requestStartedAt = Date()
+    let requestStartedNanoseconds = DispatchTime.now().uptimeNanoseconds
     guard let backend else {
+      recordRequestSpan(
+        request: request,
+        startedAt: requestStartedAt,
+        startedNanoseconds: requestStartedNanoseconds,
+        outcome: "failed",
+        attributes: ["error": "embedding model not loaded"]
+      )
       return [.failed(requestID: request.requestID, message: "embedding model not loaded")]
     }
     let inputs: [String]
     do {
       inputs = try OpenAIEmbeddingsInput.parse(request.openAIBody)
     } catch {
+      recordRequestSpan(
+        request: request,
+        startedAt: requestStartedAt,
+        startedNanoseconds: requestStartedNanoseconds,
+        outcome: "failed",
+        attributes: ["error": "bad embeddings input: \(error)"]
+      )
       return [.failed(requestID: request.requestID, message: "bad embeddings input: \(error)")]
     }
     let vectors: [[Float]]
     do {
-      vectors = try await backend.embed(inputs: inputs)
+      vectors = try await TraceTaskLocal.$requestID.withValue(request.requestID) {
+        try await backend.embed(inputs: inputs)
+      }
     } catch {
+      recordRequestSpan(
+        request: request,
+        startedAt: requestStartedAt,
+        startedNanoseconds: requestStartedNanoseconds,
+        outcome: "failed",
+        attributes: [
+          "error": "embed failed: \(error)",
+          "input_count": "\(inputs.count)",
+        ]
+      )
       return [.failed(requestID: request.requestID, message: "embed failed: \(error)")]
     }
     let (dims, payload) = VectorBlob.encode(vectors)
+    recordRequestSpan(
+      request: request,
+      startedAt: requestStartedAt,
+      startedNanoseconds: requestStartedNanoseconds,
+      outcome: "completed",
+      attributes: [
+        "dims": "\(dims)",
+        "input_count": "\(inputs.count)",
+        "vector_count": "\(vectors.count)",
+      ]
+    )
     // Prompt tokens are not cheaply available from the embedding forward pass
     // without re-tokenizing, so report 0 per the Phase 2 contract.
     return [
@@ -85,5 +127,24 @@ actor EmbeddingHost {
       .usage(requestID: request.requestID, promptTokens: 0, completionTokens: 0),
       .done(requestID: request.requestID),
     ]
+  }
+
+  private func recordRequestSpan(
+    request: BackendRequest,
+    startedAt: Date,
+    startedNanoseconds: UInt64,
+    outcome: String,
+    attributes: [String: String]
+  ) {
+    let finishedNanoseconds = DispatchTime.now().uptimeNanoseconds
+    SnapshotSink.shared.recordRequestSpan(
+      name: "embedding.request",
+      modelID: modelPath,
+      modelKind: "embedding",
+      requestID: request.requestID,
+      startedAt: startedAt,
+      durationMilliseconds: Double(finishedNanoseconds - startedNanoseconds) / 1_000_000,
+      attributes: attributes.merging(["outcome": outcome]) { current, _ in current }
+    )
   }
 }

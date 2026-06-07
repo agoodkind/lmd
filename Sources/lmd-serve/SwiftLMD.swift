@@ -22,6 +22,7 @@ import SwiftLMControl
 import SwiftLMCore
 import SwiftLMEmbed
 import SwiftLMHostProtocol
+import SwiftLMMetrics
 import SwiftLMMonitor
 import SwiftLMRuntime
 import SwiftLMTrace
@@ -152,6 +153,13 @@ final class HostServerStore: @unchecked Sendable {
     defer { lock.unlock() }
     return byModelID[modelID]
   }
+
+  func metricsSnapshots() -> [MetricsSnapshot] {
+    lock.lock()
+    let servers = Array(byModelID.values)
+    lock.unlock()
+    return servers.compactMap { $0.metricsSnapshot() }
+  }
 }
 
 /// Everything the HTTP handlers need. The router is a `ModelRouter` actor.
@@ -228,6 +236,43 @@ struct OpenAIModelsResponse: Codable {
 
 struct ChatCompletionRequest: Codable {
   let model: String
+}
+
+func brokerMetricsSnapshot(state: BrokerState) async -> MergedMetricsSnapshot {
+  let routerSnapshot = await state.router.snapshot()
+  let reading = await state.router.memoryReading()
+  SnapshotSink.shared.setGauge(
+    name: "lmd_broker_loaded_models",
+    value: Double(routerSnapshot.loaded.count)
+  )
+  SnapshotSink.shared.setGauge(
+    name: "lmd_broker_allocated_bytes",
+    value: Double(routerSnapshot.allocatedBytes)
+  )
+  SnapshotSink.shared.setGauge(
+    name: "lmd_broker_available_bytes",
+    value: Double(reading.availableBytes)
+  )
+  SnapshotSink.shared.setGauge(
+    name: "lmd_broker_memory_under_pressure",
+    value: reading.underPressure ? 1 : 0
+  )
+  let snapshots = [SnapshotSink.shared.snapshot()] + state.hostServers.metricsSnapshots()
+  return MetricsJSON.merge(snapshots)
+}
+
+func prometheusMetricsEnabled() -> Bool {
+  let environment = ProcessInfo.processInfo.environment
+  let keys = ["LMD_ENABLE_PROMETHEUS_METRICS", "LMD_ENABLE_METRICS"]
+  for key in keys {
+    guard let rawValue = environment[key] else {
+      continue
+    }
+    if rawValue == "1" || rawValue.lowercased() == "true" {
+      return true
+    }
+  }
+  return false
 }
 
 struct ErrorEnvelope: Codable {
@@ -388,6 +433,7 @@ func performModelUnload(
 struct SwiftLMD {
   static func main() async throws {
     AppLogger.bootstrap(subsystem: "io.goodkind.lmd")
+    SwiftLMMetrics.bootstrap(process: "lmd-serve", sourceID: "broker")
     slog("swiftlmd v\(SwiftLMCore.version) starting")
 
     // Resolve configuration once, through the single typed seam. A missing or
@@ -642,12 +688,6 @@ struct SwiftLMD {
       ))
     sampler.start()
 
-    // BackendTrace background ticker. Emits `phase=tick` lines once per
-    // second while any backend is loaded so the trace stream has
-    // time-series memory data independent of request flow.
-    let traceSampler = BackendTraceSampler(router: router)
-    await traceSampler.start()
-
     log.notice("fan_control.disabled reason=moratorium")
 
     // HTTP router
@@ -717,6 +757,38 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
       headers: [.contentType: "application/json"],
       body: .init(byteBuffer: ByteBuffer(data: data))
     )
+  }
+
+  router.get("/swiftlmd/metrics") { _, _ async throws -> Response in
+    let merged = await brokerMetricsSnapshot(state: state)
+    let data = try MetricsJSON.encoder.encode(merged)
+    return Response(
+      status: .ok,
+      headers: [.contentType: "application/json"],
+      body: .init(byteBuffer: ByteBuffer(data: data))
+    )
+  }
+
+  router.get("/swiftlmd/traces") { _, _ async throws -> Response in
+    let merged = await brokerMetricsSnapshot(state: state)
+    let data = try MetricsJSON.tracesPayload(from: merged)
+    return Response(
+      status: .ok,
+      headers: [.contentType: "application/json"],
+      body: .init(byteBuffer: ByteBuffer(data: data))
+    )
+  }
+
+  if prometheusMetricsEnabled() {
+    router.get("/metrics") { _, _ async -> Response in
+      let merged = await brokerMetricsSnapshot(state: state)
+      let body = PrometheusExposition.render(merged)
+      return Response(
+        status: .ok,
+        headers: [.contentType: "text/plain; version=0.0.4"],
+        body: .init(byteBuffer: ByteBuffer(string: body))
+      )
+    }
   }
 
   router.post("/api/v1/models/load") { req, _ async throws -> Response in
@@ -1029,13 +1101,11 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
 
   let vectors: [[Float]]
   do {
-    vectors = try await TraceTaskLocal.$requestID.withValue(requestID) {
-      try await TraceTaskLocal.$loadID.withValue(routerInfo?.loadID) {
-        try await TraceTaskLocal.$backendObjectID.withValue(routerInfo?.backendObjectID) {
-          try await embedWithModelServer(server: server, inputs: inputs, requestID: requestID)
-        }
-      }
-    }
+    vectors = try await embedWithModelServer(
+      server: server,
+      inputs: inputs,
+      requestID: requestID
+    )
   } catch {
     await requestDoneToken.finish()
     log.error(

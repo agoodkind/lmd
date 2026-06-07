@@ -10,9 +10,11 @@
 
 import AppLogger
 import Foundation
+import SwiftLMMetrics
 import SwiftLMHostProtocol
 import XPC
 
+AppLogger.bootstrap(subsystem: "io.goodkind.lmd")
 private let log = AppLogger.logger(category: "ModelHost")
 
 guard let args = HostArguments.parse(Array(CommandLine.arguments.dropFirst())) else {
@@ -27,10 +29,25 @@ guard let tokenLine = readLine(strippingNewline: true), !tokenLine.isEmpty else 
 }
 let spawnToken = tokenLine
 
+SwiftLMMetrics.bootstrap(
+  process: "lmd-model-host",
+  sourceID: "host:\(args.kind.rawValue):\(args.modelPath)",
+  modelID: args.modelPath,
+  modelKind: args.kind.rawValue
+)
+
 // A box so the session reference is available to the request handler closure.
 final class SessionBox: @unchecked Sendable {
   var session: XPCSession?
   func send(_ frame: BackendFrame) { try? session?.send(frame) }
+
+  func sendMetricsSnapshot() {
+    do {
+      send(.metricsSnapshot(try SnapshotSink.shared.encodedSnapshot()))
+    } catch {
+      log.error("host.metrics_snapshot_failed err=\(String(describing: error), privacy: .public)")
+    }
+  }
 }
 let box = SessionBox()
 
@@ -100,6 +117,7 @@ do {
             return nil
           }
           Task {
+            defer { box.sendMetricsSnapshot() }
             let frames = await embeddingHost.frames(for: request)
             for frame in frames {
               box.send(frame)
@@ -112,6 +130,7 @@ do {
             return nil
           }
           Task {
+            defer { box.sendMetricsSnapshot() }
             let frames = await videoHost.frames(for: request)
             for frame in frames {
               box.send(frame)
@@ -123,6 +142,7 @@ do {
             return nil
           }
           Task {
+            defer { box.sendMetricsSnapshot() }
             await chatHost.serve(request, send: box.send)
           }
         }
@@ -185,6 +205,7 @@ statsTimer.setEventHandler {
           rssBytes: stats.rssBytes,
           gpuActiveBytes: stats.gpuActiveBytes,
           gpuCacheBytes: stats.gpuCacheBytes))
+      box.sendMetricsSnapshot()
     }
   } else {
     let stats = HostMemory.currentStats()
@@ -193,6 +214,7 @@ statsTimer.setEventHandler {
         rssBytes: stats.rssBytes,
         gpuActiveBytes: stats.gpuActiveBytes,
         gpuCacheBytes: stats.gpuCacheBytes))
+    box.sendMetricsSnapshot()
   }
 }
 statsTimer.resume()

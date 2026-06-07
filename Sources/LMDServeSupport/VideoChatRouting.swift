@@ -12,6 +12,7 @@ import Hummingbird
 import MLXLMCommon
 import SwiftLMBackend
 import SwiftLMCore
+import SwiftLMTrace
 
 private let log = AppLogger.logger(category: "VideoChatRouting")
 
@@ -103,19 +104,22 @@ public struct VideoChatRouteRequest: Sendable {
   public let bodyData: Data
   public let wantsStream: Bool
   public let videos: [OpenAIVideoInput]
+  public let requestID: UUID?
 
   public init(
     model: ModelDescriptor,
     endpoint: OpenAIChatEndpoint,
     bodyData: Data,
     wantsStream: Bool,
-    videos: [OpenAIVideoInput]
+    videos: [OpenAIVideoInput],
+    requestID: UUID? = nil
   ) {
     self.model = model
     self.endpoint = endpoint
     self.bodyData = bodyData
     self.wantsStream = wantsStream
     self.videos = videos
+    self.requestID = requestID
   }
 }
 
@@ -159,6 +163,7 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
   public init() {}
 
   public func complete(_ request: VideoChatRouteRequest) async throws -> BackendChatResult {
+    let traceContext = videoTraceContext(request)
     let completionRequest = try makeMLXVLMVideoCompletionRequest(from: request.bodyData)
     guard let modelFPS = request.model.capabilities.videoSamplingFPS else {
       throw VideoChatBackendError.modelMissingVideoSamplingFPS(modelID: request.model.id)
@@ -171,6 +176,15 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
     let allVideoURLs =
       completionRequest.videoURLs
       + completionRequest.messages.flatMap(\.videoURLs)
+    BackendTrace.debug(
+      phase: TracePhase.Video.requestPreFrames.rawValue,
+      context: traceContext,
+      snapshot: .current(),
+      extras: [
+        "video_count": "\(allVideoURLs.count)",
+        "effective_fps": "\(effectiveFPS)",
+      ]
+    )
     var preSampledVideos: [UserInput.Video] = []
     preSampledVideos.reserveCapacity(allVideoURLs.count)
     var totalFrames = 0
@@ -183,20 +197,48 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
       totalFrames += frames.count
       preSampledVideos.append(.frames(frames))
     }
+    BackendTrace.debug(
+      phase: TracePhase.Video.requestPostFrames.rawValue,
+      context: traceContext,
+      snapshot: .current(),
+      extras: [
+        "sampled_frame_count": "\(totalFrames)",
+        "video_count": "\(allVideoURLs.count)",
+      ]
+    )
     let preparedRequest = completionRequest.replacingVideos(
       preSampledVideos,
       sampledFrameCount: totalFrames,
       sampledFPS: effectiveFPS
     )
     let backend = try backend(for: request.model)
+    BackendTrace.debug(
+      phase: TracePhase.Video.requestPreGenerate.rawValue,
+      context: traceContext,
+      snapshot: .current(),
+      extras: ["stream": "\(request.wantsStream)"]
+    )
     if request.wantsStream {
       return try await streamCompletion(
         modelID: request.model.id,
         backend: backend,
-        request: preparedRequest
+        request: preparedRequest,
+        traceContext: traceContext
       )
     }
     let completion = try await backend.complete(preparedRequest)
+    BackendTrace.debug(
+      phase: TracePhase.Video.requestPostGenerate.rawValue,
+      context: traceContext,
+      snapshot: .current(),
+      extras: ["stream": "false"]
+    )
+    BackendTrace.debug(
+      phase: TracePhase.Video.requestPreReturn.rawValue,
+      context: traceContext,
+      snapshot: .current(),
+      extras: ["stream": "false"]
+    )
     return .buffered(
       statusCode: 200,
       contentType: "application/json",
@@ -217,7 +259,8 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
   private func streamCompletion(
     modelID: String,
     backend: MLXVLMVideoBackend,
-    request: MLXVLMVideoCompletionRequest
+    request: MLXVLMVideoCompletionRequest,
+    traceContext: TraceContext
   ) async throws -> BackendChatResult {
     let id = "chatcmpl-\(UUID().uuidString)"
     let created = Int(Date().timeIntervalSince1970)
@@ -235,6 +278,17 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
               completionInfo = info
             }
           }
+          var extras = ["stream": "true"]
+          if let completionInfo {
+            extras["completion_tokens"] = "\(completionInfo.generationTokenCount)"
+            extras["prompt_tokens"] = "\(completionInfo.promptTokenCount)"
+          }
+          BackendTrace.debug(
+            phase: TracePhase.Video.requestPostGenerate.rawValue,
+            context: traceContext,
+            snapshot: .current(),
+            extras: extras
+          )
           let usage = completionInfo.map { info in
             BackendUsage(
               promptTokens: info.promptTokenCount,
@@ -250,6 +304,12 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
               finishReason: completionInfo?.finishReason ?? "stop",
               usage: usage
             ))
+          BackendTrace.debug(
+            phase: TracePhase.Video.requestPreReturn.rawValue,
+            context: traceContext,
+            snapshot: .current(),
+            extras: extras
+          )
           continuation.finish()
         } catch {
           continuation.finish(throwing: error)
@@ -267,6 +327,14 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
       lifetimeToken: nil
     )
   }
+}
+
+private func videoTraceContext(_ request: VideoChatRouteRequest) -> TraceContext {
+  TraceContext(
+    modelID: request.model.id,
+    modelKind: .video,
+    requestID: request.requestID
+  )
 }
 
 public enum VideoChatRequestBuildError: Error, Equatable, CustomStringConvertible {

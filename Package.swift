@@ -19,6 +19,8 @@ let package = Package(
   products: [
     .library(name: "AppLogger", targets: ["AppLogger"]),
     .library(name: "SwiftLMCore", targets: ["SwiftLMCore"]),
+    .library(name: "SwiftLMMetrics", targets: ["SwiftLMMetrics"]),
+    .library(name: "SwiftLMMetricsOTel", targets: ["SwiftLMMetricsOTel"]),
     .library(name: "SwiftLMTrace", targets: ["SwiftLMTrace"]),
     .library(name: "SwiftLMBackend", targets: ["SwiftLMBackend"]),
     .library(name: "SwiftLMEmbed", targets: ["SwiftLMEmbed"]),
@@ -61,9 +63,22 @@ let package = Package(
       swiftSettings: strictConcurrency
     ),
     .target(
+      name: "SwiftLMMetrics",
+      dependencies: [],
+      path: "Sources/SwiftLMMetrics",
+      swiftSettings: strictConcurrency
+    ),
+    .target(
+      name: "SwiftLMMetricsOTel",
+      dependencies: ["SwiftLMMetrics"],
+      path: "Sources/SwiftLMMetricsOTel",
+      swiftSettings: strictConcurrency
+    ),
+    .target(
       name: "SwiftLMTrace",
       dependencies: [
         "AppLogger",
+        "SwiftLMMetrics",
         .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
       ],
       path: "Sources/SwiftLMTrace",
@@ -152,6 +167,7 @@ let package = Package(
         "SwiftLMCore",
         "SwiftLMBackend",
         "SwiftLMRuntime",
+        "SwiftLMTrace",
         "SwiftLMHostProtocol",
         .product(name: "Hummingbird", package: "hummingbird"),
         .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
@@ -181,6 +197,8 @@ let package = Package(
         "SwiftLMCore",
         "SwiftLMBackend",
         "SwiftLMEmbed",
+        "SwiftLMMetrics",
+        "SwiftLMTrace",
         "SwiftLMHostProtocol",
         "LMDServeSupport",
         .product(name: "MLX", package: "mlx-swift"),
@@ -196,6 +214,8 @@ let package = Package(
         "SwiftLMRuntime",
         "SwiftLMMonitor",
         "SwiftLMControl",
+        "SwiftLMMetrics",
+        "SwiftLMMetricsOTel",
         "SwiftLMTrace",
         "SwiftLMHostProtocol",
         "LMDServeSupport",

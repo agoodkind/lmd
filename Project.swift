@@ -128,6 +128,16 @@ let project = Project(
       dependencies: []
     ),
     frameworkTarget(
+      "SwiftLMMetrics",
+      dependencies: []
+    ),
+    frameworkTarget(
+      "SwiftLMMetricsOTel",
+      dependencies: [
+        .target(name: "SwiftLMMetrics"),
+      ]
+    ),
+    frameworkTarget(
       "SwiftLMHostProtocol",
       dependencies: []
     ),
@@ -135,6 +145,7 @@ let project = Project(
       "SwiftLMTrace",
       dependencies: [
         .target(name: "AppLogger"),
+        .target(name: "SwiftLMMetrics"),
         .external(name: "MLXLMCommon"),
       ]
     ),
@@ -242,6 +253,7 @@ let project = Project(
         .target(name: "SwiftLMCore"),
         .target(name: "SwiftLMBackend"),
         .target(name: "SwiftLMRuntime"),
+        .target(name: "SwiftLMTrace"),
         .target(name: "SwiftLMHostProtocol"),
         .external(name: "Hummingbird"),
         .external(name: "MLXLMCommon"),
@@ -272,6 +284,8 @@ let project = Project(
         .target(name: "SwiftLMRuntime"),
         .target(name: "SwiftLMMonitor"),
         .target(name: "SwiftLMControl"),
+        .target(name: "SwiftLMMetrics"),
+        .target(name: "SwiftLMMetricsOTel"),
         .target(name: "SwiftLMTrace"),
         .target(name: "SwiftLMHostProtocol"),
         .target(name: "LMDServeSupport"),
