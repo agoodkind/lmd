@@ -23,6 +23,7 @@ final class BrokerConfigTests: XCTestCase {
     env[BrokerConfigKey.chatMaxConcurrency.rawValue] = "4"
     env[BrokerConfigKey.embeddingMaxConcurrency.rawValue] = "4"
     env[BrokerConfigKey.batteryThrottlePct.rawValue] = "20"
+    env[BrokerConfigKey.batteryMildPct.rawValue] = "35"
     env[BrokerConfigKey.batteryResumePct.rawValue] = "80"
     env[BrokerConfigKey.disableXPC.rawValue] = "0"
     env[BrokerConfigKey.idleMinutes.rawValue] = "15"
@@ -49,6 +50,7 @@ final class BrokerConfigTests: XCTestCase {
     XCTAssertEqual(config.chatMaxConcurrency, 4)
     XCTAssertEqual(config.embeddingMaxConcurrency, 4)
     XCTAssertEqual(config.batteryThrottlePct, 20)
+    XCTAssertEqual(config.batteryMildPct, 35)
     XCTAssertEqual(config.batteryResumePct, 80)
     XCTAssertFalse(config.disableXPC)
     XCTAssertEqual(config.idleMinutes, 15)
@@ -103,6 +105,26 @@ final class BrokerConfigTests: XCTestCase {
         let keys = ((error as? BrokerConfigError)?.problems.map(\.key)) ?? []
         XCTAssertTrue(keys.contains(.embeddingMaxConcurrency))
       }
+    }
+  }
+
+  func testMildPctMustBeAboveThrottlePct() {
+    var env = completeEnvironment()
+    env[BrokerConfigKey.batteryThrottlePct.rawValue] = "40"
+    env[BrokerConfigKey.batteryMildPct.rawValue] = "35"
+    XCTAssertThrowsError(try config(env)) { error in
+      let keys = ((error as? BrokerConfigError)?.problems.map(\.key)) ?? []
+      XCTAssertTrue(keys.contains(.batteryMildPct))
+    }
+  }
+
+  func testMildPctMustBeBelowResumePct() {
+    var env = completeEnvironment()
+    env[BrokerConfigKey.batteryMildPct.rawValue] = "85"
+    env[BrokerConfigKey.batteryResumePct.rawValue] = "80"
+    XCTAssertThrowsError(try config(env)) { error in
+      let keys = ((error as? BrokerConfigError)?.problems.map(\.key)) ?? []
+      XCTAssertTrue(keys.contains(.batteryMildPct))
     }
   }
 

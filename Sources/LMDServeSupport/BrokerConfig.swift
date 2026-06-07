@@ -39,6 +39,7 @@ public enum BrokerConfigKey: String, CaseIterable, Sendable {
   case chatMaxConcurrency = "LMD_CHAT_MAX_CONCURRENCY"
   case embeddingMaxConcurrency = "LMD_EMBEDDING_MAX_CONCURRENCY"
   case batteryThrottlePct = "LMD_BATTERY_THROTTLE_PCT"
+  case batteryMildPct = "LMD_BATTERY_MILD_PCT"
   case batteryResumePct = "LMD_BATTERY_RESUME_PCT"
   case disableXPC = "LMD_DISABLE_XPC"
   case idleMinutes = "LMD_IDLE_MINUTES"
@@ -114,6 +115,7 @@ public struct BrokerConfig: Sendable {
   public let chatMaxConcurrency: Int
   public let embeddingMaxConcurrency: Int
   public let batteryThrottlePct: Int
+  public let batteryMildPct: Int
   public let batteryResumePct: Int
   public let disableXPC: Bool
   public let idleMinutes: Int
@@ -229,7 +231,20 @@ public struct BrokerConfig: Sendable {
     let chatConcurrency = requireInt(.chatMaxConcurrency, min: 1)
     let embeddingConcurrency = requireInt(.embeddingMaxConcurrency, min: 1)
     let throttlePct = requireInt(.batteryThrottlePct, min: 0, max: 100)
+    let mildPct = requireInt(.batteryMildPct, min: 0, max: 100)
     let resumePct = requireInt(.batteryResumePct, min: 0, max: 100)
+    // The mild band must sit above the hard stop and below the resume point, so
+    // the levels stay ordered: hard <= mild <= resume with both gaps non-empty.
+    if let throttlePct, let mildPct, mildPct <= throttlePct {
+      record(
+        .batteryMildPct, String(mildPct),
+        "must be greater than LMD_BATTERY_THROTTLE_PCT (\(throttlePct))")
+    }
+    if let mildPct, let resumePct, mildPct >= resumePct {
+      record(
+        .batteryMildPct, String(mildPct),
+        "must be less than LMD_BATTERY_RESUME_PCT (\(resumePct))")
+    }
     let disableXPC = requireBool(.disableXPC)
     let idleMinutes = requireInt(.idleMinutes, min: 0)
     let embeddingIdleMinutes = requireInt(.embeddingIdleMinutes, min: 0)
@@ -260,6 +275,7 @@ public struct BrokerConfig: Sendable {
       let chatConcurrency,
       let embeddingConcurrency,
       let throttlePct,
+      let mildPct,
       let resumePct,
       let disableXPC,
       let idleMinutes,
@@ -280,6 +296,7 @@ public struct BrokerConfig: Sendable {
     self.chatMaxConcurrency = chatConcurrency
     self.embeddingMaxConcurrency = embeddingConcurrency
     self.batteryThrottlePct = throttlePct
+    self.batteryMildPct = mildPct
     self.batteryResumePct = resumePct
     self.disableXPC = disableXPC
     self.idleMinutes = idleMinutes

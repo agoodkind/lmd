@@ -59,6 +59,8 @@
         <string>4</string>
         <key>LMD_BATTERY_THROTTLE_PCT</key>
         <string>20</string>
+        <key>LMD_BATTERY_MILD_PCT</key>
+        <string>35</string>
         <key>LMD_BATTERY_RESUME_PCT</key>
         <string>80</string>
         <key>LMD_DISABLE_XPC</key>

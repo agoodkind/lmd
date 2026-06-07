@@ -177,6 +177,7 @@ final class EmbeddingsRouteTests: XCTestCase {
     env["LMD_CHAT_MAX_CONCURRENCY"] = "4"
     env["LMD_EMBEDDING_MAX_CONCURRENCY"] = "4"
     env["LMD_BATTERY_THROTTLE_PCT"] = "20"
+    env["LMD_BATTERY_MILD_PCT"] = "35"
     env["LMD_BATTERY_RESUME_PCT"] = "80"
     env["LMD_DATA_DIR"] = NSTemporaryDirectory()
     env["LMD_SAMPLE_INTERVAL"] = "15"
