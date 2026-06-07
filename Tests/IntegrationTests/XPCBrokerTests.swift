@@ -62,12 +62,12 @@ final class XPCBrokerTests: XCTestCase {
     XCTAssertFalse(vectors[0].isEmpty)
 
     _ = try await client.unload(model: model.id)
-    let unloaded = try await waitForModelPresence(
+    let reachedUnloaded = try await waitForModelPresence(
       modelID: model.id,
       expected: false,
       client: client
     )
-    XCTAssertFalse(unloaded, "model should be unloaded after unload")
+    XCTAssertTrue(reachedUnloaded, "model should be unloaded after unload")
   }
 
   // MARK: - Helpers
