@@ -95,6 +95,31 @@ public final class SnapshotSink: @unchecked Sendable {
     lock.unlock()
   }
 
+  /// Add a signed delta to a gauge, creating it at zero first. Backs the
+  /// swift-metrics Meter increment/decrement operations through the factory.
+  public func adjustGauge(
+    name: String,
+    by delta: Double,
+    labels: [String: String] = [:]
+  ) {
+    lock.lock()
+    let key = MetricKey(name: name, labels: labelsWithSource(labels))
+    gauges[key, default: 0] += delta
+    lock.unlock()
+  }
+
+  /// Reset a counter series to zero. Backs the swift-metrics Counter reset
+  /// operation through the factory.
+  public func resetCounter(
+    name: String,
+    labels: [String: String] = [:]
+  ) {
+    lock.lock()
+    let key = MetricKey(name: name, labels: labelsWithSource(labels))
+    counters[key] = 0
+    lock.unlock()
+  }
+
   public func recordDuration(
     name: String,
     seconds: Double,
