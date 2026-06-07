@@ -44,6 +44,10 @@ public enum BrokerRequest: Codable, Sendable {
   case pullStart(slug: String)
   case embed(model: String, inputs: [String])
   case events
+  /// Request the merged broker metrics snapshot (counters, gauges,
+  /// histograms, per-helper sources, and the recent-traces ring buffer)
+  /// as the same JSON the `/swiftlmd/metrics` HTTP route serves.
+  case metrics
 }
 
 // MARK: - Response
@@ -62,6 +66,8 @@ public enum BrokerResponse: Codable, Sendable {
   case pullEvent(PullEvent)
   case pullCompleted(slug: String, destination: String)
   case embeddings([[Float]])
+  /// The merged metrics snapshot JSON bytes (same shape as `/swiftlmd/metrics`).
+  case metricsJSON(Data)
   case error(BrokerError)
 }
 

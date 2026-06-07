@@ -174,6 +174,21 @@ public final class BrokerClient: @unchecked Sendable {
     }
   }
 
+  /// Fetch the merged broker metrics snapshot as JSON bytes (same shape as the
+  /// `/swiftlmd/metrics` HTTP route), so first-party clients read perf/trace
+  /// state over XPC with no port to configure.
+  public func metrics() async throws -> Data {
+    let reply = try await sendForReply(.metrics)
+    switch reply {
+    case .metricsJSON(let data):
+      return data
+    case .error(let err):
+      throw err
+    default:
+      throw BrokerClientError.unexpectedResponse(message: "expected .metricsJSON, got \(reply)")
+    }
+  }
+
   // MARK: - Streaming events
 
   /// Subscribe to broker lifecycle events. The stream includes a

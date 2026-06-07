@@ -23,6 +23,7 @@ import Foundation
 import LMDServeSupport
 import SwiftLMControl
 import SwiftLMCore
+import SwiftLMMetrics
 import SwiftLMRuntime
 import SwiftLMTrace
 import XPC
@@ -138,6 +139,9 @@ private final class SessionHandler: @unchecked Sendable {
 
     case .embed(let model, let inputs):
       return runBlockingResponse { try await self.embed(model: model, inputs: inputs) }
+
+    case .metrics:
+      return runBlockingResponse { try await self.metrics() }
 
     case .pullStart(let slug):
       // Streaming: ack with .ok synchronously, then fan out progress frames
@@ -312,6 +316,15 @@ private final class SessionHandler: @unchecked Sendable {
       )
       return .error(BrokerError(kind: .embeddingFailed, message: "\(error)"))
     }
+  }
+
+  /// Build the merged broker metrics snapshot and return it as the same JSON
+  /// bytes the `/swiftlmd/metrics` HTTP route serves, so XPC clients (lmd-tui)
+  /// read perf/trace state without an HTTP port.
+  private func metrics() async throws -> BrokerResponse {
+    let merged = await brokerMetricsSnapshot(state: state)
+    let data = try MetricsJSON.encoder.encode(merged)
+    return .metricsJSON(data)
   }
 
   // MARK: - Streaming pull
