@@ -37,6 +37,18 @@ If you find yourself enumerating targets, categories, or filenames in prose, sto
 - **No file logging anywhere.** Every plist's `StandardOutPath` is `/dev/null`. Operators read with `log stream --subsystem io.goodkind.lmd`. `StandardErrorPath` is a real file under `~/Library/Logs/` so Swift runtime crash banners (`Fatal error:`, `Precondition failed:`, native `SIGSEGV` from MLX/NIO) survive long enough to diagnose — the os.Logger pipeline does not capture stderr.
 - **Library targets are pure.** Long-lived state, sockets, file IO, and process spawning belong in `Sources/lmd-serve` (or its dedicated subsystems), never in a `library` target.
 
+### 3.1 Model-host processes and the chat exception
+
+The broker is a pure router. It spawns one `lmd-model-host` process per loaded model, talks to it over a second XPC Mach service (`io.goodkind.lmd.host`, separate from the `io.goodkind.lmd.control` client surface), forwards work, reads each child's real memory, and evicts by `SIGKILL`. The broker runs no model inference itself. The clean shape is one resident model maps to exactly one process; embedding and video honor it by loading their MLX model in-process inside the helper.
+
+**Chat is the deliberate exception: its helper spawns the prebuilt SwiftLM binary and proxies the OpenAI request to it over loopback HTTP inside the helper.** So chat is two processes (helper plus its SwiftLM child) and reintroduces a loopback HTTP hop behind the XPC boundary, against the one-process / no-internal-HTTP ideal.
+
+Why it diverges, so nobody "fixes" it back into the broker or rewrites it in-process without knowing the cost:
+
+- The OpenAI chat *response* code (streaming SSE envelopes, `chatcmpl` ids, tool-call deltas, usage, reasoning split) lives only in SwiftLM's **executable** target (`Sources/SwiftLM/Server.swift`), not in its importable `MLXInferenceCore` **library**. The library exposes request decoders and token-level generation only. An in-process chat path therefore cannot reuse SwiftLM's response code without forking SwiftLM and lifting `Server.swift` into a library product.
+- SwiftLM churns hard: `Server.swift` changed ~74 times in the repo's first ~80 days. A fork that restructures that file pays a recurring, conflict-prone merge cost on a hot file. Running the binary instead inherits upstream for free and stays byte-identical, because it is literally SwiftLM's own server.
+- Trade accepted: chat keeps a second process and an internal loopback HTTP hop in exchange for zero SwiftLM-fork maintenance and exact response fidelity. Revisit only if SwiftLM ships its OpenAI serving as a library product; then chat can collapse to a single in-process helper like embedding and video.
+
 ## 4. Build and toolchain
 
 - Swift tools version is set in `Package.swift`. Match it locally (Xcode bundling that Swift release) and in CI runner choice.
