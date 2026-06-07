@@ -252,6 +252,7 @@ let project = Project(
         .target(name: "SwiftLMBackend"),
         .target(name: "SwiftLMRuntime"),
         .target(name: "SwiftLMTrace"),
+        .target(name: "SwiftLMMetrics"),
         .target(name: "SwiftLMHostProtocol"),
         .external(name: "Hummingbird"),
         .external(name: "MLXLMCommon"),

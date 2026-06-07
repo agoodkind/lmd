@@ -181,6 +181,7 @@ let package = Package(
         "SwiftLMBackend",
         "SwiftLMRuntime",
         "SwiftLMTrace",
+        "SwiftLMMetrics",
         "SwiftLMHostProtocol",
         .product(name: "Hummingbird", package: "hummingbird"),
         .product(name: "MLXLMCommon", package: "mlx-swift-lm"),

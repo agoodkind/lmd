@@ -344,6 +344,17 @@ private final class ChatRequestTiming {
     tracker.mark(TracePhase.Chat.requestPostGenerate.rawValue, attributes: attributes)
     tracker.mark(TracePhase.Chat.requestPreReturn.rawValue, attributes: attributes)
     tracker.finish(attributes: attributes)
+    // Completion tokens streamed for this request. The proxy sees the child's
+    // SSE deltas, not a structured usage object, so the observed token-event
+    // count is the available token signal for the chat path.
+    SwiftLMMetrics.addCounter(
+      "lmd_tokens_total",
+      tokenEventCount,
+      labels: [
+        ("model_id", modelPath),
+        ("model_kind", "chat"),
+      ]
+    )
   }
 
   private func observeTokenEvent() {

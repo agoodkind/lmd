@@ -12,6 +12,7 @@ import Hummingbird
 import MLXLMCommon
 import SwiftLMBackend
 import SwiftLMCore
+import SwiftLMMetrics
 import SwiftLMTrace
 
 private let log = AppLogger.logger(category: "VideoChatRouting")
@@ -227,6 +228,16 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
       )
     }
     let completion = try await backend.complete(preparedRequest)
+    if let usage = completion.usage {
+      SwiftLMMetrics.addCounter(
+        "lmd_tokens_total",
+        usage.totalTokens,
+        labels: [
+          ("model_id", request.model.id),
+          ("model_kind", "video"),
+        ]
+      )
+    }
     BackendTrace.debug(
       phase: TracePhase.Video.requestPostGenerate.rawValue,
       context: traceContext,
@@ -294,6 +305,16 @@ public actor InProcessVLMVideoChatBackend: VideoChatBackend {
               promptTokens: info.promptTokenCount,
               completionTokens: info.generationTokenCount,
               totalTokens: info.promptTokenCount + info.generationTokenCount
+            )
+          }
+          if let usage {
+            SwiftLMMetrics.addCounter(
+              "lmd_tokens_total",
+              usage.totalTokens,
+              labels: [
+                ("model_id", modelID),
+                ("model_kind", "video"),
+              ]
             )
           }
           continuation.yield(
