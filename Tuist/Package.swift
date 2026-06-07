@@ -26,6 +26,8 @@ let package = Package(
     .package(url: "https://github.com/hummingbird-project/hummingbird", from: "2.22.0"),
     .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.23.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.12.0"),
+    .package(url: "https://github.com/apple/swift-metrics.git", from: "2.5.0"),
+    .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.1.0"),
     .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
     .package(url: "https://github.com/john-rocky/mlx-swift-lm.git", branch: "feat/gemma4-video"),
     .package(url: "https://github.com/ml-explore/mlx-swift", .upToNextMinor(from: "0.31.3")),

@@ -36,6 +36,10 @@ let package = Package(
     .package(url: "https://github.com/hummingbird-project/hummingbird", from: "2.22.0"),
     .package(url: "https://github.com/apple/swift-nio-transport-services.git", from: "1.23.0"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.12.0"),
+    .package(url: "https://github.com/apple/swift-metrics.git", from: "2.5.0"),
+    .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.1.0"),
+    .package(url: "https://github.com/swift-otel/swift-otel.git", from: "1.0.0"),
+    .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.6.0"),
     .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
     .package(url: "https://github.com/agoodkind/mlx-swift-lm.git", revision: "1869eaa3f0ae86fcd440ff67fe1b0988e00a787b"),
     .package(url: "https://github.com/agoodkind/mlx-swift.git", branch: "main"),
@@ -64,13 +68,22 @@ let package = Package(
     ),
     .target(
       name: "SwiftLMMetrics",
-      dependencies: [],
+      dependencies: [
+        .product(name: "Metrics", package: "swift-metrics"),
+        .product(name: "Tracing", package: "swift-distributed-tracing"),
+      ],
       path: "Sources/SwiftLMMetrics",
       swiftSettings: strictConcurrency
     ),
     .target(
       name: "SwiftLMMetricsOTel",
-      dependencies: ["SwiftLMMetrics"],
+      dependencies: [
+        "SwiftLMMetrics",
+        .product(name: "Metrics", package: "swift-metrics"),
+        .product(name: "Instrumentation", package: "swift-distributed-tracing"),
+        .product(name: "OTel", package: "swift-otel"),
+        .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
+      ],
       path: "Sources/SwiftLMMetricsOTel",
       swiftSettings: strictConcurrency
     ),
@@ -198,6 +211,7 @@ let package = Package(
         "SwiftLMBackend",
         "SwiftLMEmbed",
         "SwiftLMMetrics",
+        "SwiftLMMetricsOTel",
         "SwiftLMTrace",
         "SwiftLMHostProtocol",
         "LMDServeSupport",
@@ -261,6 +275,15 @@ let package = Package(
       name: "SwiftLMMonitorTests",
       dependencies: ["SwiftLMMonitor"],
       path: "Tests/SwiftLMMonitorTests",
+      swiftSettings: strictConcurrency
+    ),
+    .testTarget(
+      name: "SwiftLMMetricsTests",
+      dependencies: [
+        "SwiftLMMetrics",
+        .product(name: "Metrics", package: "swift-metrics"),
+      ],
+      path: "Tests/SwiftLMMetricsTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(

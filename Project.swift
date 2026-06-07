@@ -87,6 +87,7 @@ let testTargetNames = [
   "SwiftLMBackendTests",
   "SwiftLMEmbedTests",
   "SwiftLMMonitorTests",
+  "SwiftLMMetricsTests",
   "SwiftLMRuntimeTests",
   "SwiftLMControlTests",
   "SwiftLMTUITests",
@@ -129,12 +130,9 @@ let project = Project(
     ),
     frameworkTarget(
       "SwiftLMMetrics",
-      dependencies: []
-    ),
-    frameworkTarget(
-      "SwiftLMMetricsOTel",
       dependencies: [
-        .target(name: "SwiftLMMetrics"),
+        .external(name: "Metrics"),
+        .external(name: "Tracing"),
       ]
     ),
     frameworkTarget(
@@ -285,7 +283,6 @@ let project = Project(
         .target(name: "SwiftLMMonitor"),
         .target(name: "SwiftLMControl"),
         .target(name: "SwiftLMMetrics"),
-        .target(name: "SwiftLMMetricsOTel"),
         .target(name: "SwiftLMTrace"),
         .target(name: "SwiftLMHostProtocol"),
         .target(name: "LMDServeSupport"),
@@ -322,6 +319,13 @@ let project = Project(
     testTarget(
       "SwiftLMMonitorTests",
       dependencies: [.target(name: "SwiftLMMonitor")]
+    ),
+    testTarget(
+      "SwiftLMMetricsTests",
+      dependencies: [
+        .target(name: "SwiftLMMetrics"),
+        .external(name: "Metrics"),
+      ]
     ),
     testTarget(
       "SwiftLMRuntimeTests",
