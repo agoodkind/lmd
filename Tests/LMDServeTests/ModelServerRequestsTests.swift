@@ -111,8 +111,8 @@ final class ModelServerRequestsTests: XCTestCase {
       headers: [:]
     )
 
-    guard case .streaming(let statusCode, let contentType, let events, let appendDoneFrame, _) =
-      result
+    guard
+      case .streaming(let statusCode, let contentType, let events, let appendDoneFrame, _) = result
     else {
       return XCTFail("expected streaming result")
     }
