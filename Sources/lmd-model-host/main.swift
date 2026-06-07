@@ -10,8 +10,8 @@
 
 import AppLogger
 import Foundation
-import SwiftLMMetrics
 import SwiftLMHostProtocol
+import SwiftLMMetrics
 import XPC
 
 AppLogger.bootstrap(subsystem: "io.goodkind.lmd")

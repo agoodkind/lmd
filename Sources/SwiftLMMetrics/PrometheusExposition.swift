@@ -11,6 +11,8 @@
 import Foundation
 
 public enum PrometheusExposition {
+  private static let quote = #"""#
+
   public static func render(_ snapshot: MergedMetricsSnapshot) -> String {
     var lines: [String] = []
     for counter in snapshot.metrics.counters {
@@ -37,10 +39,9 @@ public enum PrometheusExposition {
     guard !labels.isEmpty else {
       return ""
     }
-    let quote = String(UnicodeScalar(34)!)
     let rendered = labels.sorted { $0.key < $1.key }
       .map { label in
-        label.key + "=" + quote + escape(label.value) + quote
+        label.key + "=" + Self.quote + escape(label.value) + Self.quote
       }
       .joined(separator: ",")
     return "{\(rendered)}"
@@ -48,10 +49,9 @@ public enum PrometheusExposition {
 
   private static func escape(_ value: String) -> String {
     let slash = "\\"
-    let quote = String(UnicodeScalar(34)!)
     return value
       .replacingOccurrences(of: slash, with: slash + slash)
-      .replacingOccurrences(of: quote, with: slash + quote)
+      .replacingOccurrences(of: Self.quote, with: slash + Self.quote)
       .replacingOccurrences(of: "\n", with: slash + "n")
   }
 }

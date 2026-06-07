@@ -194,7 +194,7 @@ public final class SnapshotSink: @unchecked Sendable {
             name: key.name,
             count: value.count,
             sum: value.sum,
-            min: value.count == 0 ? 0 : value.min,
+            min: value.min,
             max: value.max,
             last: value.last,
             labels: key.labels

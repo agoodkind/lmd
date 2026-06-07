@@ -18,8 +18,8 @@
 import AppLogger
 import Darwin
 import Foundation
-import os
 import SwiftLMMetrics
+import os
 
 public enum BackendTrace {
   /// Single backing logger for the entire trace plane. Filter with

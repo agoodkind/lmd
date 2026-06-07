@@ -11,9 +11,9 @@
 import AppLogger
 import Foundation
 import LMDServeSupport
-import SwiftLMMetrics
 import SwiftLMCore
 import SwiftLMHostProtocol
+import SwiftLMMetrics
 import SwiftLMRuntime
 import XPC
 
