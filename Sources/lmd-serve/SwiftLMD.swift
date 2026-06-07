@@ -501,6 +501,12 @@ struct SwiftLMD {
     let hostBinaryPath = resolveSiblingBinaryPath("lmd-model-host")
     slog("host binary: \(hostBinaryPath)")
 
+    // Reap model subprocesses orphaned by a previous broker that crashed or was
+    // killed without draining its helpers. They reparent to launchd (ppid==1)
+    // and hold GB. A live broker's own helpers have this broker as parent, so
+    // ppid==1 never matches them.
+    reapOrphanedModelProcesses()
+
     // Shared spawn collaborators. Created here so the embedding spawner closure
     // can capture them before `BrokerState` exists, then injected into the
     // state so the host listener and HTTP handlers see the same instances.
@@ -716,6 +722,51 @@ struct SwiftLMD {
       )
     )
     try await app.runService()
+  }
+}
+
+// MARK: - Orphan reaper
+
+/// Kill model subprocesses left behind by a previous broker that died without
+/// reaping its helpers. `SwiftLM` and `lmd-model-host` processes reparented to
+/// launchd (ppid==1) are orphans that still hold GB. A live broker's own helpers
+/// have that broker as their parent, so ppid==1 never matches them; an unrelated
+/// broker's live helpers are safe for the same reason.
+func reapOrphanedModelProcesses() {
+  let listing = Process()
+  listing.executableURL = URL(fileURLWithPath: "/bin/ps")
+  listing.arguments = ["-axo", "pid=,ppid=,comm="]
+  let pipe = Pipe()
+  listing.standardOutput = pipe
+  do {
+    try listing.run()
+  } catch {
+    log.error("reaper.ps_failed err=\(String(describing: error), privacy: .public)")
+    return
+  }
+  let data = pipe.fileHandleForReading.readDataToEndOfFile()
+  listing.waitUntilExit()
+  guard let text = String(data: data, encoding: .utf8) else {
+    return
+  }
+  for rawLine in text.split(separator: "\n") {
+    let fields = rawLine.split(separator: " ", omittingEmptySubsequences: true)
+    guard fields.count >= 3, let pid = Int32(fields[0]), let ppid = Int32(fields[1]) else {
+      continue
+    }
+    guard ppid == 1 else {
+      continue
+    }
+    let comm = fields[2...].joined(separator: " ")
+    let isModelProcess =
+      comm.hasSuffix("/SwiftLM") || comm == "SwiftLM"
+      || comm.hasSuffix("/lmd-model-host") || comm == "lmd-model-host"
+    guard isModelProcess else {
+      continue
+    }
+    kill(pid, SIGKILL)
+    log.notice(
+      "reaper.killed_orphan pid=\(pid, privacy: .public) comm=\(comm, privacy: .public)")
   }
 }
 

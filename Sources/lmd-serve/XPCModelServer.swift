@@ -242,9 +242,26 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
     session = nil
     process = nil
     lock.unlock()
-    proc?.terminate()
-    if let proc, proc.isRunning {
-      kill(proc.processIdentifier, SIGKILL)
+    guard let proc else {
+      log.notice("host.shutdown model=\(self.modelID, privacy: .public)")
+      return
+    }
+    proc.terminate()
+    // Grace window: the helper's SIGTERM handler reaps its SwiftLM child and
+    // exits. Only SIGKILL if it overstays. Run off the actor so teardown never
+    // blocks. Capture the pid (Sendable) and probe with signal 0 so the closure
+    // does not capture the non-Sendable Process.
+    let pid = proc.processIdentifier
+    let modelID = self.modelID
+    Task.detached {
+      let deadline = Date().addingTimeInterval(5)
+      while kill(pid, 0) == 0, Date() < deadline {
+        try? await Task.sleep(nanoseconds: 100_000_000)
+      }
+      if kill(pid, 0) == 0 {
+        kill(pid, SIGKILL)
+        log.notice("host.shutdown_sigkill model=\(modelID, privacy: .public)")
+      }
     }
     log.notice("host.shutdown model=\(self.modelID, privacy: .public)")
   }

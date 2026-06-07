@@ -9,6 +9,7 @@
 //
 
 import AppLogger
+import Darwin
 import Foundation
 import SwiftLMHostProtocol
 import SwiftLMMetrics
@@ -75,6 +76,32 @@ final class SessionBox: @unchecked Sendable {
 }
 let box = SessionBox()
 
+// Holds the SwiftLM child PID (chat only) so a signal handler can reap it
+// synchronously. ChatHost is an actor, and broker eviction sends SIGTERM via
+// Process.terminate(); an async hop to the actor would not finish before this
+// helper dies, which is exactly how the child gets orphaned to launchd. The
+// signal handler reads this PID and SIGKILLs the child directly. Zero for
+// embedding and video, which run in-process with no child.
+final class ChildReaper: @unchecked Sendable {
+  private let lock = NSLock()
+  private var pid: pid_t = 0
+  func update(_ newPID: pid_t) {
+    lock.lock()
+    pid = newPID
+    lock.unlock()
+  }
+  func killNow() {
+    lock.lock()
+    let target = pid
+    pid = 0
+    lock.unlock()
+    if target > 0 {
+      kill(target, SIGKILL)
+    }
+  }
+}
+let childReaper = ChildReaper()
+
 // The embedding backend, loaded after dial-in. nil for non-embedding kinds,
 // which routes their requests to their own host below.
 let embeddingHost: EmbeddingHost?
@@ -101,7 +128,8 @@ do {
       modelPath: args.modelPath,
       binaryPath: args.swiftLMBinaryPath,
       logPath: args.swiftLMLogPath,
-      contextLength: args.contextLength
+      contextLength: args.contextLength,
+      onChildPIDChange: { pid in childReaper.update(pid) }
     )
   } else {
     chatHost = nil
@@ -254,5 +282,23 @@ DispatchQueue.global().async {
   log.notice("host.stdin_eof exiting")
   exitAfterShutdown(0)
 }
+
+// Reap the SwiftLM child and exit promptly on SIGTERM/SIGINT. Broker eviction
+// calls Process.terminate(), which is SIGTERM; without this handler the default
+// disposition kills this helper first and leaves the child reparented to launchd.
+// Ignore the default action so the dispatch source receives the signal.
+signal(SIGTERM, SIG_IGN)
+signal(SIGINT, SIG_IGN)
+let signalReap: @Sendable () -> Void = {
+  log.notice("host.signal_reap killing child and exiting")
+  childReaper.killNow()
+  exit(0)
+}
+let sigtermSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+let sigintSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
+sigtermSource.setEventHandler(handler: signalReap)
+sigintSource.setEventHandler(handler: signalReap)
+sigtermSource.resume()
+sigintSource.resume()
 
 dispatchMain()
