@@ -3,7 +3,7 @@
 //  IntegrationTests
 //
 //  Drives `/v1/embeddings` against the isolated launchd test daemon that
-//  `scripts/lmd-test-daemon.sh` brings up (via `make test-integration`),
+//  `lmd-dev test-daemon up` brings up (via `make test-integration`),
 //  addressed through `LMD_TEST_BASE_URL`. Skips when that variable is unset so
 //  the default `make test` stays headless and never spawns a broker. Confirms
 //  `/v1/models` lists the embedding model and `/swiftlmd/loaded` reports
