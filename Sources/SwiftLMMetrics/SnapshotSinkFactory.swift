@@ -54,10 +54,10 @@ extension SnapshotSink: CoreMetrics.MetricsFactory {
 
   // The handlers are valueless references into the shared store; there is no
   // per-handler resource to release, so destroys are no-ops.
-  public func destroyCounter(_ handler: CounterHandler) {}
-  public func destroyMeter(_ handler: MeterHandler) {}
-  public func destroyRecorder(_ handler: RecorderHandler) {}
-  public func destroyTimer(_ handler: TimerHandler) {}
+  public func destroyCounter(_: CounterHandler) {}
+  public func destroyMeter(_: MeterHandler) {}
+  public func destroyRecorder(_: RecorderHandler) {}
+  public func destroyTimer(_: TimerHandler) {}
 }
 
 private final class SnapshotCounter: CounterHandler, @unchecked Sendable {

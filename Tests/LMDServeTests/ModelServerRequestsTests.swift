@@ -31,8 +31,8 @@ private final class FakeModelServer: ModelServer, @unchecked Sendable {
     self.framesFor = framesFor
   }
 
-  func spawn() async throws {}
-  func waitReady() async throws {}
+  func spawn() {}
+  func waitReady() {}
 
   func send(_ request: BackendRequest) -> AsyncThrowingStream<BackendFrame, Error> {
     lock.lock()
@@ -47,7 +47,7 @@ private final class FakeModelServer: ModelServer, @unchecked Sendable {
     }
   }
 
-  func stats() async -> BackendStats {
+  func stats() -> BackendStats {
     BackendStats(rssBytes: 0, gpuActiveBytes: 0, gpuCacheBytes: 0)
   }
 
@@ -80,7 +80,8 @@ final class ModelServerRequestsTests: XCTestCase {
     )
 
     guard case .buffered(let statusCode, let contentType, let decodedBody) = result else {
-      return XCTFail("expected buffered result")
+      XCTFail("expected buffered result")
+      return
     }
     XCTAssertEqual(statusCode, 201)
     XCTAssertEqual(contentType, "application/json")
@@ -114,7 +115,8 @@ final class ModelServerRequestsTests: XCTestCase {
     guard
       case .streaming(let statusCode, let contentType, let events, let appendDoneFrame, _) = result
     else {
-      return XCTFail("expected streaming result")
+      XCTFail("expected streaming result")
+      return
     }
     XCTAssertEqual(statusCode, 200)
     XCTAssertEqual(contentType, "text/event-stream")
@@ -184,7 +186,8 @@ final class ModelServerRequestsTests: XCTestCase {
     )
 
     guard case .buffered(let statusCode, let contentType, let decodedBody) = result else {
-      return XCTFail("expected buffered result")
+      XCTFail("expected buffered result")
+      return
     }
     XCTAssertEqual(statusCode, 200)
     XCTAssertEqual(contentType, "application/json")

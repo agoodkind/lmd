@@ -38,7 +38,7 @@ struct BrokerEventsSequence: AsyncSequence, Sendable {
       self.backfillCount = backfillCount
     }
 
-    func next() async throws -> ByteBuffer? {
+    func next() async -> ByteBuffer? {
       if cursor == nil {
         let s = await EventBus.shared.subscribe(backfillCount: backfillCount)
         self.stream = s

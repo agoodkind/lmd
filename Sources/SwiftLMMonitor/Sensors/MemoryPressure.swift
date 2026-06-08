@@ -23,7 +23,7 @@ public enum MemoryPressure {
   public static func parseFreePercent(_ text: String) -> Int {
     for line in text.split(separator: "\n")
     where line.contains("System-wide memory free percentage") {
-      let digits = line.filter { $0.isNumber }
+      let digits = line.filter(\.isNumber)
       return Int(digits) ?? 0
     }
     return 0

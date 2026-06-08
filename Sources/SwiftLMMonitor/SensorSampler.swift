@@ -39,7 +39,7 @@ public final class SensorSampler: @unchecked Sendable {
     public init(
       baseDir: String,
       intervalSeconds: Double = 15,
-      macmonPort: Int = 8765,
+      macmonPort: Int = 8_765,
       macmonBinary: String? = "/opt/homebrew/bin/macmon"
     ) {
       self.baseDir = baseDir
@@ -202,7 +202,7 @@ public final class SensorSampler: @unchecked Sendable {
       for line in vmOut.split(separator: "\n") {
         if line.contains(name) {
           let nums = line.split(separator: ":").last.map(String.init) ?? ""
-          let digits = nums.filter { $0.isNumber }
+          let digits = nums.filter(\.isNumber)
           return Int64(digits) ?? 0
         }
       }
@@ -223,15 +223,15 @@ public final class SensorSampler: @unchecked Sendable {
     var swapTotal = "0"
     let swapFields = swapOut.split(separator: " ").map(String.init)
     for (i, f) in swapFields.enumerated() {
-      if f == "used" && i + 2 < swapFields.count { swapUsed = swapFields[i + 2] }
-      if f == "total" && i + 2 < swapFields.count { swapTotal = swapFields[i + 2] }
+      if f == "used", i + 2 < swapFields.count { swapUsed = swapFields[i + 2] }
+      if f == "total", i + 2 < swapFields.count { swapTotal = swapFields[i + 2] }
     }
 
     let pressureOut = runCommandCaptureOut("/usr/bin/memory_pressure", args: [])
     var pressureFree = 0
     for line in pressureOut.split(separator: "\n") {
       if line.contains("System-wide memory free percentage") {
-        let digits = line.filter { $0.isNumber }
+        let digits = line.filter(\.isNumber)
         pressureFree = Int(digits) ?? 0
         break
       }

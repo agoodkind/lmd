@@ -206,14 +206,14 @@ public final class BrokerClient: @unchecked Sendable {
           case .ok:
             return
           case .error(let err):
-            self.eventDelegate.fail(err)
+            eventDelegate.fail(err)
           default:
-            self.eventDelegate.fail(
+            eventDelegate.fail(
               BrokerError(kind: .internalError, message: "unexpected start response: \(response)")
             )
           }
         case .failure(let err):
-          self.eventDelegate.fail(BrokerError(kind: .internalError, message: "\(err)"))
+          eventDelegate.fail(BrokerError(kind: .internalError, message: "\(err)"))
         }
       }
     } catch {

@@ -49,8 +49,8 @@ func startHostListener(
       reason: "XPC_SERVICE_NAME=\(env["XPC_SERVICE_NAME"] ?? "<unset>")")
   }
   let listener = try XPCListener(
-    service: brokerHostServiceName,
-    incomingSessionHandler: { request in
+    service: brokerHostServiceName
+  )    { request in
       // Holds the accepted session and the bound server. The session is
       // assigned after `accept` returns, so the message handler closure reads
       // it from here rather than capturing the still-uninitialized binding the
@@ -88,7 +88,6 @@ func startHostListener(
       try? session.activate()
       return decision
     }
-  )
   log.notice("host.listener_started service=\(brokerHostServiceName, privacy: .public)")
   return listener
 }

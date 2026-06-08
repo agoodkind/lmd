@@ -44,7 +44,7 @@ final class BrokerConfigTests: XCTestCase {
     let config = try config(completeEnvironment())
     XCTAssertEqual(config.host, "localhost")
     XCTAssertEqual(config.bindHost, "::1")
-    XCTAssertEqual(config.port, 5400)
+    XCTAssertEqual(config.port, 5_400)
     XCTAssertEqual(config.reserveBytes, 20 * 1_073_741_824)
     XCTAssertEqual(config.swiftlmBinary, "/usr/bin/true")
     XCTAssertEqual(config.chatMaxConcurrency, 4)
@@ -62,7 +62,7 @@ final class BrokerConfigTests: XCTestCase {
     XCTAssertEqual(config.mlxCacheLimitBytes, 2 * 1_073_741_824)
   }
 
-  func testEveryKeyIsRequired() throws {
+  func testEveryKeyIsRequired() {
     // The complete environment must cover exactly the canonical key set.
     let env = completeEnvironment()
     for key in BrokerConfigKey.allCases {
@@ -148,15 +148,15 @@ final class BrokerConfigTests: XCTestCase {
     env[BrokerConfigKey.promptCacheEnabled.rawValue] = "false"
     let config = try config(env)
     XCTAssertFalse(config.promptCacheEnabled)
-    XCTAssertEqual(config.effectivePromptCacheMaxTokens, 8192)
+    XCTAssertEqual(config.effectivePromptCacheMaxTokens, 8_192)
   }
 
   func testPromptCacheExplicitValueWins() throws {
     var env = completeEnvironment()
     env[BrokerConfigKey.promptCacheMaxTokens.rawValue] = "4096"
     let config = try config(env)
-    XCTAssertEqual(config.promptCacheMaxTokens, 4096)
-    XCTAssertEqual(config.effectivePromptCacheMaxTokens, 4096)
+    XCTAssertEqual(config.promptCacheMaxTokens, 4_096)
+    XCTAssertEqual(config.effectivePromptCacheMaxTokens, 4_096)
   }
 
   func testBlankRequiredKeyIsRejected() {

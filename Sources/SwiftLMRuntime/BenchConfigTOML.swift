@@ -110,7 +110,7 @@ private func parseToml(_ text: String) throws -> TOMLDoc {
     let stripped = trimComment(String(rawLine)).trimmingCharacters(in: .whitespaces)
     if stripped.isEmpty { continue }
 
-    if stripped.hasPrefix("[[") && stripped.hasSuffix("]]") {
+    if stripped.hasPrefix("[["), stripped.hasSuffix("]]") {
       // Array-of-tables header.
       flushCurrentTable()
       let name = stripped.dropFirst(2).dropLast(2).trimmingCharacters(in: .whitespaces)
@@ -125,7 +125,7 @@ private func parseToml(_ text: String) throws -> TOMLDoc {
       continue
     }
 
-    if stripped.hasPrefix("[") && stripped.hasSuffix("]") {
+    if stripped.hasPrefix("["), stripped.hasSuffix("]") {
       throw BenchConfigTOMLError.invalidSyntax(
         line: lineNo,
         reason: "single-bracket tables are not supported; use [[table]] for arrays"
@@ -175,7 +175,7 @@ private func trimComment(_ s: String) -> String {
   var inQuote = false
   for c in s {
     if c == "\"" { inQuote.toggle() }
-    if c == "#" && !inQuote { break }
+    if c == "#", !inQuote { break }
     out.append(c)
   }
   return out
@@ -199,7 +199,7 @@ private func parseValue(_ s: String, line: Int) throws -> TOMLValue {
   if s == "false" { return .bool(false) }
 
   // Quoted string.
-  if s.hasPrefix("\"") && s.hasSuffix("\"") && s.count >= 2 {
+  if s.hasPrefix("\""), s.hasSuffix("\""), s.count >= 2 {
     let inner = String(s.dropFirst().dropLast())
     return .string(unescape(inner))
   }
@@ -271,7 +271,7 @@ private func buildConfig(from doc: TOMLDoc) throws -> BenchConfig {
       name: try requireString(tbl, "name"),
       promptGlob: try requireString(tbl, "prompt_glob"),
       maxInputBytes: optionalInt(tbl, "max_input_bytes") ?? 300_000,
-      maxTokens: optionalInt(tbl, "max_tokens") ?? 8192,
+      maxTokens: optionalInt(tbl, "max_tokens") ?? 8_192,
       thinking: optionalBool(tbl, "thinking") ?? false
     )
   }

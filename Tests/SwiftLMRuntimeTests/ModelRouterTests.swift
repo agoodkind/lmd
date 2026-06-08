@@ -25,19 +25,19 @@ private final class FakeModelServer: ModelServer, @unchecked Sendable {
   private var throttleLevels: [ThrottleLevel] = []
 
   var didSpawn: Bool {
-    return spawned
+    spawned
   }
 
   var didStop: Bool {
-    return stopped
+    stopped
   }
 
   var isRunning: Bool {
-    return running && !stopped
+    running && !stopped
   }
 
   var appliedThrottleLevels: [ThrottleLevel] {
-    return throttleLevels
+    throttleLevels
   }
 
   init(modelID: String, kind: SwiftLMTrace.BackendKind, sizeBytes: Int64) {
@@ -46,12 +46,12 @@ private final class FakeModelServer: ModelServer, @unchecked Sendable {
     self.sizeBytes = sizeBytes
   }
 
-  func spawn() async throws {
+  func spawn() {
     spawned = true
     running = true
   }
 
-  func waitReady() async throws {}
+  func waitReady() {}
 
   func send(_ request: BackendRequest) -> AsyncThrowingStream<BackendFrame, Error> {
     AsyncThrowingStream { continuation in
@@ -60,7 +60,7 @@ private final class FakeModelServer: ModelServer, @unchecked Sendable {
     }
   }
 
-  func stats() async -> BackendStats {
+  func stats() -> BackendStats {
     BackendStats(rssBytes: 0, gpuActiveBytes: 0, gpuCacheBytes: 0)
   }
 
@@ -323,9 +323,9 @@ final class ModelRouterTests: XCTestCase {
 
   func testRouterPublishesTypedLifecycleEvents() async throws {
     let events = RouterEventsBox()
-    let (router, _) = makeRouter(eventSink: { event in
+    let (router, _) = makeRouter { event in
       events.append(event)
-    })
+    }
 
     _ = try await router.routeAndBegin(desc("A", 10))
     await router.requestDone(modelID: "A")
@@ -344,10 +344,9 @@ final class ModelRouterTests: XCTestCase {
     let events = RouterEventsBox()
     let memory = MemoryModel(totalGB: 80)
     let (router, created) = makeRouter(
-      reserveGB: 0, model: memory,
-      eventSink: { event in
+      reserveGB: 0, model: memory)      { event in
         events.append(event)
-      })
+      }
 
     _ = try await router.routeAndBegin(desc("A", 40))
     await router.requestDone(modelID: "A")
@@ -377,11 +376,10 @@ final class ModelRouterTests: XCTestCase {
       memoryProbe: memory.probe(),
       spawner: spawner,
       settleAttempts: 3,
-      settleIntervalMillis: 1,
-      eventSink: { event in
+      settleIntervalMillis: 1
+    )      { event in
         events.append(event)
       }
-    )
 
     _ = try await router.routeEmbeddingAndBegin(embeddingModel)
     await router.embeddingRequestDone(modelID: embeddingModel.id)
@@ -530,7 +528,8 @@ final class ModelRouterTests: XCTestCase {
       XCTFail("expected concurrencyLimitExceeded after the queue wait timed out")
     } catch let error as ModelRouter.RouteError {
       guard case .concurrencyLimitExceeded = error else {
-        return XCTFail("expected concurrencyLimitExceeded, got \(error)")
+        XCTFail("expected concurrencyLimitExceeded, got \(error)")
+        return
       }
     }
   }
@@ -546,7 +545,8 @@ final class ModelRouterTests: XCTestCase {
       XCTFail("expected concurrencyLimitExceeded after the queue wait timed out")
     } catch let error as ModelRouter.RouteError {
       guard case .concurrencyLimitExceeded = error else {
-        return XCTFail("expected concurrencyLimitExceeded, got \(error)")
+        XCTFail("expected concurrencyLimitExceeded, got \(error)")
+        return
       }
     }
   }
@@ -566,7 +566,8 @@ final class ModelRouterTests: XCTestCase {
       XCTFail("expected the fifth request to queue and time out")
     } catch let error as ModelRouter.RouteError {
       guard case .concurrencyLimitExceeded = error else {
-        return XCTFail("expected concurrencyLimitExceeded, got \(error)")
+        XCTFail("expected concurrencyLimitExceeded, got \(error)")
+        return
       }
     }
   }

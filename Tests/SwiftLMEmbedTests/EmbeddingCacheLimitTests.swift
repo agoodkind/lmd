@@ -25,7 +25,7 @@ final class EmbeddingCacheLimitTests: XCTestCase {
   /// If you intentionally retune the cap, update this assertion in the
   /// same change so the rationale stays in sync with the runtime.
   func testCacheLimitBytesContract() {
-    let expected = 2 * 1024 * 1024 * 1024
+    let expected = 2 * 1_024 * 1_024 * 1_024
     XCTAssertEqual(NVEmbeddingBackend.cacheLimitBytes, expected)
     XCTAssertEqual(MLXEmbeddingBackend.cacheLimitBytes, expected)
   }

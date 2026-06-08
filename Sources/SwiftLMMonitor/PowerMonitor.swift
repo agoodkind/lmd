@@ -72,12 +72,14 @@ public final class PowerMonitor: @unchecked Sendable {
   private var started = false
 
   /// `reading` returns the current battery charge percent (0...100).
+  @preconcurrency
   public init(config: Config, reading: @escaping @Sendable () -> Int) {
     self.config = config
     self.reading = reading
   }
 
   /// Install the handler that runs whenever the level changes.
+  @preconcurrency
   public func setOnChange(_ handler: @escaping @Sendable (Level) -> Void) {
     lock.lock()
     onChangeHandler = handler

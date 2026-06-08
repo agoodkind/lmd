@@ -206,7 +206,7 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
     }
   }
 
-  func stats() async -> BackendStats {
+  func stats() -> BackendStats {
     withLock { lastStats }
   }
 

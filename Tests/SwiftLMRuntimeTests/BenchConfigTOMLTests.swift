@@ -56,7 +56,7 @@ final class BenchConfigTOMLTests: XCTestCase {
     XCTAssertEqual(cfg.models[0].id, "qwen3-30b")
     XCTAssertEqual(cfg.models[0].contextSize, 131_072)
     XCTAssertEqual(cfg.models[1].id, "qwen3-4b")
-    XCTAssertEqual(cfg.models[1].maxTokensOverride, 4096)
+    XCTAssertEqual(cfg.models[1].maxTokensOverride, 4_096)
 
     XCTAssertEqual(cfg.variants.count, 2)
     XCTAssertEqual(cfg.variants[0].name, "review")
@@ -83,7 +83,7 @@ final class BenchConfigTOMLTests: XCTestCase {
     XCTAssertEqual(cfg.testTimeoutSeconds, 900)  // default 900
     XCTAssertEqual(cfg.parallelismPerModel, 1)  // default 1
     XCTAssertEqual(cfg.variants[0].maxInputBytes, 300_000)  // default
-    XCTAssertEqual(cfg.variants[0].maxTokens, 8192)  // default
+    XCTAssertEqual(cfg.variants[0].maxTokens, 8_192)  // default
   }
 
   // MARK: - Error cases
@@ -187,7 +187,7 @@ final class BenchConfigTOMLTests: XCTestCase {
       prompt_glob = "*"
       """
     let cfg = try loadBenchConfig(fromTOMLText: toml)
-    XCTAssertEqual(cfg.testTimeoutSeconds, 1800)
+    XCTAssertEqual(cfg.testTimeoutSeconds, 1_800)
     XCTAssertEqual(cfg.models[0].contextSize, 262_144)
   }
 

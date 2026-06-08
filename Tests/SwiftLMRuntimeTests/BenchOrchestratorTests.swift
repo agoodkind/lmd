@@ -35,9 +35,9 @@ private final class FakeBackend: BenchBackend, @unchecked Sendable {
     model: BenchModelSpec,
     variant: BenchVariant,
     systemPrompt: String,
-    userContent: String,
-    timeout: TimeInterval
-  ) async throws -> Data {
+    userContent _: String,
+    timeout _: TimeInterval
+  ) throws -> Data {
     let shouldFail = syncQ.sync { () -> Bool in
       calls.append(
         Call(
@@ -56,7 +56,7 @@ private final class FakeBackend: BenchBackend, @unchecked Sendable {
     return Data(#"{"ok": true}"#.utf8)
   }
 
-  func unload(_ model: BenchModelSpec) {}
+  func unload(_: BenchModelSpec) {}
 }
 
 final class BenchOrchestratorTests: XCTestCase {

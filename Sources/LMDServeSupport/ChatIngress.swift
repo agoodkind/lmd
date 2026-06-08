@@ -117,6 +117,7 @@ public struct ChatDispatchRule: Sendable {
   public let target: ChatDispatchTarget
   public let matches: @Sendable (PreparedChatRequest) -> Bool
 
+  @preconcurrency
   public init(
     name: String,
     target: ChatDispatchTarget,
@@ -200,6 +201,7 @@ public final class BackendLifetimeToken: @unchecked Sendable {
   private var didFinish = false
   private let onFinish: @Sendable () async -> Void
 
+  @preconcurrency
   public init(onFinish: @escaping @Sendable () async -> Void) {
     self.onFinish = onFinish
   }
@@ -281,7 +283,7 @@ public struct BackendStreamingBodySequence: AsyncSequence, Sendable {
       }
       do {
         guard let event = try await upstream.next() else {
-          if appendDoneFrame && !sentDoneFrame {
+          if appendDoneFrame, !sentDoneFrame {
             sentDoneFrame = true
             return ByteBuffer(data: backendDoneFrame())
           }

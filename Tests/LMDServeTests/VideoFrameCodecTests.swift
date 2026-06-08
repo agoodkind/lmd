@@ -19,7 +19,8 @@ final class VideoFrameCodecTests: XCTestCase {
     let result = try await VideoFrameCodec.decode(frames: stream(frames))
 
     guard case .buffered(let statusCode, let contentType, let decodedBody) = result else {
-      return XCTFail("expected buffered result")
+      XCTFail("expected buffered result")
+      return
     }
     XCTAssertEqual(statusCode, 200)
     XCTAssertEqual(contentType, "application/json")
@@ -65,7 +66,8 @@ final class VideoFrameCodecTests: XCTestCase {
     let result = try await VideoFrameCodec.decode(frames: stream(frames))
     guard case .streaming(let statusCode, let contentType, let rebuilt, let appendDone, _) = result
     else {
-      return XCTFail("expected streaming result")
+      XCTFail("expected streaming result")
+      return
     }
     XCTAssertEqual(statusCode, 200)
     XCTAssertEqual(contentType, "text/event-stream")
@@ -75,7 +77,8 @@ final class VideoFrameCodecTests: XCTestCase {
     var assembled = Data()
     for try await event in rebuilt {
       guard case .rawBytes(let bytes) = event else {
-        return XCTFail("expected rawBytes events")
+        XCTFail("expected rawBytes events")
+        return
       }
       assembled.append(bytes)
     }

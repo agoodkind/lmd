@@ -41,7 +41,7 @@ public final class MacmonClient: Sendable {
   public let port: Int
   public let timeout: TimeInterval
 
-  public init(host: String = "localhost", port: Int = 8765, timeout: TimeInterval = 1.5) {
+  public init(host: String = "localhost", port: Int = 8_765, timeout: TimeInterval = 1.5) {
     self.host = host
     self.port = port
     self.timeout = timeout

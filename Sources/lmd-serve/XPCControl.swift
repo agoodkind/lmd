@@ -70,8 +70,8 @@ func startXPCControl(state: BrokerState) throws -> XPCListener {
   }
 
   let listener = try XPCListener(
-    service: brokerXPCServiceName,
-    incomingSessionHandler: { request in
+    service: brokerXPCServiceName
+  )    { request in
       // One queue per client session. Keeps a slow embed call from
       // blocking another client's `health` ping.
       let queue = DispatchQueue(label: "io.goodkind.lmd.control.session")
@@ -95,7 +95,6 @@ func startXPCControl(state: BrokerState) throws -> XPCListener {
       }
       return decision
     }
-  )
   log.notice("xpc.listener_started service=\(brokerXPCServiceName, privacy: .public)")
   return listener
 }
@@ -165,7 +164,7 @@ private final class SessionHandler: @unchecked Sendable {
 
   // MARK: - Reply-bearing handlers
 
-  private func loaded() async throws -> BrokerResponse {
+  private func loaded() async -> BrokerResponse {
     let snap = await state.router.snapshot()
     let reading = await state.router.memoryReading()
     let reserveBytes = await state.router.reserveBytes
@@ -174,7 +173,7 @@ private final class SessionHandler: @unchecked Sendable {
         state: state, snap: snap, reading: reading, reserveBytes: reserveBytes))
   }
 
-  private func preload(request: ModelLoadRequest) async throws -> BrokerResponse {
+  private func preload(request: ModelLoadRequest) async -> BrokerResponse {
     do {
       return .preloaded(try await performModelLoad(state: state, request: request))
     } catch let error as BrokerError {
@@ -195,7 +194,7 @@ private final class SessionHandler: @unchecked Sendable {
     }
   }
 
-  private func embed(model: String, inputs: [String]) async throws -> BrokerResponse {
+  private func embed(model: String, inputs: [String]) async -> BrokerResponse {
     guard let descriptor = state.resolve(id: model) else {
       return .error(BrokerError(kind: .modelNotFound, message: "unknown model \(model)"))
     }

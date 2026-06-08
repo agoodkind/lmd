@@ -79,7 +79,7 @@ final class VideoChatRoutingTests: XCTestCase {
     XCTAssertEqual(inspection.videos, [])
   }
 
-  func testRejectsNonFileURLs() throws {
+  func testRejectsNonFileURLs() {
     assertVideoParseError(
       .unsupportedURLScheme("https"),
       json: chatRequest(videoURL: "https://localhost/video.mp4")
@@ -90,7 +90,7 @@ final class VideoChatRoutingTests: XCTestCase {
     )
   }
 
-  func testRejectsRelativeAndRemoteFileURLs() throws {
+  func testRejectsRelativeAndRemoteFileURLs() {
     assertVideoParseError(
       .relativeFileURL("file:clip.mp4"),
       json: chatRequest(videoURL: "file:clip.mp4")
@@ -130,7 +130,7 @@ final class VideoChatRoutingTests: XCTestCase {
     )
     assertVideoParseError(
       .invalidMaxFrames,
-      json: chatRequest(videoURL: videoFile.absoluteString, fps: 1, maxFrames: 4097)
+      json: chatRequest(videoURL: videoFile.absoluteString, fps: 1, maxFrames: 4_097)
     )
     assertVideoParseError(
       .invalidMaxFrames,
@@ -344,7 +344,7 @@ final class VideoChatRoutingTests: XCTestCase {
     XCTAssertEqual(value, 1)
   }
 
-  func testStreamingBodyFinishesLifetimeOnceOnThrownError() async throws {
+  func testStreamingBodyFinishesLifetimeOnceOnThrownError() async {
     let counter = CompletionCounter()
     let token = BackendLifetimeToken {
       await counter.increment()
@@ -448,7 +448,7 @@ final class VideoChatRoutingTests: XCTestCase {
     )
   }
 
-  func testEveryRouteErrorHasNonEmptyDescriptionForJSONEnvelope() throws {
+  func testEveryRouteErrorHasNonEmptyDescriptionForJSONEnvelope() {
     // The video route at lmd-serve catches typed errors and interpolates them
     // into the response envelope's `message` field. A typed error that
     // produces an empty string under `\(error)` would emit an envelope with

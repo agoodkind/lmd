@@ -212,7 +212,7 @@ public final class MetricsTab: Tab {
     let ordered = totalSum.sorted { $0.value > $1.value }
     for (phase, sum) in ordered {
       let count = totalCount[phase] ?? 0
-      let avgMS = count > 0 ? (sum / Double(count)) * 1000.0 : 0
+      let avgMS = count > 0 ? (sum / Double(count)) * 1_000.0 : 0
       let share = grandTotal > 0 ? sum / grandTotal : 0
       let bar = Self.bar(share, width: 16)
       lines.append(
@@ -278,8 +278,8 @@ public final class MetricsTab: Tab {
   }
 
   private static func bytes(_ value: Int64) -> String {
-    let gib = 1024.0 * 1024.0 * 1024.0
-    let mib = 1024.0 * 1024.0
+    let gib = 1_024.0 * 1_024.0 * 1_024.0
+    let mib = 1_024.0 * 1_024.0
     let v = Double(value)
     if v >= gib {
       return String(format: "%.2f GiB", v / gib)

@@ -37,6 +37,7 @@ public final class MemoryPressureMonitor: @unchecked Sendable {
   public init() {}
 
   /// Install the handler that runs whenever the pressure level changes.
+  @preconcurrency
   public func setOnChange(_ handler: @escaping @Sendable (Level) -> Void) {
     lock.lock()
     onChangeHandler = handler
@@ -76,7 +77,7 @@ public final class MemoryPressureMonitor: @unchecked Sendable {
       } else {
         newLevel = .normal
       }
-      self.update(newLevel)
+      update(newLevel)
     }
 
     lock.lock()

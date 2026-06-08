@@ -4,7 +4,7 @@ import XCTest
 @testable import lmd_model_host
 
 final class HostArgumentsTests: XCTestCase {
-  func testParsesAllFields() throws {
+  func testParsesAllFields() {
     let args = HostArguments.parse([
       "--model", "/models/arctic",
       "--kind", "embedding",
@@ -19,7 +19,7 @@ final class HostArgumentsTests: XCTestCase {
     XCTAssertNil(args?.videoSamplingFPS)
   }
 
-  func testParsesVideoSamplingFPS() throws {
+  func testParsesVideoSamplingFPS() {
     let args = HostArguments.parse([
       "--model", "/models/qwen-vl",
       "--kind", "video",
@@ -31,7 +31,7 @@ final class HostArgumentsTests: XCTestCase {
     XCTAssertEqual(args?.videoSamplingFPS, 2.0)
   }
 
-  func testParsesChatSwiftLMFields() throws {
+  func testParsesChatSwiftLMFields() {
     let args = HostArguments.parse([
       "--model", "/models/qwen",
       "--kind", "chat",
@@ -44,7 +44,7 @@ final class HostArgumentsTests: XCTestCase {
     XCTAssertEqual(args?.kind, .chat)
     XCTAssertEqual(args?.swiftLMBinaryPath, "/usr/local/bin/SwiftLM")
     XCTAssertEqual(args?.swiftLMLogPath, "/tmp/swiftlm.log")
-    XCTAssertEqual(args?.contextLength, 8192)
+    XCTAssertEqual(args?.contextLength, 8_192)
   }
 
   func testRejectsUnknownKind() {

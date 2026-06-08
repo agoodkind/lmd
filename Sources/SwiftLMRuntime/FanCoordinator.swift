@@ -64,21 +64,21 @@ public struct FanCoordinatorConfig: Sendable {
     fanIndices: [Int] = [0, 1],
     curve: [FanCurvePoint] = FanCoordinatorConfig.defaultCurve,
     rampUpMinDelta: Int = 500,
-    rampDownMinDelta: Int = 1500,
+    rampDownMinDelta: Int = 1_500,
     minSecondsBetweenChanges: TimeInterval = 45,
     coolOffMaxSeconds: TimeInterval = 600,
     coolOffTempC: Double = 60,
     loadEmaAlpha: Double = 0.20,
     tempEmaAlpha: Double = 0.25,
     emergencyTempC: Double = 90,
-    startupBaselineRpm: Int = 4000,
-    releaseBaselineRpm: Int = 1500,
+    startupBaselineRpm: Int = 4_000,
+    releaseBaselineRpm: Int = 1_500,
     activeRampDuration: TimeInterval = 15,
     holdSeconds: TimeInterval = 90,
     coolingRampDownSeconds: TimeInterval = 180,
     activeFullBlastTempC: Double = 75,
     rampMinSecondsBetweenChanges: TimeInterval = 0.5,
-    fallbackMaxRpm: Int = 9000,
+    fallbackMaxRpm: Int = 9_000,
     activePriority: Int = 50,
     coolingPriority: Int = 20
   ) {
@@ -105,13 +105,13 @@ public struct FanCoordinatorConfig: Sendable {
   }
 
   public static let defaultCurve: [FanCurvePoint] = [
-    .init(tempC: 50, rpm: 2500),
-    .init(tempC: 65, rpm: 3500),
-    .init(tempC: 72, rpm: 4800),
-    .init(tempC: 78, rpm: 6000),
-    .init(tempC: 85, rpm: 7500),
-    .init(tempC: 92, rpm: 9000),
-    .init(tempC: 95, rpm: 10000),
+    .init(tempC: 50, rpm: 2_500),
+    .init(tempC: 65, rpm: 3_500),
+    .init(tempC: 72, rpm: 4_800),
+    .init(tempC: 78, rpm: 6_000),
+    .init(tempC: 85, rpm: 7_500),
+    .init(tempC: 92, rpm: 9_000),
+    .init(tempC: 95, rpm: 10_000),
   ]
 }
 
@@ -173,32 +173,32 @@ public func activityFloorRpm(
 ) -> Int {
   var floor = 0
   if gpuPercent >= 80 {
-    floor = max(floor, 4500)
+    floor = max(floor, 4_500)
   } else if gpuPercent >= 50 {
-    floor = max(floor, 3800)
+    floor = max(floor, 3_800)
   } else if gpuPercent >= 25 {
-    floor = max(floor, 3200)
+    floor = max(floor, 3_200)
   }
 
   if cpuPercent >= 70 {
-    floor = max(floor, 4200)
+    floor = max(floor, 4_200)
   } else if cpuPercent >= 40 {
-    floor = max(floor, 3500)
+    floor = max(floor, 3_500)
   }
 
   if pressureFreePct <= 10 {
-    floor = max(floor, 4500)
+    floor = max(floor, 4_500)
   } else if pressureFreePct <= 25 {
-    floor = max(floor, 3800)
+    floor = max(floor, 3_800)
   }
 
   if llmActive {
     if gpuPercent >= 50 {
-      floor = max(floor, 5800)
+      floor = max(floor, 5_800)
     } else if gpuPercent >= 25 {
-      floor = max(floor, 5000)
+      floor = max(floor, 5_000)
     } else {
-      floor = max(floor, 4200)
+      floor = max(floor, 4_200)
     }
   }
   return floor
@@ -214,7 +214,7 @@ public func rpmForTemp(_ temp: Double, curve: [FanCurvePoint]) -> Int {
   for i in 0..<(curve.count - 1) {
     let a = curve[i]
     let b = curve[i + 1]
-    if temp >= a.tempC && temp <= b.tempC {
+    if temp >= a.tempC, temp <= b.tempC {
       let span = b.tempC - a.tempC
       let ratio = (temp - a.tempC) / span
       return Int(Double(a.rpm) + ratio * Double(b.rpm - a.rpm))
@@ -235,7 +235,7 @@ private func lerpInt(_ a: Int, _ b: Int, _ t: Double) -> Int {
 public final class FanCoordinator: @unchecked Sendable {
   public let config: FanCoordinatorConfig
 
-  private(set) public var state: FanState = .idle
+  public private(set) var state: FanState = .idle
   private var coolingStartedAt: Date?
   private var handedToAuto: Bool = false
 
@@ -397,7 +397,7 @@ public final class FanCoordinator: @unchecked Sendable {
   // MARK: - Tick
 
   /// Feed one sample of inputs into the coordinator.
-  public func apply(_ inputs: FanInputs, now: Date = Date()) async throws {
+  public func apply(_ inputs: FanInputs, now: Date = Date()) async {
     let previousState = self.state
     if self.activeFanIndices.isEmpty {
       log.debug(
@@ -443,7 +443,7 @@ public final class FanCoordinator: @unchecked Sendable {
         let rampComplete = elapsed >= (self.config.holdSeconds + self.config.coolingRampDownSeconds)
         let tempOk = maxTemp <= self.config.coolOffTempC
         let timeUp = elapsed >= self.config.coolOffMaxSeconds
-        if rampComplete && (tempOk || timeUp) {
+        if rampComplete, tempOk || timeUp {
           state = .idle
           coolingStartedAt = nil
           handedToAuto = false
@@ -497,10 +497,9 @@ public final class FanCoordinator: @unchecked Sendable {
 
     let inActiveRampWindow =
       self.state == .active && !hotEnoughForFullBlast
-      && self.activeRampStartedAt.map({ now.timeIntervalSince($0) < self.config.activeRampDuration }
-      ) == true
+      && self.activeRampStartedAt.map { now.timeIntervalSince($0) < self.config.activeRampDuration }== true
 
-    let coolingElapsed = self.coolingStartedAt.map({ now.timeIntervalSince($0) }) ?? .infinity
+    let coolingElapsed = self.coolingStartedAt.map { now.timeIntervalSince($0) }?? .infinity
     let inHoldWindow = self.state == .cooling && coolingElapsed < self.config.holdSeconds
     let inCoolingRampWindow =
       self.state == .cooling
@@ -587,13 +586,13 @@ public final class FanCoordinator: @unchecked Sendable {
 
       let delta = targetRpm - prev
       if !emergency, !inRampPhase {
-        if delta > 0 && delta < self.config.rampUpMinDelta {
+        if delta > 0, delta < self.config.rampUpMinDelta {
           log.debug(
             "fan.rpm_skip_up_small_delta fan=\(f, privacy: .public) delta=\(delta, privacy: .public)"
           )
           continue
         }
-        if delta < 0 && -delta < self.config.rampDownMinDelta {
+        if delta < 0, -delta < self.config.rampDownMinDelta {
           log.debug(
             "fan.rpm_skip_down_small_delta fan=\(f, privacy: .public) delta=\(delta, privacy: .public)"
           )

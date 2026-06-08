@@ -93,7 +93,7 @@ public actor EventBus {
   private let ringCap: Int
   private var subscribers: [UUID: AsyncStream<BrokerEvent>.Continuation] = [:]
 
-  public init(ringCap: Int = 1024) {
+  public init(ringCap: Int = 1_024) {
     self.ringCap = max(64, ringCap)
   }
 

@@ -16,8 +16,8 @@ final class NVEmbeddingBackendTests: XCTestCase {
   func testNVIDIAMistralBidirectionalMetadataSelectsNVBackend() throws {
     let modelDirectory = try writeModel(
       config: nvidiaConfig(),
-      pooling: poolingConfig(dimension: 4096, includePrompt: true),
-      sentence: sentenceConfig(maxSequenceLength: 4096),
+      pooling: poolingConfig(dimension: 4_096, includePrompt: true),
+      sentence: sentenceConfig(maxSequenceLength: 4_096),
       tokenizer: tokenizerConfig(padToken: "</s>", paddingSide: .left)
     )
     let descriptor = descriptor(path: modelDirectory)
@@ -30,8 +30,8 @@ final class NVEmbeddingBackendTests: XCTestCase {
     }
     XCTAssertEqual(metadata.modelType, "mistralbidirectional")
     XCTAssertEqual(metadata.architecture, "MistralBiDirectionalModel")
-    XCTAssertEqual(metadata.embeddingDimension, 4096)
-    XCTAssertEqual(metadata.maxSequenceLength, 4096)
+    XCTAssertEqual(metadata.embeddingDimension, 4_096)
+    XCTAssertEqual(metadata.maxSequenceLength, 4_096)
     XCTAssertEqual(metadata.poolingMode, .meanTokens)
     XCTAssertTrue(metadata.includePrompt)
     XCTAssertEqual(metadata.padTokenID, 2)

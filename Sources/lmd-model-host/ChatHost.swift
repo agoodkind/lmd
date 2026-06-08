@@ -79,11 +79,10 @@ actor ChatHost {
     let childServer = SwiftLMServer(
       model: modelPath,
       contextSize: contextLength,
-      config: config,
-      log: { message in
+      config: config
+    )      { message in
         log.notice("chat.child \(message, privacy: .public)")
       }
-    )
     try childServer.start()
     // Publish the PID as soon as the child exists so a signal arriving mid-load
     // still reaps it.
@@ -194,7 +193,7 @@ actor ChatHost {
   private func proxyStreaming(
     _ request: BackendRequest,
     upstreamRequest: URLRequest,
-    send: @escaping @Sendable (BackendFrame) -> Void,
+    send: @Sendable (BackendFrame) -> Void,
     timing: ChatRequestTiming
   ) async throws {
     let (bytes, response) = try await URLSession.shared.bytes(for: upstreamRequest)
@@ -211,7 +210,7 @@ actor ChatHost {
       ))
 
     var iterator = bytes.makeAsyncIterator()
-    let chunkSize = 4096
+    let chunkSize = 4_096
     while true {
       try Task.checkCancellation()
       var rawBytes: [UInt8] = []
@@ -236,7 +235,7 @@ actor ChatHost {
   private func proxyBuffered(
     _ request: BackendRequest,
     upstreamRequest: URLRequest,
-    send: @escaping @Sendable (BackendFrame) -> Void,
+    send: @Sendable (BackendFrame) -> Void,
     timing: ChatRequestTiming
   ) async throws {
     let (data, response) = try await URLSession.shared.data(for: upstreamRequest)

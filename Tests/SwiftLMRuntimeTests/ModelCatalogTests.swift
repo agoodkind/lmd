@@ -39,19 +39,19 @@ final class ModelCatalogTests: XCTestCase {
   }
 
   func testFindsModelsUnderRoot() throws {
-    try makeFakeModel(publisher: "mlx-community", name: "Qwen-Tiny", sizeBytes: 1024)
-    try makeFakeModel(publisher: "mlx-community", name: "Qwen-Small", sizeBytes: 2048)
+    try makeFakeModel(publisher: "mlx-community", name: "Qwen-Tiny", sizeBytes: 1_024)
+    try makeFakeModel(publisher: "mlx-community", name: "Qwen-Small", sizeBytes: 2_048)
 
     let catalog = ModelCatalog(roots: [tempDir.path])
     let models = catalog.allModels()
     XCTAssertEqual(models.count, 2)
 
-    let names = Set(models.map { $0.displayName })
+    let names = Set(models.map(\.displayName))
     XCTAssertEqual(names, ["Qwen-Tiny", "Qwen-Small"])
 
     let tiny = models.first { $0.displayName == "Qwen-Tiny" }
     XCTAssertEqual(tiny?.slug, "mlx-community/Qwen-Tiny")
-    XCTAssertGreaterThanOrEqual(tiny?.sizeBytes ?? 0, 1024)
+    XCTAssertGreaterThanOrEqual(tiny?.sizeBytes ?? 0, 1_024)
   }
 
   func testIgnoresNonModelDirectories() throws {
@@ -72,7 +72,7 @@ final class ModelCatalogTests: XCTestCase {
     try makeFakeModel(publisher: "mlx-community", name: "Zeta", sizeBytes: 1)
     try makeFakeModel(publisher: "mlx-community", name: "Alpha", sizeBytes: 1)
     let models = ModelCatalog(roots: [tempDir.path]).allModels()
-    XCTAssertEqual(models.map { $0.displayName }, ["Alpha", "Zeta"])
+    XCTAssertEqual(models.map(\.displayName), ["Alpha", "Zeta"])
   }
 
   // Regression: when the same model lives in both the LM Studio
@@ -80,7 +80,7 @@ final class ModelCatalogTests: XCTestCase {
   // the larger one (full weights beat an empty HF snapshot stub).
   func testDedupsSameSlugKeepingLargestSize() throws {
     // LM Studio layout.
-    try makeFakeModel(publisher: "mlx-community", name: "Qwen-Dup", sizeBytes: 4096)
+    try makeFakeModel(publisher: "mlx-community", name: "Qwen-Dup", sizeBytes: 4_096)
 
     // HF cache layout with the same slug. Smaller on disk (symlink-only
     // snapshot stub).
@@ -97,7 +97,7 @@ final class ModelCatalogTests: XCTestCase {
     let catalog = ModelCatalog(roots: [tempDir.path])
     let models = catalog.allModels()
     XCTAssertEqual(models.count, 1, "should dedup duplicate slug across roots")
-    XCTAssertGreaterThanOrEqual(models.first?.sizeBytes ?? 0, 4096, "kept the larger entry")
+    XCTAssertGreaterThanOrEqual(models.first?.sizeBytes ?? 0, 4_096, "kept the larger entry")
   }
 
   // Regression: the HF cache stores models at

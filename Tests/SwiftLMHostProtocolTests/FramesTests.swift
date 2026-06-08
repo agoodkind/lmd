@@ -32,7 +32,7 @@ final class FramesTests: XCTestCase {
       .usage(requestID: id, promptTokens: 9, completionTokens: 2),
       .done(requestID: id),
       .failed(requestID: id, message: "boom"),
-      .stats(rssBytes: 1024, gpuActiveBytes: 2048, gpuCacheBytes: 512),
+      .stats(rssBytes: 1_024, gpuActiveBytes: 2_048, gpuCacheBytes: 512),
       .metricsSnapshot(Data("{}".utf8)),
     ]
     for frame in frames {

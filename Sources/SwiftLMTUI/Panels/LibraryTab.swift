@@ -203,7 +203,7 @@ public final class LibraryTab: Tab {
         let entry = visible[i]
         let selected = i == selection
         let marker: String
-        if entry.isLoaded && entry.inFlightRequests > 0 {
+        if entry.isLoaded, entry.inFlightRequests > 0 {
           marker = "\(Theme.bad)● busy  \(Ansi.reset)"
         } else if entry.isLoaded {
           marker = "\(Theme.ok)● loaded\(Ansi.reset)"
@@ -229,7 +229,7 @@ public final class LibraryTab: Tab {
       detailLines.append("")
       if let e = selectedEntry() {
         let status: String
-        if e.isLoaded && e.inFlightRequests > 0 {
+        if e.isLoaded, e.inFlightRequests > 0 {
           status = "\(Theme.bad)busy\(Ansi.reset) (\(e.inFlightRequests) in-flight)"
         } else if e.isLoaded {
           status = "\(Theme.ok)loaded\(Ansi.reset)"

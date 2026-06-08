@@ -21,7 +21,7 @@ final class BrokerProtocolTests: XCTestCase {
     let cases: [BrokerRequest] = [
       .health,
       .loaded,
-      .preload(request: .init(model: "qwen3", contextLength: 4096, echoLoadConfig: true)),
+      .preload(request: .init(model: "qwen3", contextLength: 4_096, echoLoadConfig: true)),
       .unload(request: .init(model: "qwen3")),
       .pullStart(slug: "BAAI/bge-m3"),
       .embed(model: "snowflake", inputs: ["one", "two"]),
@@ -45,9 +45,9 @@ final class BrokerProtocolTests: XCTestCase {
           inFlightRequests: 1,
           kind: "chat",
           identifier: "reviewer",
-          contextLength: 4096,
+          contextLength: 4_096,
           ttlSeconds: 300,
-          loadConfig: ModelLoadConfig(identifier: "reviewer", contextLength: 4096, ttlSeconds: 300),
+          loadConfig: ModelLoadConfig(identifier: "reviewer", contextLength: 4_096, ttlSeconds: 300),
           capabilities: ModelCapabilities(text: true, vision: true, video: true)
         )
       ]
@@ -61,7 +61,7 @@ final class BrokerProtocolTests: XCTestCase {
           instanceID: "reviewer",
           loadTimeSeconds: 1.2,
           status: "loaded",
-          loadConfig: ModelLoadConfig(identifier: "reviewer", contextLength: 4096)
+          loadConfig: ModelLoadConfig(identifier: "reviewer", contextLength: 4_096)
         )),
       .unloaded(.init(status: "unloaded", modelIDs: ["qwen3"])),
       .event(.init(kind: .note, model: "qwen3", message: "loaded")),

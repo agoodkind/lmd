@@ -25,12 +25,12 @@ final class VMStatParseTests: XCTestCase {
       Decompressions:                      444444.
       """
     let snap = VMStat.parse(sample)
-    XCTAssertEqual(snap.pagesFree, 1234)
-    XCTAssertEqual(snap.pagesActive, 5678)
-    XCTAssertEqual(snap.pagesInactive, 9012)
+    XCTAssertEqual(snap.pagesFree, 1_234)
+    XCTAssertEqual(snap.pagesActive, 5_678)
+    XCTAssertEqual(snap.pagesInactive, 9_012)
     XCTAssertEqual(snap.pagesWired, 345)
-    XCTAssertEqual(snap.pagesCompressed, 67890)
-    XCTAssertEqual(snap.pageins, 11111)
+    XCTAssertEqual(snap.pagesCompressed, 67_890)
+    XCTAssertEqual(snap.pageins, 11_111)
     XCTAssertEqual(snap.pageouts, 22)
     XCTAssertEqual(snap.compressions, 333_333)
     XCTAssertEqual(snap.decompressions, 444_444)

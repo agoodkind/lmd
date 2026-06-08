@@ -103,12 +103,12 @@ final class TUILaunchTests: XCTestCase {
     let outputBuffer = Buffer()
     let drainQueue = DispatchQueue(label: "tui-pty-drain")
     drainQueue.async {
-      var chunk = [UInt8](repeating: 0, count: 4096)
+      var chunk = [UInt8](repeating: 0, count: 4_096)
       while true {
         let count = chunk.withUnsafeMutableBytes { read(master, $0.baseAddress, $0.count) }
         if count > 0 {
           outputBuffer.append(Data(chunk[0..<count]))
-        } else if count < 0 && (errno == EINTR || errno == EAGAIN) {
+        } else if count < 0, errno == EINTR || errno == EAGAIN {
           continue
         } else {
           break
@@ -273,7 +273,7 @@ private final class Buffer: @unchecked Sendable {
 extension Process {
   /// Block up to `timeout` seconds for the process to exit. Returns
   /// `true` if it exited, `false` on timeout.
-  func waitUntilExit2(timeout: TimeInterval) throws -> Bool {
+  func waitUntilExit2(timeout: TimeInterval) -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
     while isRunning {
       if Date() >= deadline { return false }

@@ -37,7 +37,7 @@ public enum VMStat {
     func field(_ name: String) -> Int64 {
       for line in text.split(separator: "\n") where line.contains(name) {
         let after = line.split(separator: ":").last.map(String.init) ?? ""
-        let digits = after.filter { $0.isNumber }
+        let digits = after.filter(\.isNumber)
         return Int64(digits) ?? 0
       }
       return 0

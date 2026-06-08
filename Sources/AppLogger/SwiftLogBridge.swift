@@ -66,7 +66,7 @@ struct SwiftLogToOSLogBackend: LogHandler {
     handler: Logging.Logger.Metadata,
     event: Logging.Logger.Metadata?
   ) -> Logging.Logger.Metadata {
-    guard let event = event, !event.isEmpty else { return handler }
+    guard let event, !event.isEmpty else { return handler }
     var out = handler
     for (k, v) in event { out[k] = v }
     return out

@@ -25,7 +25,7 @@ public protocol EmbeddingBackendProtocol: AnyObject, Sendable {
 }
 
 extension EmbeddingBackendProtocol {
-  public func applyPowerThrottle(_ level: PowerThrottleLevel) {}
+  public func applyPowerThrottle(_: PowerThrottleLevel) {}
 }
 
 public protocol UnsupportedEmbeddingBackendError: Error, CustomStringConvertible, Sendable {}

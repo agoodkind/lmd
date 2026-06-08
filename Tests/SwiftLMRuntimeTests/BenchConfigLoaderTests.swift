@@ -63,11 +63,11 @@ final class BenchConfigLoaderTests: XCTestCase {
     XCTAssertFalse(cfg.skipExisting)
     XCTAssertEqual(cfg.testTimeoutSeconds, 120)
     XCTAssertEqual(cfg.parallelismPerModel, 4)
-    XCTAssertEqual(cfg.models[0].contextSize, 131072)
-    XCTAssertEqual(cfg.models[0].maxTokensOverride, 4096)
-    XCTAssertEqual(cfg.models[0].maxInputBytesOverride, 100000)
-    XCTAssertEqual(cfg.variants[0].maxInputBytes, 50000)
-    XCTAssertEqual(cfg.variants[0].maxTokens, 16384)
+    XCTAssertEqual(cfg.models[0].contextSize, 131_072)
+    XCTAssertEqual(cfg.models[0].maxTokensOverride, 4_096)
+    XCTAssertEqual(cfg.models[0].maxInputBytesOverride, 100_000)
+    XCTAssertEqual(cfg.variants[0].maxInputBytes, 50_000)
+    XCTAssertEqual(cfg.variants[0].maxTokens, 16_384)
     XCTAssertTrue(cfg.variants[0].thinking)
   }
 

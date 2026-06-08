@@ -255,11 +255,11 @@ private func runBenchFromConfig(configPath: String) async {
     exit(2)
   }
 
-  let backend = BrokerBenchBackend(brokerHost: "localhost", brokerPort: 5400)
+  let backend = BrokerBenchBackend(brokerHost: "localhost", brokerPort: 5_400)
   let orchestrator = BenchOrchestrator(
     config: config,
-    backend: backend,
-    events: { event in
+    backend: backend
+  )    { event in
       switch event {
       case .runStarted(let total):
         say("running \(total) cells against the broker (HTTP /v1/* surface)")
@@ -281,7 +281,6 @@ private func runBenchFromConfig(configPath: String) async {
         )
       }
     }
-  )
   _ = await orchestrator.run()
 }
 
@@ -317,7 +316,7 @@ private func listCatalog() {
     return String(repeating: " ", count: width - string.count) + string
   }
 
-  let nameWidth = min(45, (models.map { $0.displayName.count }.max() ?? 30) + 2)
+  let nameWidth = min(45, (models.map(\.displayName.count).max() ?? 30) + 2)
   let slugWidth = min(50, (models.map { ($0.slug ?? "").count }.max() ?? 30) + 2)
   let kindWidth = 12
   say(
@@ -413,7 +412,7 @@ struct LMDServeCommand: ParsableCommand {
     aliases: ["broker"]
   )
 
-  mutating func run() throws {
+  mutating func run() {
     runServeBinary()
   }
 }
@@ -425,7 +424,7 @@ struct LMDTUICommand: ParsableCommand {
     aliases: ["lmd-tui"]
   )
 
-  mutating func run() throws {
+  mutating func run() {
     LMDTUIHost.run()
   }
 }
@@ -438,7 +437,7 @@ struct LMDBenchCommand: ParsableCommand {
     aliases: ["benchmark", "lmd-bench"]
   )
 
-  mutating func run() throws {
+  mutating func run() {
     LMDBenchTool.run()
   }
 }
@@ -452,7 +451,7 @@ struct LMDBenchRunCommand: ParsableCommand {
   @Argument(help: "Path to the BenchConfig JSON or TOML file.")
   var configPath: String
 
-  mutating func run() throws {
+  mutating func run() {
     runBenchFromConfigSync(configPath: configPath)
   }
 }
@@ -505,7 +504,7 @@ struct LMDListCommand: ParsableCommand {
     aliases: ["list", "catalog"]
   )
 
-  mutating func run() throws {
+  mutating func run() {
     listCatalog()
   }
 }
@@ -516,7 +515,7 @@ struct LMDStatusCommand: ParsableCommand {
     abstract: "Show loaded models and memory budget from the running broker."
   )
 
-  mutating func run() throws {
+  mutating func run() {
     statusCommand()
   }
 }
@@ -545,7 +544,7 @@ struct LMDLoadCommand: ParsableCommand {
   @Flag(name: .long, help: "Include the effective load config in the response.")
   var echoLoadConfig = false
 
-  mutating func run() throws {
+  mutating func run() {
     loadCommand(
       request: ModelLoadRequest(
         model: model,
@@ -574,7 +573,7 @@ struct LMDUnloadCommand: ParsableCommand {
   @Flag(name: .long, help: "Unload every currently loaded model.")
   var all = false
 
-  mutating func run() throws {
+  mutating func run() {
     unloadCommand(request: ModelUnloadRequest(model: model, identifier: identifier, all: all))
   }
 }
@@ -591,7 +590,7 @@ struct LMDEmbedCommand: ParsableCommand {
   @Option(name: [.customShort("t"), .long], help: "Input text to embed.")
   var input: String
 
-  mutating func run() throws {
+  mutating func run() {
     embedCommand(modelId: model, text: input)
   }
 }
@@ -606,7 +605,7 @@ struct LMDPullCommand: ParsableCommand {
   @Argument(help: "Hugging Face slug in `<namespace>/<name>` format.")
   var slug: String
 
-  mutating func run() throws {
+  mutating func run() {
     pullCommand(slug: slug)
   }
 }
@@ -621,7 +620,7 @@ struct LMDRmCommand: ParsableCommand {
   @Argument(help: "Model id, slug, or display name.")
   var model: String
 
-  mutating func run() throws {
+  mutating func run() {
     rmCommand(modelId: model)
   }
 }

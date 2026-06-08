@@ -46,7 +46,7 @@ public final class EventsTab: Tab {
   /// Scroll offset in event rows. 0 means "stick to newest".
   public private(set) var scrollOffset: Int = 0
   /// Upper bound on entries stored. Host-configurable.
-  public var capacity: Int = 1024
+  public var capacity: Int = 1_024
 
   public init() {}
 

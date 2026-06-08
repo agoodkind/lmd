@@ -95,7 +95,7 @@ final class XPCBrokerTests: XCTestCase {
     let deadline = Date().addingTimeInterval(TimeInterval(deadlineSeconds))
     while Date() < deadline {
       let snapshot = try await client.loaded()
-      let has = snapshot.models.contains(where: { $0.modelID == modelID })
+      let has = snapshot.models.contains { $0.modelID == modelID }
       if has == expected {
         return true
       }

@@ -114,6 +114,7 @@ public enum Screen {
 
   /// Install a SIGWINCH handler that calls `onResize` whenever the
   /// terminal window is resized.
+  @preconcurrency
   public static func onResize(_ handler: @escaping @Sendable () -> Void) -> DispatchSourceSignal {
     signal(SIGWINCH, SIG_IGN)
     let src = DispatchSource.makeSignalSource(signal: SIGWINCH)

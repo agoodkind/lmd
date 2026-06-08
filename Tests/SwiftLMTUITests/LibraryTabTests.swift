@@ -12,7 +12,7 @@ import XCTest
 
 final class LibraryTabTests: XCTestCase {
   private func fixtureEntries() -> [LibraryEntry] {
-    return [
+    [
       LibraryEntry(
         id: "a", displayName: "Alpha", slug: "test/alpha",
         sizeGB: 5, isLoaded: true, inFlightRequests: 0

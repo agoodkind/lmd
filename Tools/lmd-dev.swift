@@ -88,7 +88,7 @@ struct SmokeConfiguration {
 
   var baseURL: URL {
     // swiftlint:disable:next force_unwrapping
-    return URL(string: "http://\(host):\(port)")!
+    URL(string: "http://\(host):\(port)")!
   }
 
   init(environment: [String: String], repoRoot: URL) throws {
@@ -110,7 +110,7 @@ struct SmokeConfiguration {
       }
       port = parsedPort
     } else if useRunningDaemon {
-      port = 5400
+      port = 5_400
     } else {
       port = Int.random(in: 15_000..<16_000)
     }
@@ -624,7 +624,7 @@ final class DevTool {
     try stageRuntimeResources(for: configuration)
   }
 
-  private func test() throws {
+  func test() throws {
     // Run the suite via SwiftPM instead of `tuist test`. Tuist's static-framework
     // SPM integration fails to propagate internal C-target module maps (EventSource
     // -> async-http-client / swift-nio / _NumericsShims) on Xcode 26, which breaks
@@ -663,7 +663,7 @@ final class DevTool {
   /// services and its own data dir, so production on :5400 is never touched),
   /// points the tests at it via `LMD_TEST_BASE_URL` and `LMD_CONTROL_SERVICE`,
   /// runs them, then tears the daemon down whatever the outcome.
-  private func testIntegration() throws {
+  func testIntegration() throws {
     let configuration = "Debug"
     try build(configuration: configuration)
     var env = ProcessInfo.processInfo.environment
@@ -934,8 +934,8 @@ final class DevTool {
   private func resolveTestDaemonIdentity() throws -> TestDaemonIdentity {
     let env = environment.values
     let label = env["LMD_TEST_LABEL"] ?? "io.goodkind.lmd.serve.test"
-    let port = Int(env["LMD_TEST_PORT"] ?? "5401") ?? 5401
-    guard port != 5400 else {
+    let port = Int(env["LMD_TEST_PORT"] ?? "5401") ?? 5_401
+    guard port != 5_400 else {
       throw ToolError.failure("refusing: test port equals production port 5400")
     }
     guard label != "io.goodkind.lmd.serve" else {
@@ -1100,7 +1100,7 @@ final class DevTool {
     }
   }
 
-  private func testDaemonUp() throws {
+  func testDaemonUp() throws {
     let identity = try resolveTestDaemonIdentity()
     let servePath = try resolveTestServeBinary()
     let swiftLMBinary = try resolveTestSwiftLMBinary()
@@ -1139,7 +1139,7 @@ final class DevTool {
     throw ToolError.failure("test daemon did not become healthy")
   }
 
-  private func testDaemonDown() throws {
+  func testDaemonDown() throws {
     let identity = try resolveTestDaemonIdentity()
     try writeLine("  booting out \(identity.label)")
     _ = try? runPassthrough("launchctl", ["bootout", identity.serviceTarget])
@@ -1152,7 +1152,7 @@ final class DevTool {
     try writeLine("  down")
   }
 
-  private func testDaemonStatus() throws {
+  func testDaemonStatus() throws {
     let identity = try resolveTestDaemonIdentity()
     try writeLine("=== health \(identity.healthURL) ===")
     try writeLine(probeTestHealth(identity) ? "healthy" : "(unreachable)")
@@ -1164,7 +1164,7 @@ final class DevTool {
     }
   }
 
-  private func testDaemonRestart() throws {
+  func testDaemonRestart() throws {
     let identity = try resolveTestDaemonIdentity()
     try writeLine("  kickstart -k \(identity.serviceTarget)")
     try runPassthrough("launchctl", ["kickstart", "-k", identity.serviceTarget])
@@ -1175,7 +1175,7 @@ final class DevTool {
     throw ToolError.failure("test daemon did not become healthy after restart")
   }
 
-  private func testDaemonLogs() throws {
+  func testDaemonLogs() throws {
     let identity = try resolveTestDaemonIdentity()
     guard fileManager.fileExists(atPath: identity.stderrLog.path) else {
       throw ToolError.failure("no log at \(identity.stderrLog.path)")
@@ -1578,7 +1578,7 @@ final class DevTool {
     )
   }
 
-  private func cleanupKeychain() throws {
+  private func cleanupKeychain() {
     guard let keychainPath = environment.values["CI_KEYCHAIN_PATH"], !keychainPath.isEmpty else {
       return
     }
@@ -1933,7 +1933,7 @@ final class DevTool {
     return values
   }
 
-  private func sourceSwiftFiles(excludingPathComponent excluded: String) throws -> [URL] {
+  private func sourceSwiftFiles(excludingPathComponent excluded: String) -> [URL] {
     let sources = repoRoot.appendingPathComponent("Sources")
     guard let enumerator = fileManager.enumerator(at: sources, includingPropertiesForKeys: nil)
     else {

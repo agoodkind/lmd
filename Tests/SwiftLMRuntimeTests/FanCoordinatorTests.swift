@@ -13,7 +13,7 @@ import XCTest
 final class FanCurveTests: XCTestCase {
   func testTempBelowCurveReturnsFloor() {
     let rpm = rpmForTemp(40, curve: FanCoordinatorConfig.defaultCurve)
-    XCTAssertEqual(rpm, 2500)
+    XCTAssertEqual(rpm, 2_500)
   }
 
   func testTempAboveCurveReturnsCeiling() {
@@ -23,7 +23,7 @@ final class FanCurveTests: XCTestCase {
 
   func testMidCurveInterpolates() {
     let rpm = rpmForTemp(57.5, curve: FanCoordinatorConfig.defaultCurve)
-    XCTAssertEqual(rpm, 3000, accuracy: 50)
+    XCTAssertEqual(rpm, 3_000, accuracy: 50)
   }
 }
 
@@ -33,7 +33,7 @@ final class ActivityFloorTests: XCTestCase {
       cpuPercent: 0, gpuPercent: 85,
       pressureFreePct: 100, llmActive: false
     )
-    XCTAssertGreaterThanOrEqual(floor, 4500)
+    XCTAssertGreaterThanOrEqual(floor, 4_500)
   }
 
   func testPressureLowRaisesFloor() {
@@ -41,7 +41,7 @@ final class ActivityFloorTests: XCTestCase {
       cpuPercent: 0, gpuPercent: 0,
       pressureFreePct: 5, llmActive: false
     )
-    XCTAssertGreaterThanOrEqual(floor, 4500)
+    XCTAssertGreaterThanOrEqual(floor, 4_500)
   }
 
   func testLLMActiveRaisesFloorEvenAtLowGPU() {
@@ -73,7 +73,7 @@ final class MockFanSMC: FanSMCControlling, @unchecked Sendable {
   let maxByFan: [Int: Int]
   var failMaxRead: Bool
 
-  init(maxByFan: [Int: Int] = [0: 8000, 1: 8000], failMaxRead: Bool = false) {
+  init(maxByFan: [Int: Int] = [0: 8_000, 1: 8_000], failMaxRead: Bool = false) {
     self.maxByFan = maxByFan
     self.failMaxRead = failMaxRead
   }
@@ -83,26 +83,26 @@ final class MockFanSMC: FanSMCControlling, @unchecked Sendable {
     return 0
   }
 
-  func smcOpenIfNeededSync() throws {}
+  func smcOpenIfNeededSync() {}
 
   func readFanMaxRpmSync(fanIndex: Int) throws -> Int {
     if failMaxRead {
       throw NSError(domain: "test", code: 1)
     }
-    return maxByFan[fanIndex] ?? 8000
+    return maxByFan[fanIndex] ?? 8_000
   }
 
-  func setRpmSync(fanIndex: Int, rpm: Int) throws {}
+  func setRpmSync(fanIndex _: Int, rpm _: Int) {}
 
-  func setAutoSync(fanIndex: Int) throws {}
+  func setAutoSync(fanIndex _: Int) {}
 
-  func closeSMCConnectionSync() throws {}
+  func closeSMCConnectionSync() {}
 
-  func setRpm(fanIndex: Int, rpm: Int) async throws {
+  func setRpm(fanIndex: Int, rpm: Int) {
     lastAsyncRpm[fanIndex] = rpm
   }
 
-  func setAuto(fanIndex: Int) async throws {}
+  func setAuto(fanIndex _: Int) {}
 
   var lastPriority: Int = 0
   func setCurrentPriority(_ priority: Int) { lastPriority = priority }
@@ -165,7 +165,7 @@ final class FanCoordinatorStateTests: XCTestCase {
   /// Active ramp interpolates from takeover baseline toward the temperature-
   /// responsive active steady target, not toward SMC max.
   func testActiveRampInterpolatesTowardActiveSteady() async throws {
-    let mock = MockFanSMC(maxByFan: [0: 8000])
+    let mock = MockFanSMC(maxByFan: [0: 8_000])
     let cfg = FanCoordinatorConfig(
       fanIndices: [0],
       minSecondsBetweenChanges: 0,
@@ -190,11 +190,11 @@ final class FanCoordinatorStateTests: XCTestCase {
       now: t0.addingTimeInterval(5)
     )
     // At 50% ramp: (4000 + 5800) / 2 = 4900.
-    XCTAssertEqual(mock.lastAsyncRpm[0] ?? 0, 4900, accuracy: 50)
+    XCTAssertEqual(mock.lastAsyncRpm[0] ?? 0, 4_900, accuracy: 50)
   }
 
   func testActiveFullBlastAtSmoothedTemp() async throws {
-    let mock = MockFanSMC(maxByFan: [0: 8000])
+    let mock = MockFanSMC(maxByFan: [0: 8_000])
     let cfg = FanCoordinatorConfig(
       fanIndices: [0],
       minSecondsBetweenChanges: 0,
@@ -215,7 +215,7 @@ final class FanCoordinatorStateTests: XCTestCase {
   /// 75°C (the new default full-blast threshold) should trip full-blast during
   /// the active state.
   func testActiveFullBlastAt75DefaultThreshold() async throws {
-    let mock = MockFanSMC(maxByFan: [0: 8000])
+    let mock = MockFanSMC(maxByFan: [0: 8_000])
     let cfg = FanCoordinatorConfig(
       fanIndices: [0],
       minSecondsBetweenChanges: 0,
@@ -245,7 +245,7 @@ final class FanCoordinatorStateTests: XCTestCase {
       activeRampDuration: 0.001,
       activeFullBlastTempC: 100,
       rampMinSecondsBetweenChanges: 0,
-      fallbackMaxRpm: 7777
+      fallbackMaxRpm: 7_777
     )
     let coord = FanCoordinator(config: cfg, smc: mock)
     coord.takeOver()
@@ -259,13 +259,13 @@ final class FanCoordinatorStateTests: XCTestCase {
       now: base.addingTimeInterval(20)
     )
     // gpu=90% with llm active → floor 5800; curve(50°C) = 2500; steady = 5800.
-    XCTAssertEqual(mock.lastAsyncRpm[0] ?? 0, 5800, accuracy: 50)
+    XCTAssertEqual(mock.lastAsyncRpm[0] ?? 0, 5_800, accuracy: 50)
   }
 
   /// After LLM unloads, fans hold their active RPM for holdSeconds before
   /// the ramp begins.
   func testHoldPhaseHoldsRpmAfterUnload() async throws {
-    let mock = MockFanSMC(maxByFan: [0: 8000])
+    let mock = MockFanSMC(maxByFan: [0: 8_000])
     let cfg = FanCoordinatorConfig(
       fanIndices: [0],
       minSecondsBetweenChanges: 0,
@@ -291,7 +291,7 @@ final class FanCoordinatorStateTests: XCTestCase {
       now: t0.addingTimeInterval(1)
     )
     let activeRpm = mock.lastAsyncRpm[0] ?? 0
-    XCTAssertGreaterThan(activeRpm, 4000)
+    XCTAssertGreaterThan(activeRpm, 4_000)
 
     // Unload LLM: enters .cooling, starts hold phase.
     try await coord.apply(
@@ -311,7 +311,7 @@ final class FanCoordinatorStateTests: XCTestCase {
   /// After the hold window elapses, fans ramp down toward the cooling steady
   /// target over coolingRampDownSeconds.
   func testCoolingRampStartsAfterHoldWindow() async throws {
-    let mock = MockFanSMC(maxByFan: [0: 8000])
+    let mock = MockFanSMC(maxByFan: [0: 8_000])
     let cfg = FanCoordinatorConfig(
       fanIndices: [0],
       rampUpMinDelta: 0,
@@ -338,7 +338,7 @@ final class FanCoordinatorStateTests: XCTestCase {
       now: t0.addingTimeInterval(1)
     )
     let activeRpm = mock.lastAsyncRpm[0] ?? 0
-    XCTAssertGreaterThan(activeRpm, 4000)
+    XCTAssertGreaterThan(activeRpm, 4_000)
 
     try await coord.apply(
       FanInputs(cpuTempC: 55, gpuTempC: 55, gpuPercent: 0, llmLoaded: false),
@@ -370,19 +370,19 @@ final class FanCoordinatorStateTests: XCTestCase {
   func testTakeoverSurvivesBaselineWriteFailure() async throws {
     final class OneFanFailingSMC: FanSMCControlling, @unchecked Sendable {
       var lastAsyncRpm: [Int: Int] = [:]
-      func runLaunchProcess(_ path: String, _ args: [String]) -> Int32 { 0 }
-      func smcOpenIfNeededSync() throws {}
-      func readFanMaxRpmSync(fanIndex: Int) throws -> Int { 8000 }
-      func setRpmSync(fanIndex: Int, rpm: Int) throws {
+      func runLaunchProcess(_: String, _: [String]) -> Int32 { 0 }
+      func smcOpenIfNeededSync() {}
+      func readFanMaxRpmSync(fanIndex _: Int) -> Int { 8_000 }
+      func setRpmSync(fanIndex: Int, rpm _: Int) throws {
         if fanIndex == 1 { throw NSError(domain: "test", code: 1) }
       }
-      func setAutoSync(fanIndex: Int) throws {}
-      func closeSMCConnectionSync() throws {}
-      func setRpm(fanIndex: Int, rpm: Int) async throws {
+      func setAutoSync(fanIndex _: Int) {}
+      func closeSMCConnectionSync() {}
+      func setRpm(fanIndex: Int, rpm: Int) {
         lastAsyncRpm[fanIndex] = rpm
       }
-      func setAuto(fanIndex: Int) async throws {}
-      func setCurrentPriority(_ priority: Int) {}
+      func setAuto(fanIndex _: Int) {}
+      func setCurrentPriority(_: Int) {}
     }
     let mock = OneFanFailingSMC()
     let cfg = FanCoordinatorConfig(

@@ -44,5 +44,5 @@ public protocol ModelServer: AnyObject, Sendable {
 extension ModelServer {
   public var isRunning: Bool { true }
 
-  public func applyPowerThrottle(_ level: ThrottleLevel) {}
+  public func applyPowerThrottle(_: ThrottleLevel) {}
 }

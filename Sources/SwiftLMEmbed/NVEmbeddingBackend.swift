@@ -210,7 +210,7 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
     )
   }
 
-  public func embed(inputs: [String]) async throws -> [[Float]] {
+  public func embed(inputs: [String]) throws -> [[Float]] {
     guard let runtime else {
       throw NVEmbeddingRuntimeError.modelNotLoaded
     }

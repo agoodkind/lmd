@@ -29,8 +29,8 @@ private final class RecordingModelServer: ModelServer, @unchecked Sendable {
     self.sizeBytes = sizeBytes
   }
 
-  func spawn() async throws {}
-  func waitReady() async throws {}
+  func spawn() {}
+  func waitReady() {}
 
   func send(_ request: BackendRequest) -> AsyncThrowingStream<BackendFrame, Error> {
     AsyncThrowingStream { continuation in
@@ -39,7 +39,7 @@ private final class RecordingModelServer: ModelServer, @unchecked Sendable {
     }
   }
 
-  func stats() async -> BackendStats {
+  func stats() -> BackendStats {
     BackendStats(rssBytes: 0, gpuActiveBytes: 0, gpuCacheBytes: 0)
   }
 

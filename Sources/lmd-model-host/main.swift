@@ -128,9 +128,8 @@ do {
       modelPath: args.modelPath,
       binaryPath: args.swiftLMBinaryPath,
       logPath: args.swiftLMLogPath,
-      contextLength: args.contextLength,
-      onChildPIDChange: { pid in childReaper.update(pid) }
-    )
+      contextLength: args.contextLength
+    )      { pid in childReaper.update(pid) }
   } else {
     chatHost = nil
   }

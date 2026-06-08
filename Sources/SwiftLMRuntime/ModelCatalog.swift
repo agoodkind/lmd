@@ -132,7 +132,7 @@ public struct ModelCatalog {
 
     let displayName: String
     let slug: String?
-    if parent == "snapshots" && grand.hasPrefix("models--") {
+    if parent == "snapshots", grand.hasPrefix("models--") {
       // HF hub snapshot. Turn `models--mlx-community--Qwen3.5-4B-MLX-4bit`
       // into the slug `mlx-community/Qwen3.5-4B-MLX-4bit` and use the
       // trailing model name as the display name.
@@ -253,7 +253,7 @@ public struct ModelCatalog {
   /// FPS resampling rate. We declare that value as the model default while
   /// still allowing callers to request a different route extraction rate.
   private static func qwenFamilySamplingFPS() -> Double {
-    return 2.0
+    2.0
   }
 
   private static func smolVLM2VideoSamplingFPS(
@@ -262,9 +262,9 @@ public struct ModelCatalog {
   ) -> Double? {
     let isSmolVLM2 =
       stringValue(config["model_type"])?.lowercased().hasPrefix("smolvlm") == true
-      || metadata.contains(where: { json in
+      || metadata.contains { json in
         stringValue(json["processor_class"])?.contains("SmolVLM") == true
-      })
+      }
     guard isSmolVLM2 else {
       return nil
     }
@@ -287,9 +287,9 @@ public struct ModelCatalog {
   ) -> Double? {
     let isGemma4 =
       stringValue(config["model_type"])?.lowercased().hasPrefix("gemma4") == true
-      || metadata.contains(where: { json in
+      || metadata.contains { json in
         stringValue(json["processor_class"])?.contains("Gemma4") == true
-      })
+      }
     guard isGemma4 else {
       return nil
     }
@@ -369,9 +369,9 @@ public struct ModelCatalog {
     else {
       return false
     }
-    return metadata.contains(where: { json in
+    return metadata.contains { json in
       hasValue(json["image_processor_type"])
-    })
+    }
   }
 
   private static func jsonObject(at path: String, fileManager: FileManager) -> [String: Any]? {

@@ -131,7 +131,7 @@ public struct BrokerConfig: Sendable {
   private static let gigabyte: Int64 = 1_073_741_824
   /// Conservative prompt-token ceiling used when the prompt cache is disabled
   /// and no explicit limit is set, mirroring the prior inline behavior.
-  private static let disabledPromptCacheCeiling = 8192
+  private static let disabledPromptCacheCeiling = 8_192
 
   /// The prompt-token ceiling enforced before admitting a chat request. An
   /// explicit `promptCacheMaxTokens` wins; otherwise a disabled cache imposes a
@@ -255,7 +255,7 @@ public struct BrokerConfig: Sendable {
 
     // The single optional key: the variable must be defined (present), but a
     // blank value is the explicit way to request "auto".
-    var promptCacheMaxTokensValue: Int? = nil
+    var promptCacheMaxTokensValue: Int?
     if let raw = source.raw(.promptCacheMaxTokens) {
       if raw.isEmpty {
         promptCacheMaxTokensValue = nil

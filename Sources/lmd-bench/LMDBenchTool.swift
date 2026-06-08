@@ -48,9 +48,9 @@ let swiftLMBinary: String = {
   let home = NSHomeDirectory()
   return "\(home)/Sites/SwiftLM/.build/release/SwiftLM"
 }()
-let serverPort: Int = 5413
+let serverPort: Int = 5_413
 let serverHost = "localhost"
-let perTestTimeout: TimeInterval = 1800  // 30 min default, enough for 122B in RAM
+let perTestTimeout: TimeInterval = 1_800  // 30 min default, enough for 122B in RAM
 let fancurveAgentPath = "/Applications/FanCurve.app/Contents/MacOS/io.goodkind.fancurveagent"
 let configsRepo = "/Users/agoodkind/Sites/configs"
 let repoMaxBytes = 300_000
@@ -61,42 +61,42 @@ let models: [(displayName: String, path: String, maxTokens: Int)] = [
   (
     "qwen3.5-4b-mlx",
     "/Users/agoodkind/.lmstudio/models/mlx-community/Qwen3.5-4B-MLX-4bit",
-    8192
+    8_192
   ),
   (
     "qwen3-coder-30b-a3b-instruct@4bit",
     "/Users/agoodkind/.lmstudio/models/mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit",
-    8192
+    8_192
   ),
   (
     "qwen3-coder-30b-a3b-instruct@8bit",
     "/Users/agoodkind/.lmstudio/models/mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit",
-    8192
+    8_192
   ),
   (
     "qwen3-coder-30b-a3b-instruct-dwq-lr9e8",
     "/Users/agoodkind/.lmstudio/models/mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit-DWQ-lr9e8",
-    8192
+    8_192
   ),
   (
     "qwen3.6-35b-a3b",
     "/Users/agoodkind/.lmstudio/models/mlx-community/Qwen3.6-35B-A3B-4bit",
-    8192
+    8_192
   ),
   (
     "microsoft_phi-4-reasoning-plus",
     "/Users/agoodkind/.lmstudio/models/lmstudio-community/Phi-4-reasoning-plus-MLX-4bit",
-    4096
+    4_096
   ),
   (
     "qwen_qwen3-coder-next",
     "/Users/agoodkind/.lmstudio/models/lmstudio-community/Qwen3-Coder-Next-MLX-6bit",
-    8192
+    8_192
   ),
   (
     "qwen3.5-122b-a10b-text-mlx",
     "/Users/agoodkind/.lmstudio/models/nightmedia/Qwen3.5-122B-A10B-Text-mxfp4-mlx",
-    8192
+    8_192
   ),
 ]
 
@@ -144,9 +144,8 @@ final class FanController {
     let cfg = FanCoordinatorConfig()
     self.coordinator = FanCoordinator(
       config: cfg,
-      smc: smc,
-      log: { message in log.info("\(message, privacy: .public)") }
-    )
+      smc: smc
+    )      { message in log.info("\(message, privacy: .public)") }
   }
 
   func start() { coordinator.takeOver() }
@@ -176,7 +175,7 @@ final class MemoryMonitor {
 
   let outPath = memoryPath
   let intervalSeconds: Double = 15
-  let macmonPort: Int = 8765
+  let macmonPort: Int = 8_765
   let lowBatteryPct: Int = 30
   let resumeBatteryPct: Int = 75
 
@@ -378,14 +377,14 @@ final class MemoryMonitor {
     var pauseAction = "none"
     if let srv = server, let proc = srv.process {
       let pid = proc.processIdentifier
-      if !wasPaused && battPct <= lowBatteryPct {
+      if !wasPaused, battPct <= lowBatteryPct {
         kill(pid, SIGSTOP)
         lock.lock()
         paused = true
         lock.unlock()
         pauseAction = "paused_low_battery_\(battPct)pct"
         log.notice("monitor.paused_on_battery battery_pct=\(battPct, privacy: .public)")
-      } else if wasPaused && battPct >= resumeBatteryPct && acState == "charging" {
+      } else if wasPaused, battPct >= resumeBatteryPct, acState == "charging" {
         kill(pid, SIGCONT)
         lock.lock()
         paused = false
@@ -517,9 +516,8 @@ final class SwiftLMServer {
         port: serverPort,
         logFilePath: swiftLMLogPath,
         readyTimeout: 300
-      ),
-      log: { message in log.info("\(message, privacy: .public)") }
-    )
+      )
+    )      { message in log.info("\(message, privacy: .public)") }
     try b.start()
     self.backend = b
   }
@@ -549,9 +547,8 @@ final class SwiftLMServer {
           port: serverPort,
           logFilePath: swiftLMLogPath,
           readyTimeout: timeout
-        ),
-        log: { message in log.info("\(message, privacy: .public)") }
-      )
+        )
+      )        { message in log.info("\(message, privacy: .public)") }
       do {
         try b.start()
       } catch {
@@ -683,7 +680,7 @@ func runChat(model: String, systemPrompt: String, userContent: String, maxTokens
   var resultData: Data?
   var httpCode = -1
 
-  URLSession.shared.dataTask(with: req) { data, resp, err in
+  URLSession.shared.dataTask(with: req) { data, resp, _ in
     if let r = resp as? HTTPURLResponse { httpCode = r.statusCode }
     resultData = data
     sem.signal()
@@ -692,8 +689,8 @@ func runChat(model: String, systemPrompt: String, userContent: String, maxTokens
   _ = sem.wait(timeout: .now() + perTestTimeout + 10)
   let end = Int(Date().timeIntervalSince1970)
 
-  var rawText: String? = nil
-  var parsedResp: [String: AnyCodable]? = nil
+  var rawText: String?
+  var parsedResp: [String: AnyCodable]?
   if let d = resultData {
     if let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
       parsedResp = obj.mapValues { AnyCodable($0) }
@@ -835,14 +832,14 @@ let reasoningModels: [ReasoningModel] = [
   ReasoningModel(
     displayName: "qwen3.6-35b-a3b",
     path: "/Users/agoodkind/.lmstudio/models/mlx-community/Qwen3.6-35B-A3B-4bit",
-    maxTokens: 16384,
+    maxTokens: 16_384,
     maxInputBytes: 300_000,
-    ctxSize: 204800
+    ctxSize: 204_800
   ),
   ReasoningModel(
     displayName: "microsoft_phi-4-reasoning-plus",
     path: "/Users/agoodkind/.lmstudio/models/lmstudio-community/Phi-4-reasoning-plus-MLX-4bit",
-    maxTokens: 16384,
+    maxTokens: 16_384,
     maxInputBytes: 100_000,
     ctxSize: nil
   ),

@@ -544,8 +544,8 @@ struct SwiftLMD {
         return server
       },
       chatMaxConcurrency: config.chatMaxConcurrency,
-      embeddingMaxConcurrency: config.embeddingMaxConcurrency,
-      eventSink: { event in
+      embeddingMaxConcurrency: config.embeddingMaxConcurrency
+    )      { event in
         switch event {
         case .modelUnloaded(let modelID, _),
           .modelEvicted(let modelID, _),
@@ -557,7 +557,6 @@ struct SwiftLMD {
         }
         publishRouterEvent(event)
       }
-    )
 
     let state = BrokerState(
       catalog: catalog,
@@ -855,7 +854,7 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
   }
 
   router.post("/api/v1/models/load") { req, _ async throws -> Response in
-    let bodyBuffer = try await req.body.collect(upTo: 1024 * 1024)
+    let bodyBuffer = try await req.body.collect(upTo: 1_024 * 1_024)
     let bodyData = Data(buffer: bodyBuffer)
     let request: ModelLoadRequest
     do {
@@ -888,7 +887,7 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
   }
 
   router.post("/api/v1/models/unload") { req, _ async throws -> Response in
-    let bodyBuffer = try await req.body.collect(upTo: 1024 * 1024)
+    let bodyBuffer = try await req.body.collect(upTo: 1_024 * 1_024)
     let bodyData = Data(buffer: bodyBuffer)
     let request: ModelUnloadRequest
     do {
@@ -947,7 +946,7 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
   //   Spawns the backend and warms it without sending a chat request.
   //   Returns 202 when ready.
   router.post("/swiftlmd/preload") { req, _ async throws -> Response in
-    let bodyBuffer = try await req.body.collect(upTo: 1024 * 1024)
+    let bodyBuffer = try await req.body.collect(upTo: 1_024 * 1_024)
     let bodyData = Data(buffer: bodyBuffer)
     let request: ModelLoadRequest
     do {
@@ -979,7 +978,7 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
   // POST /swiftlmd/unload  body {"model": "<id>"}
   //   Force-unloads a model even if it was loaded moments ago.
   router.post("/swiftlmd/unload") { req, _ async throws -> Response in
-    let bodyBuffer = try await req.body.collect(upTo: 1024 * 1024)
+    let bodyBuffer = try await req.body.collect(upTo: 1_024 * 1_024)
     let bodyData = Data(buffer: bodyBuffer)
     let request: ModelUnloadRequest
     do {
@@ -1006,7 +1005,7 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
 // MARK: - Embeddings
 
 func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response {
-  let bodyBuffer = try await req.body.collect(upTo: 32 * 1024 * 1024)
+  let bodyBuffer = try await req.body.collect(upTo: 32 * 1_024 * 1_024)
   let bodyData = Data(buffer: bodyBuffer)
   guard let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
     let modelField = json["model"] as? String
@@ -1339,7 +1338,7 @@ private func chatRequestBudgetError(
 }
 
 private func elapsedMilliseconds(since start: Date) -> Int {
-  max(0, Int((Date().timeIntervalSince(start) * 1000).rounded()))
+  max(0, Int((Date().timeIntervalSince(start) * 1_000).rounded()))
 }
 
 private func lmReviewRequestID(from req: Request) -> String? {
@@ -1513,7 +1512,7 @@ func handleChat(
   let requestID = UUID()
   let clientRequestID = lmReviewRequestID(from: req)
   let startedAt = Date()
-  let bodyBuffer = try await req.body.collect(upTo: 100 * 1024 * 1024)
+  let bodyBuffer = try await req.body.collect(upTo: 100 * 1_024 * 1_024)
   var bodyData = Data(buffer: bodyBuffer)
 
   let ingress: ParsedChatIngress

@@ -98,7 +98,7 @@ public func loadBenchConfig(fromJSON data: Data) throws -> BenchConfig {
         name: v.name,
         promptGlob: v.prompt_glob,
         maxInputBytes: v.max_input_bytes ?? 300_000,
-        maxTokens: v.max_tokens ?? 8192,
+        maxTokens: v.max_tokens ?? 8_192,
         thinking: v.thinking ?? false
       )
     },

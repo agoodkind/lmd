@@ -35,7 +35,7 @@ public struct SwiftLMServerConfig: Sendable {
   public init(
     binaryPath: String,
     host: String = "localhost",
-    port: Int = 5413,
+    port: Int = 5_413,
     logFilePath: String? = nil,
     readyTimeout: TimeInterval = 300
   ) {
@@ -91,6 +91,7 @@ public final class SwiftLMServer {
   /// `SwiftLMServer`.
   private let logSink: @Sendable (String) -> Void
 
+  @preconcurrency
   public init(
     model: String,
     thinking: Bool = false,
@@ -191,7 +192,7 @@ public final class SwiftLMServer {
     if p.isRunning {
       p.terminate()
       let deadline = Date().addingTimeInterval(30)
-      while p.isRunning && Date() < deadline {
+      while p.isRunning, Date() < deadline {
         Thread.sleep(forTimeInterval: 0.2)
       }
       if p.isRunning {

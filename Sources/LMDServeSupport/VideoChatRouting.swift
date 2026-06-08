@@ -27,7 +27,7 @@ private let allowedVideoExtensions: Set<String> = [
   "mpg",
   "webm",
 ]
-public let maximumVideoFrameCount = 4096
+public let maximumVideoFrameCount = 4_096
 
 private struct ValidatedVideoURL {
   let originalURL: URL
@@ -146,7 +146,7 @@ public protocol VideoChatBackend: Sendable {
 public struct NotConfiguredVideoChatBackend: VideoChatBackend {
   public init() {}
 
-  public func complete(_ request: VideoChatRouteRequest) async throws -> BackendChatResult {
+  public func complete(_ request: VideoChatRouteRequest) throws -> BackendChatResult {
     log.info(
       "video.backend_not_configured model=\(request.model.id, privacy: .public) video_count=\(request.videos.count, privacy: .public)"
     )
@@ -155,7 +155,7 @@ public struct NotConfiguredVideoChatBackend: VideoChatBackend {
 }
 
 func effectiveSamplingFPS(modelFPS: Double, requestFPS: Double?) -> Double {
-  return requestFPS ?? modelFPS
+  requestFPS ?? modelFPS
 }
 
 public actor InProcessVLMVideoChatBackend: VideoChatBackend {

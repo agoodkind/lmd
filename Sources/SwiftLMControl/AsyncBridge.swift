@@ -39,6 +39,7 @@ enum AsyncBridgeError: Error {
 /// This helper intentionally mirrors the existing `runBlocking` patterns in
 /// this repository so synchronous CLI and XPC entry points can block on
 /// async work.
+@preconcurrency
 public func runBlocking<Value>(
   _ work: @Sendable @escaping () async throws -> Value
 ) -> Result<Value, Error> {

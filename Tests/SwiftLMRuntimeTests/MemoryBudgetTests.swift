@@ -46,7 +46,7 @@ final class EvictionPolicyTests: XCTestCase {
     let now = Date()
     let a = EvictionCandidate(
       modelID: "A", sizeBytes: 20 * gb,
-      lastUsed: now.addingTimeInterval(-3600), inFlightRequests: 0)
+      lastUsed: now.addingTimeInterval(-3_600), inFlightRequests: 0)
     let b = EvictionCandidate(
       modelID: "B", sizeBytes: 20 * gb,
       lastUsed: now.addingTimeInterval(-600), inFlightRequests: 0)
@@ -59,7 +59,7 @@ final class EvictionPolicyTests: XCTestCase {
     let now = Date()
     let busy = EvictionCandidate(
       modelID: "busy", sizeBytes: 40 * gb,
-      lastUsed: now.addingTimeInterval(-7200), inFlightRequests: 2)
+      lastUsed: now.addingTimeInterval(-7_200), inFlightRequests: 2)
     let idleSmall = EvictionCandidate(
       modelID: "idle", sizeBytes: 10 * gb,
       lastUsed: now.addingTimeInterval(-60), inFlightRequests: 0)
@@ -85,10 +85,10 @@ final class EvictionPolicyTests: XCTestCase {
     let now = Date()
     let a = EvictionCandidate(
       modelID: "A", sizeBytes: 10 * gb,
-      lastUsed: now.addingTimeInterval(-3600), inFlightRequests: 0)
+      lastUsed: now.addingTimeInterval(-3_600), inFlightRequests: 0)
     let b = EvictionCandidate(
       modelID: "B", sizeBytes: 10 * gb,
-      lastUsed: now.addingTimeInterval(-1800), inFlightRequests: 0)
+      lastUsed: now.addingTimeInterval(-1_800), inFlightRequests: 0)
     // Need 15 GB. One model frees 10, so both are needed, oldest first.
     let plan = EvictionPolicy.planEvictionToFree(candidates: [b, a], bytesToFree: 15 * gb)
     XCTAssertEqual(plan, ["A", "B"])
@@ -98,10 +98,10 @@ final class EvictionPolicyTests: XCTestCase {
     let now = Date()
     let chat = EvictionCandidate(
       modelID: "chat", sizeBytes: 30 * gb,
-      lastUsed: now.addingTimeInterval(-7200), inFlightRequests: 0, isEmbedding: false)
+      lastUsed: now.addingTimeInterval(-7_200), inFlightRequests: 0, isEmbedding: false)
     let embed = EvictionCandidate(
       modelID: "embed", sizeBytes: 30 * gb,
-      lastUsed: now.addingTimeInterval(-3600), inFlightRequests: 0, isEmbedding: true)
+      lastUsed: now.addingTimeInterval(-3_600), inFlightRequests: 0, isEmbedding: true)
     // Need 30 GB. Chat goes first even though it is older than the embedding cutoff.
     let plan = EvictionPolicy.planEvictionToFree(candidates: [embed, chat], bytesToFree: 30 * gb)
     XCTAssertEqual(plan, ["chat"])

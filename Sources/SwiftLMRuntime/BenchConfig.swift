@@ -42,7 +42,7 @@ public struct BenchVariant: Sendable, Equatable {
     name: String,
     promptGlob: String,
     maxInputBytes: Int = 300_000,
-    maxTokens: Int = 8192,
+    maxTokens: Int = 8_192,
     thinking: Bool = false
   ) {
     self.name = name

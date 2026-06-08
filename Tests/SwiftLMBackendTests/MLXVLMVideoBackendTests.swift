@@ -94,7 +94,8 @@ final class MLXVLMVideoBackendTests: XCTestCase {
 
     XCTAssertEqual(input.videos.count, 2)
     guard case .chat(let chatMessages) = input.prompt else {
-      return XCTFail("expected structured chat input")
+      XCTFail("expected structured chat input")
+      return
     }
     XCTAssertEqual(chatMessages.count, 3)
     XCTAssertEqual(chatMessages[0].videos.count, 1)

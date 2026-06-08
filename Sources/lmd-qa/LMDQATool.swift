@@ -224,10 +224,10 @@ final class PTYDriver: TUIDriver {
     let queue = DispatchQueue(label: "tuiqa.pty.\(ProcessInfo.processInfo.processIdentifier)")
     let opts = TerminalOptions(cols: cols, rows: rows)
     let ht = HeadlessTerminal(queue: queue, options: opts) { [weak self] code in
-      guard let self = self else { return }
-      self.exitedAtomic.lock()
-      self.exitCode = code ?? -1
-      self.exitedAtomic.unlock()
+      guard let self else { return }
+      exitedAtomic.lock()
+      exitCode = code ?? -1
+      exitedAtomic.unlock()
     }
     term = ht
     // Propagate standard env vars the child expects (HOME, PATH, etc.) plus
@@ -337,7 +337,7 @@ final class ITermDriver: TUIDriver {
       } else if b == 0x08 {
         flushLiteral()
         parts.append("(ASCII character 8)")
-      } else if b >= 0x20 && b < 0x7F {
+      } else if b >= 0x20, b < 0x7F {
         literal.append(Character(UnicodeScalar(b)))
       } else {
         flushLiteral()
@@ -484,7 +484,7 @@ final class ITermDriver: TUIDriver {
   // one whose id matches. Simpler and more reliable than the nested whose
   // filter which has quirks in older AppleScript versions.
   private func scriptTargetingSession(body: String) -> String {
-    return """
+    """
         tell application "iTerm"
           try
             repeat with w in windows
@@ -914,7 +914,7 @@ public enum LMDQATool {
     screenshotDir = env["TUIQA_SCREENSHOT_DIR"]
 
     var positional: [String] = []
-    var driverSpec: String? = nil
+    var driverSpec: String?
     var checkCoverage = true
     var argsIter = arguments.makeIterator()
     while let arg = argsIter.next() {
@@ -978,7 +978,7 @@ public enum LMDQATool {
     }
 
     say("")
-    if failures == 0 && coverageDeficit == 0 {
+    if failures == 0, coverageDeficit == 0 {
       let total = exercisedLabels.values.reduce(0) { $0 + $1.count }
       say("[tui-qa] PASSED (\(total) label-runs across \(driverNames.count) driver(s))")
       return 0

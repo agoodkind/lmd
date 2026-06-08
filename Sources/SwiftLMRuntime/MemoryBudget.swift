@@ -104,7 +104,7 @@ public enum EvictionPolicy {
     if bytesToFree <= 0 {
       return []
     }
-    let idle = candidates.filter { $0.isIdle }.sorted { a, b in
+    let idle = candidates.filter(\.isIdle).sorted { a, b in
       let pa = a.isEmbedding ? 1 : 0
       let pb = b.isEmbedding ? 1 : 0
       if pa != pb {

@@ -149,6 +149,7 @@ public actor ModelRouter {
   /// surfaces `concurrencyLimitExceeded`. Settable for tests.
   private var queueTimeoutNanos: UInt64 = 120 * 1_000_000_000
 
+  @preconcurrency
   public init(
     reserveBytes: Int64,
     memoryProbe: @escaping MemoryProbe,
@@ -210,7 +211,7 @@ public actor ModelRouter {
     var reading = memoryProbe()
     var deficit = HeadroomPolicy.bytesToFree(
       availableBytes: reading.availableBytes, needing: needing, reserveBytes: reserveBytes)
-    if deficit == 0 && !reading.underPressure {
+    if deficit == 0, !reading.underPressure {
       return
     }
 
@@ -264,11 +265,11 @@ public actor ModelRouter {
   /// Best-effort background pass: free idle models until the reserve is restored
   /// or no idle model remains. Used by the periodic loop and the memory-pressure
   /// event handler. Never throws; it frees what it can.
-  public func enforceHeadroom() async {
+  public func enforceHeadroom() {
     let reading = memoryProbe()
     let deficit = HeadroomPolicy.bytesToFree(
       availableBytes: reading.availableBytes, needing: 0, reserveBytes: reserveBytes)
-    if deficit == 0 && !reading.underPressure {
+    if deficit == 0, !reading.underPressure {
       return
     }
     let snap = snapshot()
@@ -422,8 +423,8 @@ public actor ModelRouter {
       context: TraceContext(modelID: model.id, modelKind: kind, requestID: requestID),
       snapshot: .current()
     )
-    var resultLoadID: UUID? = nil
-    var resultBackendObj: String? = nil
+    var resultLoadID: UUID?
+    var resultBackendObj: String?
     defer {
       BackendTrace.notice(
         phase: TracePhase.Router.routeEnd.rawValue,
@@ -449,7 +450,7 @@ public actor ModelRouter {
           unload(modelID: model.id, disposition: .unloaded)
           break routeAcquire
         }
-        if loadConfig != nil && entry.loadConfig != effectiveLoadConfig {
+        if loadConfig != nil, entry.loadConfig != effectiveLoadConfig {
           if entry.inFlight > 0 {
             throw RouteError.loadConfigConflict(modelID: model.id)
           }

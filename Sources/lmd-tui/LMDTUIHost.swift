@@ -46,7 +46,7 @@ func latestMonitorSnapshot() -> MonitorSnapshot {
   guard let fh = FileHandle(forReadingAtPath: memoryPath) else { return .empty }
   defer { try? fh.close() }
   let size = (try? fh.seekToEnd()) ?? 0
-  let tail: UInt64 = min(size, 8192)
+  let tail: UInt64 = min(size, 8_192)
   try? fh.seek(toOffset: size - tail)
   let data = fh.readDataToEndOfFile()
   guard let text = String(data: data, encoding: .utf8) else { return .empty }
@@ -335,7 +335,7 @@ public enum LMDTUIHost {
           continue
         }
 
-        if n == 1 && buf[0] == 0x09 {
+        if n == 1, buf[0] == 0x09 {
           stateLock.lock()
           let next = (router.activeIndex + 1) % router.tabs.count
           router.setActive(index: next)
@@ -369,7 +369,7 @@ public enum LMDTUIHost {
             renderFrame()
             continue
           }
-          if byte >= 0x20 && byte < 0x7F {
+          if byte >= 0x20, byte < 0x7F {
             let character = Character(UnicodeScalar(byte))
             stateLock.lock()
             activeLibrary.appendSearchChar(character)
@@ -402,7 +402,7 @@ public enum LMDTUIHost {
           }
         }
 
-        if n >= 6 && buf[0] == 0x1B {
+        if n >= 6, buf[0] == 0x1B {
           if let mouseEvent = MouseParser.parse(Array(buf[0..<n]), start: 0, length: n) {
             let input: TabInput =
               (mouseEvent.isWheelUp || mouseEvent.isWheelDown)

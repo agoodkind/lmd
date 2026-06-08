@@ -225,7 +225,7 @@ public struct MLXVLMVideoCompletionRequest: @unchecked Sendable {
     sampledFrameCount: Int,
     sampledFPS: Double
   ) -> MLXVLMVideoCompletionRequest {
-    return MLXVLMVideoCompletionRequest(
+    MLXVLMVideoCompletionRequest(
       messages: messages,
       videoURLs: videoURLs,
       preSampledVideos: videos,

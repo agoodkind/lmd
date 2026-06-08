@@ -33,7 +33,7 @@ public final class BrokerBenchBackend: BenchBackend, @unchecked Sendable {
 
   public init(
     brokerHost: String = "localhost",
-    brokerPort: Int = 5400,
+    brokerPort: Int = 5_400,
     session: URLSession = .shared
   ) {
     self.brokerBase = "http://\(brokerHost):\(brokerPort)"

@@ -34,8 +34,8 @@ public enum SwapUsage {
     var total = "0"
     let fields = text.split(separator: " ").map(String.init)
     for (i, f) in fields.enumerated() {
-      if f == "used" && i + 2 < fields.count { used = fields[i + 2] }
-      if f == "total" && i + 2 < fields.count { total = fields[i + 2] }
+      if f == "used", i + 2 < fields.count { used = fields[i + 2] }
+      if f == "total", i + 2 < fields.count { total = fields[i + 2] }
     }
     return SwapUsageSnapshot(used: used, total: total)
   }

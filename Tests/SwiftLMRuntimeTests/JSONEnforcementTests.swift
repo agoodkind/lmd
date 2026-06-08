@@ -71,7 +71,7 @@ final class JSONEnforcementTests: XCTestCase {
 
   // MARK: - Injection paths
 
-  func testJSONObjectInjectsNewSystemMessage() throws {
+  func testJSONObjectInjectsNewSystemMessage() {
     var json = body([
       "model": "x",
       "messages": [["role": "user", "content": "hi"]],
@@ -89,7 +89,7 @@ final class JSONEnforcementTests: XCTestCase {
     XCTAssertEqual(messages.last?["role"] as? String, "user")
   }
 
-  func testJSONObjectAppendsToExistingSystemMessage() throws {
+  func testJSONObjectAppendsToExistingSystemMessage() {
     var json = body([
       "model": "x",
       "messages": [
@@ -109,7 +109,7 @@ final class JSONEnforcementTests: XCTestCase {
     XCTAssertTrue(sysContent.contains("JSON"))
   }
 
-  func testJSONSchemaIncludesSchemaInInstruction() throws {
+  func testJSONSchemaIncludesSchemaInInstruction() {
     let schemaBody: [String: Any] = [
       "type": "object",
       "properties": ["name": ["type": "string"]],

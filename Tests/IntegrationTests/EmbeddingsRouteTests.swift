@@ -98,7 +98,7 @@ final class EmbeddingsRouteTests: XCTestCase {
 
   private func expectedEmbeddingDimension(for model: ModelDescriptor) -> Int? {
     if model.slug == "nvidia/NV-EmbedCode-7b-v1" {
-      return 4096
+      return 4_096
     }
     return nil
   }
@@ -108,7 +108,7 @@ final class EmbeddingsRouteTests: XCTestCase {
       return values
     }
     if let values = row["embedding"] as? [NSNumber] {
-      return values.map { $0.doubleValue }
+      return values.map(\.doubleValue)
     }
     return []
   }
