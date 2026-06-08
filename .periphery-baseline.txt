@@ -1,0 +1,6 @@
+# periphery: generated_at=2026-06-08T05:00:23Z
+Sources/SwiftLMRuntime/FanCoordinator.swift:500:101: error: '==' is not a postfix unary operator	# periphery:first_added=2026-06-08T05:00:23Z last_seen=2026-06-08T05:00:23Z
+Sources/SwiftLMRuntime/FanCoordinator.swift:500:103: error: consecutive statements on a line must be separated by ';'	# periphery:first_added=2026-06-08T05:00:23Z last_seen=2026-06-08T05:00:23Z
+Sources/SwiftLMRuntime/FanCoordinator.swift:500:104: warning: boolean literal is unused [#no-usage]	# periphery:first_added=2026-06-08T05:00:23Z last_seen=2026-06-08T05:00:23Z
+Sources/SwiftLMRuntime/FanCoordinator.swift:502:82: error: cannot use optional chaining on non-optional value of type 'TimeInterval' (aka 'Double')	# periphery:first_added=2026-06-08T05:00:23Z last_seen=2026-06-08T05:00:23Z
+Sources/SwiftLMRuntime/FanCoordinator.swift:502:82: error: static member 'infinity' cannot be used on instance of type 'TimeInterval' (aka 'Double')	# periphery:first_added=2026-06-08T05:00:23Z last_seen=2026-06-08T05:00:23Z

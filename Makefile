@@ -2,23 +2,36 @@
 #  Makefile
 #  lmd
 #
-#  Thin aliases around the Swift-owned development tool.
+#  Consumer of swift-mk: build, test, clean, lint, fmt, and check route through
+#  swift-mk so the gates run over lmd's own sources. The dev tool drives the
+#  actual compile and the developer-only subcommands.
 #
 
 TUIST ?= tuist
 TARGET ?=
 CONFIG ?= Debug
-LMD_DEV := TUIST="$(TUIST)" swift Tools/lmd-dev.swift
+LMD_DEV = SWIFT_MK_BIN="$(SWIFT_MK_BIN)" TUIST="$(TUIST)" swift Tools/lmd-dev.swift
 
-.PHONY: help toolchain preflight build debug test test-integration lint format install install-debug \
-        uninstall clean run-serve run-tui run-bench stop-serve start-serve restart-serve \
+# swift-mk owns build/test/clean/lint/fmt/check; the dev tool runs the compile.
+SWIFT_MK_MODULES := swift-build.mk
+SWIFT_MK_OWN_RUN := 1
+SWIFT_BUILD_CMD = $(LMD_DEV) build $(CONFIG)
+SWIFT_TEST_CMD = $(LMD_DEV) test
+SWIFT_CLEAN_CMD = $(LMD_DEV) clean
+SWIFT_DEPLOY_CMD = $(LMD_DEV) install $(CONFIG)
+SWIFT_LOG_AUDIT_CMD = $(LMD_DEV) log-audit
+SWIFT_FORMAT_TARGETS := Sources Tests Tools
+SWIFTLINT_TARGETS := Sources Tests Tools
+SWIFTCHECK_EXTRA_TARGETS := Sources Tests Tools
+
+include bootstrap.mk
+
+.PHONY: toolchain preflight debug test-integration install-debug \
+        uninstall run-serve run-tui run-bench stop-serve start-serve restart-serve \
         test-daemon-up test-daemon-down test-daemon-status \
-        snapshot-update log-audit log-smoke tui-qa smoke video-smoke \
+        snapshot-update log-smoke tui-qa smoke video-smoke \
         sign notarize notary-setup dist ci-import-cert ci-sign ci-notarize \
         release-tag push-tag github-release cleanup-keychain
-
-help:
-	@$(LMD_DEV) help
 
 toolchain:
 	@$(LMD_DEV) toolchain
@@ -26,23 +39,11 @@ toolchain:
 preflight:
 	@$(LMD_DEV) preflight
 
-build:
-	@$(LMD_DEV) build $(CONFIG)
-
 debug:
 	@$(LMD_DEV) debug
 
-test:
-	@$(LMD_DEV) test
-
 test-integration:
 	@$(LMD_DEV) test-integration
-
-clean:
-	@$(LMD_DEV) clean
-
-install:
-	@$(LMD_DEV) install $(CONFIG)
 
 install-debug:
 	@CONFIG=Debug $(LMD_DEV) install Debug
@@ -89,9 +90,6 @@ snapshot-update:
 tui-qa:
 	@$(LMD_DEV) tui-qa $(TARGET)
 
-log-audit:
-	@$(LMD_DEV) log-audit
-
 log-smoke:
 	@$(LMD_DEV) log-smoke
 
@@ -127,9 +125,3 @@ github-release:
 
 cleanup-keychain:
 	@$(LMD_DEV) cleanup-keychain
-
-lint:
-	@$(LMD_DEV) lint
-
-format:
-	@$(LMD_DEV) format
