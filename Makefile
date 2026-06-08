@@ -12,6 +12,7 @@ LMD_DEV := TUIST="$(TUIST)" swift Tools/lmd-dev.swift
 
 .PHONY: help toolchain preflight build debug test test-integration lint format install install-debug \
         uninstall clean run-serve run-tui run-bench stop-serve start-serve restart-serve \
+        test-daemon-up test-daemon-down test-daemon-status \
         snapshot-update log-audit log-smoke tui-qa smoke video-smoke \
         sign notarize notary-setup dist ci-import-cert ci-sign ci-notarize \
         release-tag push-tag github-release cleanup-keychain
@@ -57,6 +58,15 @@ stop-serve:
 
 restart-serve:
 	@$(LMD_DEV) restart-serve
+
+test-daemon-up:
+	@$(LMD_DEV) test-daemon up
+
+test-daemon-down:
+	@$(LMD_DEV) test-daemon down
+
+test-daemon-status:
+	@$(LMD_DEV) test-daemon status
 
 run-serve:
 	@$(LMD_DEV) run-serve
