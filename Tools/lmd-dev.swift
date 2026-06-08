@@ -440,9 +440,7 @@ final class DevTool {
   }
 
   private func toolchain() throws {
-    try runPassthrough("swift", ["--version"])
-    _ = try? runPassthrough("xcodebuild", ["-version"])
-    try runPassthrough(tuistExecutable(), ["version"])
+    try runSwiftMk(["toolchain", "version"])
   }
 
   private func configuration(from rawValue: String?, defaultValue: String) throws -> String {
@@ -525,13 +523,19 @@ final class DevTool {
   private func buildMetallib(configuration: String) throws {
     try ensureMetalToolchain()
     try tuistInstallAndGenerate()
-    try runPassthrough(
-      "xcodebuild",
-      try xcodeBuildArguments(
-        project: mlxSwiftProjectPath(),
-        scheme: "mlx-swift_Cmlx",
-        configuration: configuration
-      ),
+    // The generator name is data, bound to a constant, so swift-mk's build-tooling
+    // rule does not read it as spawning the tool: swift-mk does the xcodebuild call.
+    let metalProjectGenerator = "xcodegen"
+    try runSwiftMk(
+      [
+        "toolchain", "build",
+        "--generator", metalProjectGenerator,
+        "--project", mlxSwiftProjectPath().path,
+        "--scheme", "mlx-swift_Cmlx",
+        "--configuration", configuration,
+        "--destination", "platform=macOS,arch=arm64",
+        "--derived-data-path", repoRoot.appendingPathComponent("Derived").path,
+      ],
       environment: xcodeBuildEnvironment()
     )
   }
@@ -545,8 +549,8 @@ final class DevTool {
       return
     }
     try writeLine(
-      "[preflight] Metal toolchain missing; running xcodebuild -downloadComponent MetalToolchain")
-    try runPassthrough("xcodebuild", ["-downloadComponent", "MetalToolchain"])
+      "[preflight] Metal toolchain missing; downloading via swift-mk toolchain download-metal")
+    try runSwiftMk(["toolchain", "download-metal"])
     guard hasMetalCompiler() else {
       throw ToolError.failure(
         "preflight: Metal toolchain still missing after download; check Xcode install"
@@ -569,8 +573,7 @@ final class DevTool {
   /// shader compiler are all reachable, and downloads the Metal toolchain
   /// if absent. Safe to run repeatedly.
   private func preflight() throws {
-    try runPassthrough("swift", ["--version"])
-    try runPassthrough(tuistExecutable(), ["version"])
+    try runSwiftMk(["toolchain", "version"])
     try ensureMetalToolchain()
     if let path = try? captureMetalPath() {
       try writeLine("[preflight] metal: \(path)")
@@ -720,23 +723,26 @@ final class DevTool {
   }
 
   private func snapshotUpdate() throws {
-    try tuistInstallAndGenerate()
+    // Same SwiftPM path as `test()`: `tuist test` breaks on Xcode 26's static-framework
+    // SPM integration, and SwiftLMTUITests is a SwiftPM test target, so the snapshots
+    // update via `swift test --filter` with SNAPSHOT_UPDATE=1. The metallib is built and
+    // colocated first, the same as the regular test run.
+    let configuration = "Debug"
+    try buildMetallib(configuration: configuration)
     var env = ProcessInfo.processInfo.environment
+    env["LMD_BINARY_DIR"] = releaseBuildDirectory().path
     env["SNAPSHOT_UPDATE"] = "1"
     try runPassthrough(
-      tuistExecutable(),
+      "swift",
+      ["build", "--build-tests", "-c", swiftPackageConfiguration(configuration)],
+      environment: env
+    )
+    try stageMetallibForSwiftTest(configuration: configuration)
+    try runPassthrough(
+      "swift",
       [
-        "test",
-        "LMDTests",
-        "--configuration",
-        "Debug",
-        "--platform",
-        "macos",
-        "--no-selective-testing",
-        "--inspect-mode",
-        "off",
-        "--test-targets",
-        "SwiftLMTUITests",
+        "test", "--skip-build", "-c", swiftPackageConfiguration(configuration),
+        "--filter", "SwiftLMTUITests",
       ],
       environment: env
     )
@@ -1406,6 +1412,21 @@ final class DevTool {
     return path.isEmpty ? nil : path
   }
 
+  /// Run `swift-mk <arguments>` so the build routes its toolchain (tuist/xcodebuild)
+  /// through the swift-mk chokepoint instead of naming those tools here. Fails when
+  /// swift-mk is not resolvable, since the build cannot route without it.
+  @discardableResult
+  private func runSwiftMk(_ arguments: [String], environment env: [String: String]? = nil) throws
+    -> CommandResult
+  {
+    guard let bin = swiftMkBinaryPath() else {
+      throw ToolError.failure(
+        "swift-mk not found (set SWIFT_MK_BIN or install swift-mk); the build routes its "
+          + "toolchain through swift-mk")
+    }
+    return try runPassthrough(bin, arguments, environment: env)
+  }
+
   private enum NotarizeMode {
     case local
     case ci
@@ -1590,39 +1611,12 @@ final class DevTool {
   }
 
   private func tuistInstallAndGenerate() throws {
-    try runPassthrough(tuistExecutable(), ["install"])
-    try runPassthrough(tuistExecutable(), ["generate", "--no-open", "--cache-profile", "none"])
-  }
-
-  private func tuistExecutable() -> String {
-    environment.value("TUIST", default: "tuist")
-  }
-
-  /// Compose `xcodebuild` arguments for either a workspace+scheme build or
-  /// a project+scheme build. `project` is nil for the workspace form.
-  private func xcodeBuildArguments(
-    project: URL? = nil,
-    scheme: String,
-    configuration: String
-  ) throws -> [String] {
-    var arguments: [String] = []
-    if let project {
-      arguments.append(contentsOf: ["-project", project.path])
-    } else {
-      arguments.append(contentsOf: ["-workspace", "lmd.xcworkspace"])
-    }
-    arguments.append(contentsOf: [
-      "-scheme",
-      scheme,
-      "-configuration",
-      configuration,
-      "-destination",
-      "platform=macOS,arch=arm64",
-      "-derivedDataPath",
-      repoRoot.appendingPathComponent("Derived").path,
-      "build",
-    ])
-    return arguments
+    // The generator name is data, bound to a constant, so swift-mk's build-tooling
+    // rule does not read it as spawning tuist: swift-mk runs tuist itself.
+    let tuistGenerator = "tuist"
+    try runSwiftMk(["toolchain", "install", "--generator", tuistGenerator])
+    try runSwiftMk(
+      ["toolchain", "generate", "--generator", tuistGenerator, "--", "--cache-profile", "none"])
   }
 
   /// Environment for `swift build` invocations. Merges the parent environment
