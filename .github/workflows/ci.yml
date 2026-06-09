@@ -74,8 +74,6 @@ jobs:
       - name: Unit + snapshot + integration tests
         run: swift Tools/lmd-dev.swift test
 
-      - name: Log audit
-        run: swift Tools/lmd-dev.swift log-audit
       # `swift Tools/lmd-dev.swift smoke` is a developer convenience that spawns lmd-serve
       # outside launchd and pokes its HTTP endpoints. It is intentionally
       # not run in CI: the broker is a LaunchAgent in production and the

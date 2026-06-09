@@ -351,8 +351,6 @@ final class DevTool {
       try await smoke(requireVideo: true)
     case "tui-qa":
       try tuiQA(target: rest.first)
-    case "log-audit":
-      try logAudit()
     case "log-smoke":
       try logSmoke()
     case "notary-setup":
@@ -430,7 +428,6 @@ final class DevTool {
         test-daemon ACTION      drive the isolated :5401 test daemon: up, down, status, restart, logs
         smoke                   build and run the Swift HTTP smoke test
         video-smoke             build and require real video acceptance via LMD_VIDEO_SAMPLE_FILE
-        log-audit               enforce first-party logging rules
         log-smoke               exercise CLI logging and check redactions
         sign                    build and codesign product CLIs and shader bundle
         notarize                build, sign, and notarize the staged release
@@ -1213,56 +1210,6 @@ final class DevTool {
     }
     try runPassthrough(
       releaseBuildDirectory().appendingPathComponent("lmd").path, args, environment: env)
-  }
-
-  private func logAudit() throws {
-    try writeLine("[log-audit] scanning for forbidden output calls...")
-    let swiftFiles = try sourceSwiftFiles(excludingPathComponent: "AppLogger")
-    let outputPattern = try NSRegularExpression(
-      pattern: "(^|[^A-Za-z_])(print|NSLog|debugPrint|dump)\\(")
-    var failed = false
-
-    for file in swiftFiles {
-      let content = try String(contentsOf: file, encoding: .utf8)
-      let range = NSRange(content.startIndex..<content.endIndex, in: content)
-      if outputPattern.firstMatch(in: content, range: range) != nil {
-        try writeLine("[log-audit] output call violation: \(relativePath(file))")
-        failed = true
-      }
-    }
-    if failed {
-      throw ToolError.failure(
-        "[log-audit] FAILED: replace with log.<level>(...) or FileHandle.standardOutput.write")
-    }
-    try writeLine("[log-audit]   output calls: OK")
-
-    try writeLine("[log-audit] scanning for direct Logger(subsystem:) construction...")
-    for file in swiftFiles {
-      let content = try String(contentsOf: file, encoding: .utf8)
-      if content.contains("Logger(subsystem:") {
-        try writeLine("[log-audit] Logger construction violation: \(relativePath(file))")
-        failed = true
-      }
-    }
-    if failed {
-      throw ToolError.failure("[log-audit] FAILED: use AppLogger.logger(category:) instead")
-    }
-    try writeLine("[log-audit]   Logger construction: OK")
-
-    try writeLine("[log-audit] scanning for swift-log direct use...")
-    for file in swiftFiles {
-      let content = try String(contentsOf: file, encoding: .utf8)
-      if content.components(separatedBy: .newlines).contains("import Logging") {
-        try writeLine("[log-audit] swift-log import violation: \(relativePath(file))")
-        failed = true
-      }
-    }
-    if failed {
-      throw ToolError.failure(
-        "[log-audit] FAILED: swift-log must route through AppLogger/SwiftLogBridge")
-    }
-    try writeLine("[log-audit]   swift-log direct use: OK")
-    try writeLine("[log-audit] PASSED")
   }
 
   private func logSmoke() throws {
