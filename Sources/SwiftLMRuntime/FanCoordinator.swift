@@ -495,11 +495,13 @@ public final class FanCoordinator: @unchecked Sendable {
     let maxSmooth = max(smoothCpuTempC, smoothGpuTempC)
     let hotEnoughForFullBlast = maxSmooth >= self.config.activeFullBlastTempC
 
+    let activeRampElapsed =
+      self.activeRampStartedAt.map { now.timeIntervalSince($0) < self.config.activeRampDuration }
     let inActiveRampWindow =
-      self.state == .active && !hotEnoughForFullBlast
-      && self.activeRampStartedAt.map { now.timeIntervalSince($0) < self.config.activeRampDuration }== true
+      self.state == .active && !hotEnoughForFullBlast && (activeRampElapsed ?? false)
 
-    let coolingElapsed = self.coolingStartedAt.map { now.timeIntervalSince($0) }?? .infinity
+    let coolingSince = self.coolingStartedAt.map { now.timeIntervalSince($0) }
+    let coolingElapsed = coolingSince ?? .infinity
     let inHoldWindow = self.state == .cooling && coolingElapsed < self.config.holdSeconds
     let inCoolingRampWindow =
       self.state == .cooling
