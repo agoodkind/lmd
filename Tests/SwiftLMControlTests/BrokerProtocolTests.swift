@@ -10,6 +10,7 @@
 //  case, dropped associated value) fails loudly at build time.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMControl
@@ -30,7 +31,7 @@ final class BrokerProtocolTests: XCTestCase {
     for request in cases {
       let encoded = try JSONEncoder().encode(request)
       let decoded = try JSONDecoder().decode(BrokerRequest.self, from: encoded)
-      XCTAssertEqual(describe(decoded), describe(request))
+      expect(self.describe(decoded)) == self.describe(request)
     }
   }
 
@@ -75,12 +76,12 @@ final class BrokerProtocolTests: XCTestCase {
     for response in cases {
       let encoded = try JSONEncoder().encode(response)
       let decoded = try JSONDecoder().decode(BrokerResponse.self, from: encoded)
-      XCTAssertEqual(describe(decoded), describe(response))
+      expect(self.describe(decoded)) == self.describe(response)
     }
   }
 
   func testServiceNameStable() {
-    XCTAssertEqual(brokerXPCServiceName, "io.goodkind.lmd.control")
+    expect(brokerXPCServiceName) == "io.goodkind.lmd.control"
   }
 
   // String(describing:) is good enough to compare enums with associated
