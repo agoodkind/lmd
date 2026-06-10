@@ -13,6 +13,7 @@
 
 import CoreMetrics
 import Foundation
+import Nimble
 import XCTest
 
 @testable import SwiftLMMetrics
@@ -44,8 +45,8 @@ final class SnapshotSinkFactoryTests: XCTestCase {
     handler.increment(by: 4)
 
     let found = counter(sink.snapshot(), named: "lmd_requests_total")
-    XCTAssertEqual(found?.value, 7)
-    XCTAssertEqual(found?.labels["model_kind"], "chat")
+    expect(found?.value) == 7
+    expect(found?.labels["model_kind"]) == "chat"
   }
 
   func testCounterResetZeroesSeries() {
@@ -54,7 +55,7 @@ final class SnapshotSinkFactoryTests: XCTestCase {
     handler.increment(by: 5)
     handler.reset()
 
-    XCTAssertEqual(counter(sink.snapshot(), named: "c")?.value, 0)
+    expect(self.counter(sink.snapshot(), named: "c")?.value) == 0
   }
 
   func testMeterFactoryHoldsLastValue() {
@@ -63,7 +64,7 @@ final class SnapshotSinkFactoryTests: XCTestCase {
     handler.set(2.0)
     handler.set(5.0)
 
-    XCTAssertEqual(gauge(sink.snapshot(), named: "lmd_broker_loaded_models")?.value, 5)
+    expect(self.gauge(sink.snapshot(), named: "lmd_broker_loaded_models")?.value) == 5
   }
 
   func testMeterIncrementAndDecrementAdjustGauge() {
@@ -72,7 +73,7 @@ final class SnapshotSinkFactoryTests: XCTestCase {
     handler.increment(by: 4)
     handler.decrement(by: 1.5)
 
-    XCTAssertEqual(gauge(sink.snapshot(), named: "g")?.value, 2.5)
+    expect(self.gauge(sink.snapshot(), named: "g")?.value) == 2.5
   }
 
   func testNonAggregatingRecorderActsAsGauge() {
@@ -80,8 +81,8 @@ final class SnapshotSinkFactoryTests: XCTestCase {
     let handler = sink.makeRecorder(label: "r", dimensions: [], aggregate: false)
     handler.record(9.0)
 
-    XCTAssertEqual(gauge(sink.snapshot(), named: "r")?.value, 9)
-    XCTAssertNil(histogram(sink.snapshot(), named: "r"))
+    expect(self.gauge(sink.snapshot(), named: "r")?.value) == 9
+    expect(self.histogram(sink.snapshot(), named: "r")) == nil
   }
 
   func testTimerFactoryFeedsCountSumMinMax() throws {
@@ -91,11 +92,11 @@ final class SnapshotSinkFactoryTests: XCTestCase {
     handler.recordNanoseconds(3_000_000_000)  // 3.0s
 
     let found = try XCTUnwrap(histogram(sink.snapshot(), named: "lmd_chat_inter_token_seconds"))
-    XCTAssertEqual(found.count, 2)
-    XCTAssertEqual(found.sum, 4.0, accuracy: 1e-9)
-    XCTAssertEqual(found.min, 1.0, accuracy: 1e-9)
-    XCTAssertEqual(found.max, 3.0, accuracy: 1e-9)
-    XCTAssertEqual(found.last, 3.0, accuracy: 1e-9)
+    expect(found.count) == 2
+    expect(found.sum) == (expected: 4.0, delta: 1e-9)
+    expect(found.min) == (expected: 1.0, delta: 1e-9)
+    expect(found.max) == (expected: 3.0, delta: 1e-9)
+    expect(found.last) == (expected: 3.0, delta: 1e-9)
   }
 
   func testSourceIdStampedOnEverySeries() {
@@ -105,9 +106,9 @@ final class SnapshotSinkFactoryTests: XCTestCase {
     sink.makeTimer(label: "t", dimensions: []).recordNanoseconds(1_000)
 
     let snapshot = sink.snapshot()
-    XCTAssertEqual(counter(snapshot, named: "c")?.labels["source_id"], "host:chat:/models/x")
-    XCTAssertEqual(gauge(snapshot, named: "g")?.labels["source_id"], "host:chat:/models/x")
-    XCTAssertEqual(histogram(snapshot, named: "t")?.labels["source_id"], "host:chat:/models/x")
+    expect(self.counter(snapshot, named: "c")?.labels["source_id"]) == "host:chat:/models/x"
+    expect(self.gauge(snapshot, named: "g")?.labels["source_id"]) == "host:chat:/models/x"
+    expect(self.histogram(snapshot, named: "t")?.labels["source_id"]) == "host:chat:/models/x"
   }
 
   func testMultiplexFansOutToEverySink() {
@@ -116,8 +117,8 @@ final class SnapshotSinkFactoryTests: XCTestCase {
     let multiplex = MultiplexMetricsHandler(factories: [first, second])
     multiplex.makeCounter(label: "lmd_tokens_total", dimensions: []).increment(by: 11)
 
-    XCTAssertEqual(counter(first.snapshot(), named: "lmd_tokens_total")?.value, 11)
-    XCTAssertEqual(counter(second.snapshot(), named: "lmd_tokens_total")?.value, 11)
+    expect(self.counter(first.snapshot(), named: "lmd_tokens_total")?.value) == 11
+    expect(self.counter(second.snapshot(), named: "lmd_tokens_total")?.value) == 11
   }
 
   func testMergeRoundTripsThroughPrometheus() {
@@ -127,11 +128,11 @@ final class SnapshotSinkFactoryTests: XCTestCase {
       .increment(by: 5)
 
     let merged = MetricsJSON.merge([sink.snapshot()])
-    XCTAssertEqual(merged.sources.count, 1)
-    XCTAssertEqual(merged.sources.first?.sourceID, "broker")
+    expect(merged.sources.count) == 1
+    expect(merged.sources.first?.sourceID) == "broker"
 
     let exposition = PrometheusExposition.render(merged)
-    XCTAssertTrue(exposition.contains("lmd_broker_loaded_models"))
-    XCTAssertTrue(exposition.contains("lmd_tokens_total"))
+    expect(exposition.contains("lmd_broker_loaded_models")) == true
+    expect(exposition.contains("lmd_tokens_total")) == true
   }
 }
