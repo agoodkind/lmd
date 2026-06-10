@@ -41,6 +41,7 @@ let package = Package(
     .package(url: "https://github.com/swift-otel/swift-otel.git", from: "1.0.0"),
     .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.6.0"),
     .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
+    .package(url: "https://github.com/Quick/Nimble.git", from: "13.8.0"),
     .package(url: "https://github.com/agoodkind/mlx-swift-lm.git", revision: "1869eaa3f0ae86fcd440ff67fe1b0988e00a787b"),
     .package(url: "https://github.com/agoodkind/mlx-swift.git", branch: "main"),
     .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
@@ -248,7 +249,10 @@ let package = Package(
     ),
     .testTarget(
       name: "SwiftLMCoreTests",
-      dependencies: ["SwiftLMCore"],
+      dependencies: [
+        "SwiftLMCore",
+        .product(name: "Nimble", package: "Nimble"),
+      ],
       path: "Tests/SwiftLMCoreTests",
       swiftSettings: strictConcurrency
     ),
@@ -258,6 +262,7 @@ let package = Package(
         "SwiftLMBackend",
         "SwiftLMCore",
         .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+        .product(name: "Nimble", package: "Nimble"),
       ],
       path: "Tests/SwiftLMBackendTests",
       swiftSettings: strictConcurrency
@@ -268,13 +273,17 @@ let package = Package(
         "SwiftLMEmbed",
         "SwiftLMCore",
         .product(name: "MLX", package: "mlx-swift"),
+        .product(name: "Nimble", package: "Nimble"),
       ],
       path: "Tests/SwiftLMEmbedTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(
       name: "SwiftLMMonitorTests",
-      dependencies: ["SwiftLMMonitor"],
+      dependencies: [
+        "SwiftLMMonitor",
+        .product(name: "Nimble", package: "Nimble"),
+      ],
       path: "Tests/SwiftLMMonitorTests",
       swiftSettings: strictConcurrency
     ),
@@ -283,50 +292,83 @@ let package = Package(
       dependencies: [
         "SwiftLMMetrics",
         .product(name: "Metrics", package: "swift-metrics"),
+        .product(name: "Nimble", package: "Nimble"),
       ],
       path: "Tests/SwiftLMMetricsTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(
       name: "SwiftLMRuntimeTests",
-      dependencies: ["SwiftLMRuntime", "SwiftLMCore", "SwiftLMHostProtocol", "SwiftLMTrace"],
+      dependencies: [
+        "SwiftLMRuntime",
+        "SwiftLMCore",
+        "SwiftLMHostProtocol",
+        "SwiftLMTrace",
+        .product(name: "Nimble", package: "Nimble"),
+      ],
       path: "Tests/SwiftLMRuntimeTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(
       name: "SwiftLMControlTests",
-      dependencies: ["SwiftLMControl", "SwiftLMCore", "SwiftLMRuntime"],
+      dependencies: [
+        "SwiftLMControl",
+        "SwiftLMCore",
+        "SwiftLMRuntime",
+        .product(name: "Nimble", package: "Nimble"),
+      ],
       path: "Tests/SwiftLMControlTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(
       name: "SwiftLMTUITests",
-      dependencies: ["SwiftLMTUI"],
+      dependencies: [
+        "SwiftLMTUI",
+        .product(name: "Nimble", package: "Nimble"),
+      ],
       path: "Tests/SwiftLMTUITests",
       exclude: ["Snapshots"],
       swiftSettings: strictConcurrency
     ),
     .testTarget(
       name: "LMDServeTests",
-      dependencies: ["LMDServeSupport", "SwiftLMCore", "SwiftLMRuntime", "SwiftLMHostProtocol"],
+      dependencies: [
+        "LMDServeSupport",
+        "SwiftLMCore",
+        "SwiftLMRuntime",
+        "SwiftLMHostProtocol",
+        .product(name: "Nimble", package: "Nimble"),
+      ],
       path: "Tests/LMDServeTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(
       name: "SwiftLMHostProtocolTests",
-      dependencies: ["SwiftLMHostProtocol"],
+      dependencies: [
+        "SwiftLMHostProtocol",
+        .product(name: "Nimble", package: "Nimble"),
+      ],
       path: "Tests/SwiftLMHostProtocolTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(
       name: "LMDModelHostTests",
-      dependencies: ["lmd-model-host"],
+      dependencies: [
+        "lmd-model-host",
+        .product(name: "Nimble", package: "Nimble"),
+      ],
       path: "Tests/LMDModelHostTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(
       name: "IntegrationTests",
-      dependencies: ["SwiftLMControl", "SwiftLMCore", "SwiftLMRuntime", "SwiftLMHostProtocol"],
+      dependencies: [
+        "SwiftLMControl",
+        "SwiftLMCore",
+        "SwiftLMRuntime",
+        "SwiftLMHostProtocol",
+        .product(name: "Nimble", package: "Nimble"),
+      ],
       path: "Tests/IntegrationTests",
       swiftSettings: strictConcurrency
     ),
