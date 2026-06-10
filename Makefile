@@ -7,10 +7,9 @@
 #  actual compile and the developer-only subcommands.
 #
 
-TUIST ?= tuist
 TARGET ?=
 CONFIG ?= Debug
-LMD_DEV = SWIFT_MK_BIN="$(SWIFT_MK_BIN)" TUIST="$(TUIST)" swift Tools/lmd-dev.swift
+LMD_DEV = SWIFT_MK_BIN="$(SWIFT_MK_BIN)" swift Tools/lmd-dev.swift
 
 # swift-mk owns build/test/clean/lint/fmt/check; the dev tool runs the compile.
 SWIFT_MK_MODULES := swift-build.mk swift-release.mk
@@ -23,19 +22,10 @@ SWIFT_FORMAT_TARGETS := Sources Tests Tools
 SWIFTLINT_TARGETS := Sources Tests Tools
 SWIFTCHECK_EXTRA_TARGETS := Sources Tests Tools
 
-# CI defaults; workflows override them as make variables when needed.
+# CI default; release.yml overrides it as a make variable, and the export is
+# what carries the override into the lmd-dev child process.
 LMD_ENABLE_CCACHE ?= 0
-SWIFTPM_ENABLE_COMMAND_PLUGINS ?= false
 export LMD_ENABLE_CCACHE
-export SWIFTPM_ENABLE_COMMAND_PLUGINS
-
-# Map swift-mk's signing variables onto the names lmd-dev reads, so the shared
-# release workflow's resolved identity reaches ci-sign without a parallel set
-# of secrets.
-APPLE_CODE_SIGN_IDENTITY ?= $(CODE_SIGN_IDENTITY)
-APPLE_TEAM_ID ?= $(DEVELOPMENT_TEAM)
-export APPLE_CODE_SIGN_IDENTITY
-export APPLE_TEAM_ID
 
 # Release artifacts for the shared _release.yml pipeline: build, post-build
 # codesign, then lmd-dev's own notarization (bare CLI zips cannot be stapled,
@@ -54,7 +44,16 @@ include bootstrap.mk
 # lmd-dev shells out to $(SWIFT_MK_BIN) from these entry points, so each one
 # must build the binary first; without this a fresh checkout (CI) ran lmd-dev
 # before any swift-mk existed.
-toolchain preflight sign dist ci-sign release-tag push-tag github-release: swift-mk-bin
+toolchain preflight ci-sign release-tag push-tag github-release: swift-mk-bin
+
+# Every dev-tool entry point that compiles or runs a product routes through the
+# gated `build` chokepoint first, so the lint gates cannot be bypassed by
+# invoking the dev tool's own compile paths. The dev tool's inner build is
+# incremental after the gated build. `ci-sign`/`ci-notarize` stay un-gated
+# because SWIFT_MK_RELEASE_BUILD_CMD already runs the gated build first.
+debug install-debug test-integration snapshot-update \
+        run-serve run-tui run-bench smoke video-smoke tui-qa \
+        sign notarize dist: build
 
 toolchain:
 	@$(LMD_DEV) toolchain

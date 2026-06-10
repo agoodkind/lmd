@@ -1287,9 +1287,22 @@ final class DevTool {
   }
 
   private func signCI() throws {
-    let identity = signingIdentityThroughSwiftMk(
-      source: try environment.required("APPLE_CODE_SIGN_IDENTITY"),
-      team: environment.values["APPLE_TEAM_ID"])
+    // swift-mk's canonical signing variable names come first; the APPLE_*
+    // names stay as a fallback for older local environments.
+    let identityCandidates = [
+      environment.values["CODE_SIGN_IDENTITY"],
+      environment.values["APPLE_CODE_SIGN_IDENTITY"],
+    ]
+    guard let identitySource = identityCandidates.compactMap({ $0 }).first(where: { !$0.isEmpty })
+    else {
+      throw ToolError.failure("ci-sign: CODE_SIGN_IDENTITY is required")
+    }
+    let teamCandidates = [
+      environment.values["DEVELOPMENT_TEAM"],
+      environment.values["APPLE_TEAM_ID"],
+    ]
+    let team = teamCandidates.compactMap { $0 }.first { !$0.isEmpty }
+    let identity = signingIdentityThroughSwiftMk(source: identitySource, team: team)
     try signTargets(
       productBinaries,
       identity: identity,

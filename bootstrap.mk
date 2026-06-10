@@ -34,15 +34,17 @@ endif
 endif
 
 define _swift_mk_fetch
+	tmp_file=$$(mktemp "$(2).tmp.XXXXXX") || exit 1; \
 	if [ -n "$(SWIFT_MK_DEV_DIR)" ] && [ -f "$(SWIFT_MK_DEV_DIR)/$(1)" ]; then \
-		cp "$(SWIFT_MK_DEV_DIR)/$(1)" "$(2)"; \
+		cp "$(SWIFT_MK_DEV_DIR)/$(1)" "$$tmp_file" && [ -s "$$tmp_file" ] && mv "$$tmp_file" "$(2)"; \
 	else \
 		gh_path=$$(command -v gh || true); \
-		if [ -n "$$gh_path" ] && gh api "repos/$(SWIFT_MK_API_REPO)/contents/$(1)?ref=$(SWIFT_MK_API_REF)" -H "Accept: application/vnd.github.raw" | dd of="$(2)" status=none; then \
-			: ; \
-		elif curl -fsSL --connect-timeout 5 --max-time 10 "$(SWIFT_MK_BASE_URL)/$(1)" -o "$(2)"; then \
-			: ; \
+		if [ -n "$$gh_path" ] && gh api "repos/$(SWIFT_MK_API_REPO)/contents/$(1)?ref=$(SWIFT_MK_API_REF)" -H "Accept: application/vnd.github.raw" > "$$tmp_file" && [ -s "$$tmp_file" ]; then \
+			mv "$$tmp_file" "$(2)"; \
+		elif curl -fsSL --connect-timeout 5 --max-time 10 "$(SWIFT_MK_BASE_URL)/$(1)" -o "$$tmp_file" && [ -s "$$tmp_file" ]; then \
+			mv "$$tmp_file" "$(2)"; \
 		else \
+			rm -f "$$tmp_file"; \
 			printf '%s\n' "error: $(1) fetch failed. Run: gh auth login"; \
 			exit 1; \
 		fi; \
