@@ -544,8 +544,8 @@ struct SwiftLMD {
         return server
       },
       chatMaxConcurrency: config.chatMaxConcurrency,
-      embeddingMaxConcurrency: config.embeddingMaxConcurrency
-    )      { event in
+      embeddingMaxConcurrency: config.embeddingMaxConcurrency,
+      eventSink: { event in
         switch event {
         case .modelUnloaded(let modelID, _),
           .modelEvicted(let modelID, _),
@@ -557,6 +557,7 @@ struct SwiftLMD {
         }
         publishRouterEvent(event)
       }
+    )
 
     let state = BrokerState(
       catalog: catalog,
