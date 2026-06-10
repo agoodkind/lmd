@@ -1667,6 +1667,26 @@ final class DevTool {
     guard fileManager.fileExists(atPath: path.path) else {
       throw ToolError.failure("sign: not found: \(path.path)")
     }
+    // swift-mk's codesign-run owns the canonical flags and the strict verify;
+    // the resolved identity rides in through SWIFT_MK_SIGN_IDENTITY so lmd's
+    // signing.env source keeps working. The direct codesign below survives
+    // only for a checkout with no swift-mk binary, so signing never breaks.
+    if let swiftMk = swiftMkBinaryPath() {
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: swiftMk)
+      process.arguments = [
+        "codesign-run", "--mode", "binary", "--identifier", identifier, path.path,
+      ]
+      var processEnvironment = ProcessInfo.processInfo.environment
+      processEnvironment["SWIFT_MK_SIGN_IDENTITY"] = identity
+      process.environment = processEnvironment
+      try process.run()
+      process.waitUntilExit()
+      guard process.terminationStatus == 0 else {
+        throw ToolError.failure("sign: swift-mk codesign-run failed for \(path.path)")
+      }
+      return
+    }
     try runPassthrough(
       "codesign",
       [
