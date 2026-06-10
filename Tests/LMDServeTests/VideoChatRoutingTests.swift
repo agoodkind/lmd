@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import Nimble
 import SwiftLMCore
 import XCTest
 
@@ -52,17 +53,17 @@ final class VideoChatRoutingTests: XCTestCase {
 
     let inspection = try inspectOpenAIVideoInputs(in: json)
 
-    XCTAssertTrue(inspection.containsVideo)
-    XCTAssertEqual(inspection.videos.count, 1)
-    XCTAssertEqual(inspection.videos[0].url, URL(string: videoFile.absoluteString))
-    XCTAssertEqual(inspection.videos[0].fileURL, videoFile.standardizedFileURL)
-    XCTAssertEqual(inspection.videos[0].fps, 2.5)
-    XCTAssertEqual(inspection.videos[0].maxFrames, 48)
+    expect(inspection.containsVideo) == true
+    expect(inspection.videos.count) == 1
+    expect(inspection.videos[0].url) == URL(string: videoFile.absoluteString)
+    expect(inspection.videos[0].fileURL) == videoFile.standardizedFileURL
+    expect(inspection.videos[0].fps) == 2.5
+    expect(inspection.videos[0].maxFrames) == 48
   }
 
   func testExplicitRequestFPSOverridesModelSamplingFPS() {
-    XCTAssertEqual(effectiveSamplingFPS(modelFPS: 2.0, requestFPS: 16.0), 16.0)
-    XCTAssertEqual(effectiveSamplingFPS(modelFPS: 2.0, requestFPS: nil), 2.0)
+    expect(effectiveSamplingFPS(modelFPS: 2.0, requestFPS: 16.0)) == 16.0
+    expect(effectiveSamplingFPS(modelFPS: 2.0, requestFPS: nil)) == 2.0
   }
 
   func testIgnoresTextOnlyMessages() throws {
@@ -75,8 +76,8 @@ final class VideoChatRoutingTests: XCTestCase {
 
     let inspection = try inspectOpenAIVideoInputs(in: json)
 
-    XCTAssertFalse(inspection.containsVideo)
-    XCTAssertEqual(inspection.videos, [])
+    expect(inspection.containsVideo) == false
+    expect(inspection.videos) == []
   }
 
   func testRejectsNonFileURLs() {
@@ -160,14 +161,14 @@ final class VideoChatRoutingTests: XCTestCase {
     )
 
     guard case .videoBackend(let request) = decision else {
-      XCTFail("expected video backend route")
+      fail("expected video backend route")
       return
     }
-    XCTAssertEqual(request.model.id, "video-model")
-    XCTAssertEqual(request.endpoint, .chatCompletions)
-    XCTAssertEqual(request.bodyData, bodyData)
-    XCTAssertFalse(request.wantsStream)
-    XCTAssertEqual(request.videos, inspection.videos)
+    expect(request.model.id) == "video-model"
+    expect(request.endpoint) == .chatCompletions
+    expect(request.bodyData) == bodyData
+    expect(request.wantsStream) == false
+    expect(request.videos) == inspection.videos
   }
 
   func testRouteDecisionKeepsTextOnlyRequestsOnSwiftLMProxy() {
@@ -186,7 +187,7 @@ final class VideoChatRoutingTests: XCTestCase {
     )
 
     guard case .swiftLMProxy = decision else {
-      XCTFail("expected SwiftLM proxy route")
+      fail("expected SwiftLM proxy route")
       return
     }
   }
@@ -212,9 +213,9 @@ final class VideoChatRoutingTests: XCTestCase {
 
     do {
       _ = try await NotConfiguredVideoChatBackend().complete(request)
-      XCTFail("expected not configured error")
+      fail("expected not configured error")
     } catch let error as VideoChatBackendError {
-      XCTAssertEqual(error, .notConfigured)
+      expect(error) == .notConfigured
     }
   }
 
@@ -270,7 +271,7 @@ final class VideoChatRoutingTests: XCTestCase {
 
     for testCase in cases {
       let decision = dispatchChatRequest(testCase.1)
-      XCTAssertEqual(dispatchLabel(decision), testCase.2, testCase.0)
+      expect(self.dispatchLabel(decision)) == testCase.2
     }
   }
 
@@ -281,9 +282,9 @@ final class VideoChatRoutingTests: XCTestCase {
 
     let ingress = try parseChatIngress(endpoint: .chatCompletions, bodyData: body)
 
-    XCTAssertEqual(ingress.modelID, "missing-model")
-    XCTAssertFalse(ingress.wantsStream)
-    XCTAssertFalse(ingress.mediaInspection.containsVideo)
+    expect(ingress.modelID) == "missing-model"
+    expect(ingress.wantsStream) == false
+    expect(ingress.mediaInspection.containsVideo) == false
   }
 
   func testSSEEncoderProducesOrderedOpenAIFramesAndDone() async throws {
@@ -314,12 +315,12 @@ final class VideoChatRoutingTests: XCTestCase {
     let done = try await stringFromNextBuffer(&iterator)
     let end = try await iterator.next()
 
-    XCTAssertTrue(role.contains(#""role":"assistant""#))
-    XCTAssertTrue(content.contains(#""content":"hello""#))
-    XCTAssertTrue(finish.contains(#""finish_reason":"stop""#))
-    XCTAssertTrue(finish.contains(#""total_tokens":5"#))
-    XCTAssertEqual(done, "data: [DONE]\n\n")
-    XCTAssertNil(end)
+    expect(role.contains(#""role":"assistant""#)) == true
+    expect(content.contains(#""content":"hello""#)) == true
+    expect(finish.contains(#""finish_reason":"stop""#)) == true
+    expect(finish.contains(#""total_tokens":5"#)) == true
+    expect(done) == "data: [DONE]\n\n"
+    expect(end) == nil
   }
 
   func testStreamingBodyFinishesLifetimeOnceOnNormalCompletion() async throws {
@@ -337,11 +338,11 @@ final class VideoChatRoutingTests: XCTestCase {
     ).makeAsyncIterator()
 
     let next = try await iterator.next()
-    XCTAssertNil(next)
+    expect(next) == nil
     await token.finish()
 
     let value = await counter.currentValue()
-    XCTAssertEqual(value, 1)
+    expect(value) == 1
   }
 
   func testStreamingBodyFinishesLifetimeOnceOnThrownError() async {
@@ -360,15 +361,15 @@ final class VideoChatRoutingTests: XCTestCase {
 
     do {
       _ = try await iterator.next()
-      XCTFail("expected stream error")
+      fail("expected stream error")
     } catch TestStreamError.failed {
     } catch {
-      XCTFail("unexpected error \(error)")
+      fail("unexpected error \(error)")
     }
     await token.finish()
 
     let value = await counter.currentValue()
-    XCTAssertEqual(value, 1)
+    expect(value) == 1
   }
 
   func testLifetimeTokenFinishesOnceForCancellationCleanup() async {
@@ -381,7 +382,7 @@ final class VideoChatRoutingTests: XCTestCase {
     await token.finish()
 
     let value = await counter.currentValue()
-    XCTAssertEqual(value, 1)
+    expect(value) == 1
   }
 
   func testBuildsMLXVLMRequestFromOpenAIVideoMessage() throws {
@@ -393,14 +394,14 @@ final class VideoChatRoutingTests: XCTestCase {
 
     let request = try makeMLXVLMVideoCompletionRequest(from: bodyData)
 
-    XCTAssertEqual(request.messages.count, 1)
-    XCTAssertEqual(request.messages[0].role, .user)
-    XCTAssertEqual(request.messages[0].content, "describe the clip")
-    XCTAssertEqual(request.messages[0].videoURLs, [videoFile.standardizedFileURL])
-    XCTAssertEqual(request.fps, 3)
-    XCTAssertEqual(request.maxFrames, 24)
-    XCTAssertEqual(request.maxTokens, 128)
-    XCTAssertEqual(request.temperature, 0.2, accuracy: 0.001)
+    expect(request.messages.count) == 1
+    expect(request.messages[0].role) == .user
+    expect(request.messages[0].content) == "describe the clip"
+    expect(request.messages[0].videoURLs) == [videoFile.standardizedFileURL]
+    expect(request.fps) == 3
+    expect(request.maxFrames) == 24
+    expect(request.maxTokens) == 128
+    expect(request.temperature) == (expected: 0.2, delta: 0.001)
   }
 
   func testBuildsMLXVLMRequestFromRawHTTPJSONNumbers() throws {
@@ -425,10 +426,10 @@ final class VideoChatRoutingTests: XCTestCase {
 
     let request = try makeMLXVLMVideoCompletionRequest(from: bodyData)
 
-    XCTAssertEqual(request.fps, 1)
-    XCTAssertEqual(request.maxFrames, 16)
-    XCTAssertEqual(request.maxTokens, 64)
-    XCTAssertEqual(request.temperature, 0)
+    expect(request.fps) == 1
+    expect(request.maxFrames) == 16
+    expect(request.maxTokens) == 64
+    expect(request.temperature) == 0
   }
 
   func testRejectsInvalidMLXVLMGenerationParametersAtRequestBoundary() throws {
@@ -467,22 +468,13 @@ final class VideoChatRoutingTests: XCTestCase {
     ]
     for error in buildErrors {
       let description = error.description
-      XCTAssertFalse(
-        description.isEmpty,
-        "VideoChatRequestBuildError.\(error) has an empty description"
-      )
+      expect(description.isEmpty) == false
       let interpolated = "\(error)"
-      XCTAssertFalse(
-        interpolated.isEmpty,
-        "VideoChatRequestBuildError.\(error) interpolates to an empty string"
-      )
+      expect(interpolated.isEmpty) == false
     }
 
     let backendError: VideoChatBackendError = .notConfigured
-    XCTAssertFalse(
-      "\(backendError)".isEmpty,
-      "VideoChatBackendError.notConfigured interpolates to an empty string"
-    )
+    expect("\(backendError)".isEmpty) == false
   }
 
   // MARK: - Helpers
@@ -577,33 +569,33 @@ final class VideoChatRoutingTests: XCTestCase {
   private func assertVideoParseError(
     _ expectedError: OpenAIVideoParseError,
     json: [String: Any],
-    file: StaticString = #filePath,
+    file: String = #filePath,
     line: UInt = #line
   ) {
     do {
       _ = try inspectOpenAIVideoInputs(in: json)
-      XCTFail("expected \(expectedError)", file: file, line: line)
+      fail("expected \(expectedError)", file: file, line: line)
     } catch let error as OpenAIVideoParseError {
-      XCTAssertEqual(error, expectedError, file: file, line: line)
+      expect(file: file, line: line, error) == expectedError
     } catch {
-      XCTFail("expected \(expectedError), got \(error)", file: file, line: line)
+      fail("expected \(expectedError), got \(error)", file: file, line: line)
     }
   }
 
   private func assertVideoRequestBuildError(
     _ expectedError: VideoChatRequestBuildError,
     json: [String: Any],
-    file: StaticString = #filePath,
+    file: String = #filePath,
     line: UInt = #line
   ) {
     do {
       let bodyData = try JSONSerialization.data(withJSONObject: json)
       _ = try makeMLXVLMVideoCompletionRequest(from: bodyData)
-      XCTFail("expected \(expectedError)", file: file, line: line)
+      fail("expected \(expectedError)", file: file, line: line)
     } catch let error as VideoChatRequestBuildError {
-      XCTAssertEqual(error, expectedError, file: file, line: line)
+      expect(file: file, line: line, error) == expectedError
     } catch {
-      XCTFail("expected \(expectedError), got \(error)", file: file, line: line)
+      fail("expected \(expectedError), got \(error)", file: file, line: line)
     }
   }
 }

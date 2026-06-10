@@ -1,4 +1,5 @@
 import Foundation
+import Nimble
 import SwiftLMHostProtocol
 import XCTest
 
@@ -19,12 +20,12 @@ final class VideoFrameCodecTests: XCTestCase {
     let result = try await VideoFrameCodec.decode(frames: stream(frames))
 
     guard case .buffered(let statusCode, let contentType, let decodedBody) = result else {
-      XCTFail("expected buffered result")
+      fail("expected buffered result")
       return
     }
-    XCTAssertEqual(statusCode, 200)
-    XCTAssertEqual(contentType, "application/json")
-    XCTAssertEqual(decodedBody, body)
+    expect(statusCode) == 200
+    expect(contentType) == "application/json"
+    expect(decodedBody) == body
   }
 
   func testStreamingResultRoundTripsExactSSEBytesIncludingDone() async throws {
@@ -58,38 +59,35 @@ final class VideoFrameCodecTests: XCTestCase {
         expected.append(bytes)
       }
     }
-    XCTAssertTrue(
-      String(data: expected, encoding: .utf8)?.contains("data: [DONE]\n\n") ?? false,
-      "streaming body must end with the SSE DONE line"
-    )
+    expect(String(data: expected, encoding: .utf8)?.contains("data: [DONE]\n\n") ?? false) == true
 
     let result = try await VideoFrameCodec.decode(frames: stream(frames))
     guard case .streaming(let statusCode, let contentType, let rebuilt, let appendDone, _) = result
     else {
-      XCTFail("expected streaming result")
+      fail("expected streaming result")
       return
     }
-    XCTAssertEqual(statusCode, 200)
-    XCTAssertEqual(contentType, "text/event-stream")
+    expect(statusCode) == 200
+    expect(contentType) == "text/event-stream"
     // The host already serialized [DONE]; the broker must not re-append one.
-    XCTAssertFalse(appendDone)
+    expect(appendDone) == false
 
     var assembled = Data()
     for try await event in rebuilt {
       guard case .rawBytes(let bytes) = event else {
-        XCTFail("expected rawBytes events")
+        fail("expected rawBytes events")
         return
       }
       assembled.append(bytes)
     }
-    XCTAssertEqual(assembled, expected)
+    expect(assembled) == expected
   }
 
   func testNotConfiguredFailureRoundTripsToTypedError() async {
     let frame = VideoFrameCodec.encodeFailure(
       VideoChatBackendError.notConfigured, requestID: requestID)
     await assertDecodeThrows(frame) { error in
-      XCTAssertEqual(error as? VideoChatBackendError, .notConfigured)
+      expect(error as? VideoChatBackendError) == .notConfigured
     }
   }
 
@@ -97,8 +95,7 @@ final class VideoFrameCodecTests: XCTestCase {
     let frame = VideoFrameCodec.encodeFailure(
       VideoChatBackendError.modelMissingVideoSamplingFPS(modelID: "/m"), requestID: requestID)
     await assertDecodeThrows(frame) { error in
-      XCTAssertEqual(
-        error as? VideoChatBackendError, .modelMissingVideoSamplingFPS(modelID: "/m"))
+      expect(error as? VideoChatBackendError) == .modelMissingVideoSamplingFPS(modelID: "/m")
     }
   }
 
@@ -106,7 +103,7 @@ final class VideoFrameCodecTests: XCTestCase {
     let frame = VideoFrameCodec.encodeFailure(
       VideoChatRequestBuildError.noVideoContent, requestID: requestID)
     await assertDecodeThrows(frame) { error in
-      XCTAssertEqual(error as? VideoChatRequestBuildError, .noVideoContent)
+      expect(error as? VideoChatRequestBuildError) == .noVideoContent
     }
   }
 
@@ -114,7 +111,7 @@ final class VideoFrameCodecTests: XCTestCase {
     let frame = VideoFrameCodec.encodeFailure(
       VideoChatRequestBuildError.unsupportedRole("tool"), requestID: requestID)
     await assertDecodeThrows(frame) { error in
-      XCTAssertEqual(error as? VideoChatRequestBuildError, .unsupportedRole("tool"))
+      expect(error as? VideoChatRequestBuildError) == .unsupportedRole("tool")
     }
   }
 
@@ -126,9 +123,9 @@ final class VideoFrameCodecTests: XCTestCase {
         case ModelServerVideoChatError.hostFailed(let message)? = error
           as? ModelServerVideoChatError
       else {
-        return XCTFail("expected hostFailed, got \(error)")
+        return fail("expected hostFailed, got \(error)")
       }
-      XCTAssertTrue(message.contains("Boom"))
+      expect(message.contains("Boom")) == true
     }
   }
 
@@ -136,11 +133,11 @@ final class VideoFrameCodecTests: XCTestCase {
     let frames: [BackendFrame] = [.done(requestID: requestID)]
     do {
       _ = try await VideoFrameCodec.decode(frames: stream(frames))
-      XCTFail("expected missingHeader")
+      fail("expected missingHeader")
     } catch let error as VideoFrameCodecError {
-      XCTAssertEqual(error, .missingHeader)
+      expect(error) == .missingHeader
     } catch {
-      XCTFail("expected VideoFrameCodecError, got \(error)")
+      fail("expected VideoFrameCodecError, got \(error)")
     }
   }
 
@@ -150,7 +147,7 @@ final class VideoFrameCodecTests: XCTestCase {
   ) async {
     do {
       _ = try await VideoFrameCodec.decode(frames: stream([frame]))
-      XCTFail("expected decode to throw")
+      fail("expected decode to throw")
     } catch {
       assertion(error)
     }

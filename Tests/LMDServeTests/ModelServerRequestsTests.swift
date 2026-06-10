@@ -1,4 +1,5 @@
 import Foundation
+import Nimble
 import SwiftLMCore
 import SwiftLMHostProtocol
 import SwiftLMRuntime
@@ -80,15 +81,15 @@ final class ModelServerRequestsTests: XCTestCase {
     )
 
     guard case .buffered(let statusCode, let contentType, let decodedBody) = result else {
-      XCTFail("expected buffered result")
+      fail("expected buffered result")
       return
     }
-    XCTAssertEqual(statusCode, 201)
-    XCTAssertEqual(contentType, "application/json")
-    XCTAssertEqual(decodedBody, body)
-    XCTAssertEqual(server.lastRequest?.kind, .chat)
-    XCTAssertEqual(server.lastRequest?.endpointPath, "/v1/chat/completions")
-    XCTAssertEqual(server.lastRequest?.headers["X-Test"], "1")
+    expect(statusCode) == 201
+    expect(contentType) == "application/json"
+    expect(decodedBody) == body
+    expect(server.lastRequest?.kind) == .chat
+    expect(server.lastRequest?.endpointPath) == "/v1/chat/completions"
+    expect(server.lastRequest?.headers["X-Test"]) == "1"
   }
 
   func testStreamingChatResponsePropagatesRawBytes() async throws {
@@ -115,20 +116,20 @@ final class ModelServerRequestsTests: XCTestCase {
     guard
       case .streaming(let statusCode, let contentType, let events, let appendDoneFrame, _) = result
     else {
-      XCTFail("expected streaming result")
+      fail("expected streaming result")
       return
     }
-    XCTAssertEqual(statusCode, 200)
-    XCTAssertEqual(contentType, "text/event-stream")
-    XCTAssertFalse(appendDoneFrame)
+    expect(statusCode) == 200
+    expect(contentType) == "text/event-stream"
+    expect(appendDoneFrame) == false
     var received = Data()
     for try await event in events {
       if case .rawBytes(let data) = event {
         received.append(data)
       }
     }
-    XCTAssertEqual(received, chunk)
-    XCTAssertTrue(server.lastRequest?.stream ?? false)
+    expect(received) == chunk
+    expect(server.lastRequest?.stream ?? false) == true
   }
 
   func testEmbeddingRequestRoundTripsVectorsThroughVectorBlob() async throws {
@@ -148,9 +149,9 @@ final class ModelServerRequestsTests: XCTestCase {
       requestID: UUID()
     )
 
-    XCTAssertEqual(vectors, expected)
-    XCTAssertEqual(server.lastRequest?.kind, .embedding)
-    XCTAssertFalse(server.lastRequest?.stream ?? true)
+    expect(vectors) == expected
+    expect(server.lastRequest?.kind) == .embedding
+    expect(server.lastRequest?.stream ?? true) == false
   }
 
   func testEmbeddingThrowsOnFailedFrame() async {
@@ -160,11 +161,11 @@ final class ModelServerRequestsTests: XCTestCase {
 
     do {
       _ = try await embedWithModelServer(server: server, inputs: ["a"], requestID: UUID())
-      XCTFail("expected host failure")
+      fail("expected host failure")
     } catch let error as ModelServerEmbeddingError {
-      XCTAssertEqual(error, .hostFailed(message: "boom"))
+      expect(error) == .hostFailed(message: "boom")
     } catch {
-      XCTFail("expected ModelServerEmbeddingError, got \(error)")
+      fail("expected ModelServerEmbeddingError, got \(error)")
     }
   }
 
@@ -186,14 +187,14 @@ final class ModelServerRequestsTests: XCTestCase {
     )
 
     guard case .buffered(let statusCode, let contentType, let decodedBody) = result else {
-      XCTFail("expected buffered result")
+      fail("expected buffered result")
       return
     }
-    XCTAssertEqual(statusCode, 200)
-    XCTAssertEqual(contentType, "application/json")
-    XCTAssertEqual(decodedBody, body)
-    XCTAssertEqual(server.lastRequest?.kind, .video)
-    XCTAssertFalse(server.lastRequest?.stream ?? true)
+    expect(statusCode) == 200
+    expect(contentType) == "application/json"
+    expect(decodedBody) == body
+    expect(server.lastRequest?.kind) == .video
+    expect(server.lastRequest?.stream ?? true) == false
   }
 
   func testVideoMissingSamplingFPSThrowsTypedError() async {
@@ -212,11 +213,11 @@ final class ModelServerRequestsTests: XCTestCase {
         request: routeRequest(model: model, wantsStream: false),
         requestID: UUID()
       )
-      XCTFail("expected missing videoSamplingFPS")
+      fail("expected missing videoSamplingFPS")
     } catch let error as VideoChatBackendError {
-      XCTAssertEqual(error, .modelMissingVideoSamplingFPS(modelID: model.id))
+      expect(error) == .modelMissingVideoSamplingFPS(modelID: model.id)
     } catch {
-      XCTFail("expected VideoChatBackendError, got \(error)")
+      fail("expected VideoChatBackendError, got \(error)")
     }
   }
 }

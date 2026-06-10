@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import Nimble
 import XCTest
 
 @testable import LMDServeSupport
@@ -40,33 +41,47 @@ final class BrokerConfigTests: XCTestCase {
     try BrokerConfig(source: EnvironmentConfigSource(environment: env))
   }
 
+  private func expectConfigError(
+    _ env: [String: String],
+    _ assertions: (BrokerConfigError) -> Void
+  ) {
+    do {
+      _ = try config(env)
+      fail("expected BrokerConfigError")
+    } catch let error as BrokerConfigError {
+      assertions(error)
+    } catch {
+      fail("expected BrokerConfigError, got \(error)")
+    }
+  }
+
   func testCompleteConfigParses() throws {
     let config = try config(completeEnvironment())
-    XCTAssertEqual(config.host, "localhost")
-    XCTAssertEqual(config.bindHost, "::1")
-    XCTAssertEqual(config.port, 5_400)
-    XCTAssertEqual(config.reserveBytes, 20 * 1_073_741_824)
-    XCTAssertEqual(config.swiftlmBinary, "/usr/bin/true")
-    XCTAssertEqual(config.chatMaxConcurrency, 4)
-    XCTAssertEqual(config.embeddingMaxConcurrency, 4)
-    XCTAssertEqual(config.batteryThrottlePct, 20)
-    XCTAssertEqual(config.batteryMildPct, 35)
-    XCTAssertEqual(config.batteryResumePct, 80)
-    XCTAssertFalse(config.disableXPC)
-    XCTAssertEqual(config.idleMinutes, 15)
-    XCTAssertEqual(config.embeddingIdleMinutes, 60)
-    XCTAssertEqual(config.dataDir, "/tmp")
-    XCTAssertEqual(config.sampleInterval, 15, accuracy: 0.0001)
-    XCTAssertTrue(config.promptCacheEnabled)
-    XCTAssertNil(config.promptCacheMaxTokens)
-    XCTAssertEqual(config.mlxCacheLimitBytes, 2 * 1_073_741_824)
+    expect(config.host) == "localhost"
+    expect(config.bindHost) == "::1"
+    expect(config.port) == 5_400
+    expect(config.reserveBytes) == 20 * 1_073_741_824
+    expect(config.swiftlmBinary) == "/usr/bin/true"
+    expect(config.chatMaxConcurrency) == 4
+    expect(config.embeddingMaxConcurrency) == 4
+    expect(config.batteryThrottlePct) == 20
+    expect(config.batteryMildPct) == 35
+    expect(config.batteryResumePct) == 80
+    expect(config.disableXPC) == false
+    expect(config.idleMinutes) == 15
+    expect(config.embeddingIdleMinutes) == 60
+    expect(config.dataDir) == "/tmp"
+    expect(config.sampleInterval) == (expected: 15, delta: 0.0001)
+    expect(config.promptCacheEnabled) == true
+    expect(config.promptCacheMaxTokens) == nil
+    expect(config.mlxCacheLimitBytes) == 2 * 1_073_741_824
   }
 
   func testEveryKeyIsRequired() {
     // The complete environment must cover exactly the canonical key set.
     let env = completeEnvironment()
     for key in BrokerConfigKey.allCases {
-      XCTAssertNotNil(env[key.rawValue], "completeEnvironment is missing \(key.rawValue)")
+      expect(env[key.rawValue]) != nil
     }
   }
 
@@ -74,26 +89,20 @@ final class BrokerConfigTests: XCTestCase {
     var env = completeEnvironment()
     env.removeValue(forKey: BrokerConfigKey.port.rawValue)
     env.removeValue(forKey: BrokerConfigKey.dataDir.rawValue)
-    XCTAssertThrowsError(try config(env)) { error in
-      guard let configError = error as? BrokerConfigError else {
-        return XCTFail("expected BrokerConfigError, got \(error)")
-      }
+    expectConfigError(env) { configError in
       let keys = Set(configError.problems.map(\.key))
-      XCTAssertTrue(keys.contains(.port))
-      XCTAssertTrue(keys.contains(.dataDir))
+      expect(keys.contains(.port)) == true
+      expect(keys.contains(.dataDir)) == true
     }
   }
 
   func testUnparseableIntIsReportedWithRawValue() {
     var env = completeEnvironment()
     env[BrokerConfigKey.port.rawValue] = "not-a-number"
-    XCTAssertThrowsError(try config(env)) { error in
-      guard let configError = error as? BrokerConfigError else {
-        return XCTFail("expected BrokerConfigError, got \(error)")
-      }
+    expectConfigError(env) { configError in
       let portProblem = configError.problems.first { $0.key == .port }
-      XCTAssertNotNil(portProblem)
-      XCTAssertEqual(portProblem?.raw, "not-a-number")
+      expect(portProblem) != nil
+      expect(portProblem?.raw) == "not-a-number"
     }
   }
 
@@ -101,9 +110,9 @@ final class BrokerConfigTests: XCTestCase {
     for badValue in ["0", "-1"] {
       var env = completeEnvironment()
       env[BrokerConfigKey.embeddingMaxConcurrency.rawValue] = badValue
-      XCTAssertThrowsError(try config(env), "expected \(badValue) to be rejected") { error in
-        let keys = ((error as? BrokerConfigError)?.problems.map(\.key)) ?? []
-        XCTAssertTrue(keys.contains(.embeddingMaxConcurrency))
+      expectConfigError(env) { configError in
+        let keys = configError.problems.map(\.key)
+        expect(keys.contains(.embeddingMaxConcurrency)) == true
       }
     }
   }
@@ -112,9 +121,9 @@ final class BrokerConfigTests: XCTestCase {
     var env = completeEnvironment()
     env[BrokerConfigKey.batteryThrottlePct.rawValue] = "40"
     env[BrokerConfigKey.batteryMildPct.rawValue] = "35"
-    XCTAssertThrowsError(try config(env)) { error in
-      let keys = ((error as? BrokerConfigError)?.problems.map(\.key)) ?? []
-      XCTAssertTrue(keys.contains(.batteryMildPct))
+    expectConfigError(env) { configError in
+      let keys = configError.problems.map(\.key)
+      expect(keys.contains(.batteryMildPct)) == true
     }
   }
 
@@ -122,49 +131,49 @@ final class BrokerConfigTests: XCTestCase {
     var env = completeEnvironment()
     env[BrokerConfigKey.batteryMildPct.rawValue] = "85"
     env[BrokerConfigKey.batteryResumePct.rawValue] = "80"
-    XCTAssertThrowsError(try config(env)) { error in
-      let keys = ((error as? BrokerConfigError)?.problems.map(\.key)) ?? []
-      XCTAssertTrue(keys.contains(.batteryMildPct))
+    expectConfigError(env) { configError in
+      let keys = configError.problems.map(\.key)
+      expect(keys.contains(.batteryMildPct)) == true
     }
   }
 
   func testHostAllowlistRejectsOtherHosts() {
     var env = completeEnvironment()
     env[BrokerConfigKey.host.rawValue] = "0.0.0.0"
-    XCTAssertThrowsError(try config(env)) { error in
-      let keys = ((error as? BrokerConfigError)?.problems.map(\.key)) ?? []
-      XCTAssertTrue(keys.contains(.host))
+    expectConfigError(env) { configError in
+      let keys = configError.problems.map(\.key)
+      expect(keys.contains(.host)) == true
     }
   }
 
   func testPromptCacheBlankMeansAuto() throws {
     let config = try config(completeEnvironment())
-    XCTAssertNil(config.promptCacheMaxTokens)
-    XCTAssertNil(config.effectivePromptCacheMaxTokens)
+    expect(config.promptCacheMaxTokens) == nil
+    expect(config.effectivePromptCacheMaxTokens) == nil
   }
 
   func testPromptCacheDisabledImposesCeiling() throws {
     var env = completeEnvironment()
     env[BrokerConfigKey.promptCacheEnabled.rawValue] = "false"
     let config = try config(env)
-    XCTAssertFalse(config.promptCacheEnabled)
-    XCTAssertEqual(config.effectivePromptCacheMaxTokens, 8_192)
+    expect(config.promptCacheEnabled) == false
+    expect(config.effectivePromptCacheMaxTokens) == 8_192
   }
 
   func testPromptCacheExplicitValueWins() throws {
     var env = completeEnvironment()
     env[BrokerConfigKey.promptCacheMaxTokens.rawValue] = "4096"
     let config = try config(env)
-    XCTAssertEqual(config.promptCacheMaxTokens, 4_096)
-    XCTAssertEqual(config.effectivePromptCacheMaxTokens, 4_096)
+    expect(config.promptCacheMaxTokens) == 4_096
+    expect(config.effectivePromptCacheMaxTokens) == 4_096
   }
 
   func testBlankRequiredKeyIsRejected() {
     var env = completeEnvironment()
     env[BrokerConfigKey.dataDir.rawValue] = ""
-    XCTAssertThrowsError(try config(env)) { error in
-      let keys = ((error as? BrokerConfigError)?.problems.map(\.key)) ?? []
-      XCTAssertTrue(keys.contains(.dataDir))
+    expectConfigError(env) { configError in
+      let keys = configError.problems.map(\.key)
+      expect(keys.contains(.dataDir)) == true
     }
   }
 }
