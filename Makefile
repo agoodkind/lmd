@@ -13,16 +13,34 @@ CONFIG ?= Debug
 LMD_DEV = SWIFT_MK_BIN="$(SWIFT_MK_BIN)" TUIST="$(TUIST)" swift Tools/lmd-dev.swift
 
 # swift-mk owns build/test/clean/lint/fmt/check; the dev tool runs the compile.
-SWIFT_MK_MODULES := swift-build.mk
+SWIFT_MK_MODULES := swift-build.mk swift-release.mk
 SWIFT_MK_OWN_RUN := 1
 SWIFT_BUILD_CMD = $(LMD_DEV) build $(CONFIG)
 SWIFT_TEST_CMD = $(LMD_DEV) test
 SWIFT_CLEAN_CMD = $(LMD_DEV) clean
 SWIFT_DEPLOY_CMD = $(LMD_DEV) install $(CONFIG)
-SWIFT_LOG_AUDIT_CMD = $(LMD_DEV) log-audit
 SWIFT_FORMAT_TARGETS := Sources Tests Tools
 SWIFTLINT_TARGETS := Sources Tests Tools
 SWIFTCHECK_EXTRA_TARGETS := Sources Tests Tools
+
+# CI defaults; workflows override them as make variables when needed.
+LMD_ENABLE_CCACHE ?= 0
+SWIFTPM_ENABLE_COMMAND_PLUGINS ?= false
+export LMD_ENABLE_CCACHE
+export SWIFTPM_ENABLE_COMMAND_PLUGINS
+
+# Map swift-mk's signing variables onto the names lmd-dev reads, so the shared
+# release workflow's resolved identity reaches ci-sign without a parallel set
+# of secrets.
+APPLE_CODE_SIGN_IDENTITY ?= $(CODE_SIGN_IDENTITY)
+APPLE_TEAM_ID ?= $(DEVELOPMENT_TEAM)
+export APPLE_CODE_SIGN_IDENTITY
+export APPLE_TEAM_ID
+
+# Release artifacts for the shared _release.yml pipeline: build, post-build
+# codesign, then lmd-dev's own notarization (bare CLI zips cannot be stapled,
+# so the shared workflow runs with notarize disabled), then the zip into dist/.
+SWIFT_MK_RELEASE_BUILD_CMD := $(MAKE) SWIFT_MK_SKIP_FETCH=1 build CONFIG=Release && $(MAKE) SWIFT_MK_SKIP_FETCH=1 ci-sign && $(MAKE) SWIFT_MK_SKIP_FETCH=1 ci-notarize && cp Products/lmd-*.zip dist/
 
 include bootstrap.mk
 
@@ -32,6 +50,11 @@ include bootstrap.mk
         snapshot-update log-smoke tui-qa smoke video-smoke \
         sign notarize notary-setup dist ci-import-cert ci-sign ci-notarize \
         release-tag push-tag github-release cleanup-keychain
+
+# lmd-dev shells out to $(SWIFT_MK_BIN) from these entry points, so each one
+# must build the binary first; without this a fresh checkout (CI) ran lmd-dev
+# before any swift-mk existed.
+toolchain preflight sign dist ci-sign release-tag push-tag github-release: swift-mk-bin
 
 toolchain:
 	@$(LMD_DEV) toolchain
