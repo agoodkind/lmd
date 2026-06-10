@@ -485,23 +485,23 @@ final class ITermDriver: TUIDriver {
   // filter which has quirks in older AppleScript versions.
   private func scriptTargetingSession(body: String) -> String {
     """
-        tell application "iTerm"
-          try
-            repeat with w in windows
-              repeat with t in tabs of w
-                repeat with s in sessions of t
-                  try
-                    if (id of s as string) is "\(sessionID)" then
-                      \(body)
-                    end if
-                  end try
-                end repeat
+      tell application "iTerm"
+        try
+          repeat with w in windows
+            repeat with t in tabs of w
+              repeat with s in sessions of t
+                try
+                  if (id of s as string) is "\(sessionID)" then
+                    \(body)
+                  end if
+                end try
               end repeat
             end repeat
-          end try
-          return ""
-        end tell
-      """
+          end repeat
+        end try
+        return ""
+      end tell
+    """
   }
 
   func capture() -> String {

@@ -344,9 +344,10 @@ final class ModelRouterTests: XCTestCase {
     let events = RouterEventsBox()
     let memory = MemoryModel(totalGB: 80)
     let (router, created) = makeRouter(
-      reserveGB: 0, model: memory)      { event in
-        events.append(event)
-      }
+      reserveGB: 0, model: memory
+    ) { event in
+      events.append(event)
+    }
 
     _ = try await router.routeAndBegin(desc("A", 40))
     await router.requestDone(modelID: "A")
@@ -377,9 +378,9 @@ final class ModelRouterTests: XCTestCase {
       spawner: spawner,
       settleAttempts: 3,
       settleIntervalMillis: 1
-    )      { event in
-        events.append(event)
-      }
+    ) { event in
+      events.append(event)
+    }
 
     _ = try await router.routeEmbeddingAndBegin(embeddingModel)
     await router.embeddingRequestDone(modelID: embeddingModel.id)

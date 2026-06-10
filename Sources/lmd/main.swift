@@ -259,28 +259,28 @@ private func runBenchFromConfig(configPath: String) async {
   let orchestrator = BenchOrchestrator(
     config: config,
     backend: backend
-  )    { event in
-      switch event {
-      case .runStarted(let total):
-        say("running \(total) cells against the broker (HTTP /v1/* surface)")
-        log.notice("bench.run_started total=\(total, privacy: .public)")
-      case .modelStarting(let model, let pending):
-        say("  ▶ \(model.id) (\(pending) tests)")
-      case .cellStarted(let cell):
-        FileHandle.standardOutput.write(Data("    \(cell.promptFilename) …".utf8))
-      case .cellFinished(let cell, let elapsed, let bytes):
-        say(" ✓ \(Int(elapsed))s \(bytes)B  [\(cell.variant.name)]")
-      case .cellFailed(let cell, let error):
-        say(" ✗ \(cell.promptFilename): \(error)")
-      case .modelFinished(let model):
-        say("  ✓ \(model.id)")
-      case .runFinished(let done, let failed):
-        say("done. completed=\(done) failed=\(failed)")
-        log.notice(
-          "bench.run_finished completed=\(done, privacy: .public) failed=\(failed, privacy: .public)"
-        )
-      }
+  ) { event in
+    switch event {
+    case .runStarted(let total):
+      say("running \(total) cells against the broker (HTTP /v1/* surface)")
+      log.notice("bench.run_started total=\(total, privacy: .public)")
+    case .modelStarting(let model, let pending):
+      say("  ▶ \(model.id) (\(pending) tests)")
+    case .cellStarted(let cell):
+      FileHandle.standardOutput.write(Data("    \(cell.promptFilename) …".utf8))
+    case .cellFinished(let cell, let elapsed, let bytes):
+      say(" ✓ \(Int(elapsed))s \(bytes)B  [\(cell.variant.name)]")
+    case .cellFailed(let cell, let error):
+      say(" ✗ \(cell.promptFilename): \(error)")
+    case .modelFinished(let model):
+      say("  ✓ \(model.id)")
+    case .runFinished(let done, let failed):
+      say("done. completed=\(done) failed=\(failed)")
+      log.notice(
+        "bench.run_finished completed=\(done, privacy: .public) failed=\(failed, privacy: .public)"
+      )
     }
+  }
   _ = await orchestrator.run()
 }
 

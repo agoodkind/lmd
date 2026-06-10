@@ -47,7 +47,8 @@ final class BrokerProtocolTests: XCTestCase {
           identifier: "reviewer",
           contextLength: 4_096,
           ttlSeconds: 300,
-          loadConfig: ModelLoadConfig(identifier: "reviewer", contextLength: 4_096, ttlSeconds: 300),
+          loadConfig: ModelLoadConfig(
+            identifier: "reviewer", contextLength: 4_096, ttlSeconds: 300),
           capabilities: ModelCapabilities(text: true, vision: true, video: true)
         )
       ]

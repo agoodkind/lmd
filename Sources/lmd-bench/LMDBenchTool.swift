@@ -145,7 +145,7 @@ final class FanController {
     self.coordinator = FanCoordinator(
       config: cfg,
       smc: smc
-    )      { message in log.info("\(message, privacy: .public)") }
+    ) { message in log.info("\(message, privacy: .public)") }
   }
 
   func start() { coordinator.takeOver() }
@@ -517,7 +517,7 @@ final class SwiftLMServer {
         logFilePath: swiftLMLogPath,
         readyTimeout: 300
       )
-    )      { message in log.info("\(message, privacy: .public)") }
+    ) { message in log.info("\(message, privacy: .public)") }
     try b.start()
     self.backend = b
   }
@@ -548,7 +548,7 @@ final class SwiftLMServer {
           logFilePath: swiftLMLogPath,
           readyTimeout: timeout
         )
-      )        { message in log.info("\(message, privacy: .public)") }
+      ) { message in log.info("\(message, privacy: .public)") }
       do {
         try b.start()
       } catch {

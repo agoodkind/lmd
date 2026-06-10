@@ -80,9 +80,9 @@ actor ChatHost {
       model: modelPath,
       contextSize: contextLength,
       config: config
-    )      { message in
-        log.notice("chat.child \(message, privacy: .public)")
-      }
+    ) { message in
+      log.notice("chat.child \(message, privacy: .public)")
+    }
     try childServer.start()
     // Publish the PID as soon as the child exists so a signal arriving mid-load
     // still reaps it.

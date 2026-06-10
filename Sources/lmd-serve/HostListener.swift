@@ -50,44 +50,44 @@ func startHostListener(
   }
   let listener = try XPCListener(
     service: brokerHostServiceName
-  )    { request in
-      // Holds the accepted session and the bound server. The session is
-      // assigned after `accept` returns, so the message handler closure reads
-      // it from here rather than capturing the still-uninitialized binding the
-      // same `accept` call produces.
-      final class Binder: @unchecked Sendable {
-        var session: XPCSession?
-        var server: XPCModelServer?
-      }
-      let binder = Binder()
-      let (decision, session) = request.accept(
-        incomingMessageHandler: { (frame: BackendFrame) -> (any Encodable)? in
-          if case .hello(let token) = frame {
-            Task {
-              guard let session = binder.session,
-                let modelID = await pending.claim(token: token),
-                let server = registry.server(forModelID: modelID)
-              else {
-                log.error("host.hello_unmatched token_present=\(!token.isEmpty, privacy: .public)")
-                return
-              }
-              server.bind(session: session)
-              binder.server = server
-              log.notice("host.bound model=\(modelID, privacy: .public)")
-            }
-          } else {
-            binder.server?.deliver(frame)
-          }
-          return nil
-        },
-        cancellationHandler: { reason in
-          log.notice("host.session_canceled reason=\(String(describing: reason), privacy: .public)")
-        }
-      )
-      binder.session = session
-      try? session.activate()
-      return decision
+  ) { request in
+    // Holds the accepted session and the bound server. The session is
+    // assigned after `accept` returns, so the message handler closure reads
+    // it from here rather than capturing the still-uninitialized binding the
+    // same `accept` call produces.
+    final class Binder: @unchecked Sendable {
+      var session: XPCSession?
+      var server: XPCModelServer?
     }
+    let binder = Binder()
+    let (decision, session) = request.accept(
+      incomingMessageHandler: { (frame: BackendFrame) -> (any Encodable)? in
+        if case .hello(let token) = frame {
+          Task {
+            guard let session = binder.session,
+              let modelID = await pending.claim(token: token),
+              let server = registry.server(forModelID: modelID)
+            else {
+              log.error("host.hello_unmatched token_present=\(!token.isEmpty, privacy: .public)")
+              return
+            }
+            server.bind(session: session)
+            binder.server = server
+            log.notice("host.bound model=\(modelID, privacy: .public)")
+          }
+        } else {
+          binder.server?.deliver(frame)
+        }
+        return nil
+      },
+      cancellationHandler: { reason in
+        log.notice("host.session_canceled reason=\(String(describing: reason), privacy: .public)")
+      }
+    )
+    binder.session = session
+    try? session.activate()
+    return decision
+  }
   log.notice("host.listener_started service=\(brokerHostServiceName, privacy: .public)")
   return listener
 }

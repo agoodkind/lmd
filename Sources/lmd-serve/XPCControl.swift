@@ -71,30 +71,30 @@ func startXPCControl(state: BrokerState) throws -> XPCListener {
 
   let listener = try XPCListener(
     service: brokerXPCServiceName
-  )    { request in
-      // One queue per client session. Keeps a slow embed call from
-      // blocking another client's `health` ping.
-      let queue = DispatchQueue(label: "io.goodkind.lmd.control.session")
-      let handler = SessionHandler(state: state, queue: queue)
-      let (decision, session) = request.accept(
-        incomingMessageHandler: { (message: BrokerRequest) -> (any Encodable)? in
-          handler.handle(request: message)
-        },
-        cancellationHandler: { reason in
-          handler.handleCancellation(reason: String(describing: reason))
-        }
-      )
-      // Stash the session reference so server-initiated frames (pull
-      // events) have somewhere to land. Activated below.
-      handler.bind(session: session)
-      do {
-        try session.activate()
-        log.info("xpc.session_accepted")
-      } catch {
-        log.error("xpc.session_activate_failed err=\(String(describing: error), privacy: .public)")
+  ) { request in
+    // One queue per client session. Keeps a slow embed call from
+    // blocking another client's `health` ping.
+    let queue = DispatchQueue(label: "io.goodkind.lmd.control.session")
+    let handler = SessionHandler(state: state, queue: queue)
+    let (decision, session) = request.accept(
+      incomingMessageHandler: { (message: BrokerRequest) -> (any Encodable)? in
+        handler.handle(request: message)
+      },
+      cancellationHandler: { reason in
+        handler.handleCancellation(reason: String(describing: reason))
       }
-      return decision
+    )
+    // Stash the session reference so server-initiated frames (pull
+    // events) have somewhere to land. Activated below.
+    handler.bind(session: session)
+    do {
+      try session.activate()
+      log.info("xpc.session_accepted")
+    } catch {
+      log.error("xpc.session_activate_failed err=\(String(describing: error), privacy: .public)")
     }
+    return decision
+  }
   log.notice("xpc.listener_started service=\(brokerXPCServiceName, privacy: .public)")
   return listener
 }
