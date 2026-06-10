@@ -8,6 +8,7 @@
 
 import Foundation
 import MLXLMCommon
+import Nimble
 import SwiftLMCore
 import XCTest
 
@@ -25,11 +26,11 @@ final class MLXVLMVideoBackendTests: XCTestCase {
 
     let videoDescriptor = try MLXVLMVideoModelDescriptor(descriptor: descriptor)
 
-    XCTAssertEqual(videoDescriptor.id, "local-vlm")
-    XCTAssertEqual(videoDescriptor.displayName, "Local VLM")
-    XCTAssertEqual(videoDescriptor.path, "/tmp/local-vlm")
-    XCTAssertEqual(videoDescriptor.directoryURL.path, "/tmp/local-vlm")
-    XCTAssertEqual(videoDescriptor.sizeBytes, 42)
+    expect(videoDescriptor.id) == "local-vlm"
+    expect(videoDescriptor.displayName) == "Local VLM"
+    expect(videoDescriptor.path) == "/tmp/local-vlm"
+    expect(videoDescriptor.directoryURL.path) == "/tmp/local-vlm"
+    expect(videoDescriptor.sizeBytes) == 42
   }
 
   func testRequestPreservesVideoSamplingHintsButMarksBackendAsAuthoritative() throws {
@@ -43,14 +44,14 @@ final class MLXVLMVideoBackendTests: XCTestCase {
       temperature: 0
     )
 
-    XCTAssertNoThrow(try request.validate())
+    expect { try request.validate() }.toNot(throwError())
     let metadata = MLXVLMVideoMetadata(request: request)
 
-    XCTAssertEqual(metadata.videoCount, 1)
-    XCTAssertEqual(metadata.requestedFPS, 2)
-    XCTAssertEqual(metadata.requestedMaxFrames, 12)
-    XCTAssertNil(metadata.sampledFPS)
-    XCTAssertNil(metadata.sampledFrameCount)
+    expect(metadata.videoCount) == 1
+    expect(metadata.requestedFPS) == 2
+    expect(metadata.requestedMaxFrames) == 12
+    expect(metadata.sampledFPS) == nil
+    expect(metadata.sampledFrameCount) == nil
   }
 
   func testReplacingVideosPreservesRequestedAndSampledMetadata() throws {
@@ -70,11 +71,11 @@ final class MLXVLMVideoBackendTests: XCTestCase {
     )
     let metadata = MLXVLMVideoMetadata(request: replaced)
 
-    XCTAssertEqual(metadata.videoCount, 1)
-    XCTAssertEqual(metadata.requestedFPS, 16)
-    XCTAssertEqual(metadata.requestedMaxFrames, 48)
-    XCTAssertEqual(metadata.sampledFPS, 16)
-    XCTAssertEqual(metadata.sampledFrameCount, 32)
+    expect(metadata.videoCount) == 1
+    expect(metadata.requestedFPS) == 16
+    expect(metadata.requestedMaxFrames) == 48
+    expect(metadata.sampledFPS) == 16
+    expect(metadata.sampledFrameCount) == 32
   }
 
   func testRequestBuildsChatMessageWithVideoURLOnLastUserMessage() throws {
@@ -92,59 +93,51 @@ final class MLXVLMVideoBackendTests: XCTestCase {
     try request.validate()
     let input = request.makeUserInput()
 
-    XCTAssertEqual(input.videos.count, 2)
+    expect(input.videos.count) == 2
     guard case .chat(let chatMessages) = input.prompt else {
-      XCTFail("expected structured chat input")
+      fail("expected structured chat input")
       return
     }
-    XCTAssertEqual(chatMessages.count, 3)
-    XCTAssertEqual(chatMessages[0].videos.count, 1)
-    XCTAssertEqual(chatMessages[1].videos.count, 0)
-    XCTAssertEqual(chatMessages[2].videos.count, 1)
+    expect(chatMessages.count) == 3
+    expect(chatMessages[0].videos.count) == 1
+    expect(chatMessages[1].videos.count) == 0
+    expect(chatMessages[2].videos.count) == 1
   }
 
   func testRequestRejectsInvalidInputsBeforeMLXRuntime() throws {
     let videoURL = try makeTemporaryVideoFile()
 
-    XCTAssertThrowsError(
+    expect {
       try MLXVLMVideoCompletionRequest(
         chatText: "Describe.",
         videoURLs: [videoURL],
         fps: 0
       ).validate()
-    ) { error in
-      XCTAssertEqual(error as? MLXVLMVideoBackendError, .invalidFPS(0))
-    }
+    }.to(throwError(MLXVLMVideoBackendError.invalidFPS(0)))
 
-    XCTAssertThrowsError(
+    expect {
       try MLXVLMVideoCompletionRequest(
         chatText: "Describe.",
         videoURLs: [videoURL],
         maxFrames: 0
       ).validate()
-    ) { error in
-      XCTAssertEqual(error as? MLXVLMVideoBackendError, .invalidMaxFrames(0))
-    }
+    }.to(throwError(MLXVLMVideoBackendError.invalidMaxFrames(0)))
 
-    XCTAssertThrowsError(
+    expect {
       try MLXVLMVideoCompletionRequest(
         chatText: "Describe.",
         videoURLs: [],
         maxTokens: 0
       ).validate()
-    ) { error in
-      XCTAssertEqual(error as? MLXVLMVideoBackendError, .invalidMaxTokens(0))
-    }
+    }.to(throwError(MLXVLMVideoBackendError.invalidMaxTokens(0)))
 
     let remoteURL = try XCTUnwrap(URL(string: "https://localhost/video.mov"))
-    XCTAssertThrowsError(
+    expect {
       try MLXVLMVideoCompletionRequest(
         chatText: "Describe.",
         videoURLs: [remoteURL]
       ).validate()
-    ) { error in
-      XCTAssertEqual(error as? MLXVLMVideoBackendError, .nonFileVideoURL(remoteURL))
-    }
+    }.to(throwError(MLXVLMVideoBackendError.nonFileVideoURL(remoteURL)))
   }
 
   func testResponseUsesOpenAICompatibleChatShape() throws {
@@ -175,23 +168,23 @@ final class MLXVLMVideoBackendTests: XCTestCase {
       completionInfo: completionInfo
     )
 
-    XCTAssertEqual(response.object, "chat.completion")
-    XCTAssertEqual(response.choices.first?.message.role, "assistant")
-    XCTAssertEqual(response.choices.first?.message.content, "A short answer.")
-    XCTAssertEqual(response.choices.first?.finishReason, "length")
-    XCTAssertEqual(response.usage?.promptTokens, 11)
-    XCTAssertEqual(response.usage?.completionTokens, 7)
-    XCTAssertEqual(response.usage?.totalTokens, 18)
+    expect(response.object) == "chat.completion"
+    expect(response.choices.first?.message.role) == "assistant"
+    expect(response.choices.first?.message.content) == "A short answer."
+    expect(response.choices.first?.finishReason) == "length"
+    expect(response.usage?.promptTokens) == 11
+    expect(response.usage?.completionTokens) == 7
+    expect(response.usage?.totalTokens) == 18
 
     let encoded = try JSONEncoder().encode(response)
     let decoded = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
-    XCTAssertNotNil(decoded?["choices"])
-    XCTAssertNotNil(decoded?["usage"])
-    XCTAssertNotNil(decoded?["metadata"])
+    expect(decoded?["choices"]) != nil
+    expect(decoded?["usage"]) != nil
+    expect(decoded?["metadata"]) != nil
     let metadataJSON = decoded?["metadata"] as? [String: Any]
-    XCTAssertEqual(metadataJSON?["video_count"] as? Int, 1)
-    XCTAssertEqual(metadataJSON?["requested_fps"] as? Double, 1.0)
-    XCTAssertEqual(metadataJSON?["requested_max_frames"] as? Int, 8)
+    expect(metadataJSON?["video_count"] as? Int) == 1
+    expect(metadataJSON?["requested_fps"] as? Double) == 1.0
+    expect(metadataJSON?["requested_max_frames"] as? Int) == 8
   }
 
   private func makeTemporaryVideoFile() throws -> URL {

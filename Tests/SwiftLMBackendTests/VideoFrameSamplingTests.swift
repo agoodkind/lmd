@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import Nimble
 import XCTest
 
 @testable import SwiftLMBackend
@@ -17,7 +18,7 @@ final class VideoFrameSamplingTests: XCTestCase {
 
     let frames = try await sampledVideoFrames(originalURL: fixtureURL, targetFPS: 2.0)
 
-    XCTAssertGreaterThanOrEqual(frames.count, 1)
+    expect(frames.count) >= 1
   }
 
   func testSamplesMultipleFramesFromTwoSecondFixture() async throws {
@@ -25,7 +26,7 @@ final class VideoFrameSamplingTests: XCTestCase {
 
     let frames = try await sampledVideoFrames(originalURL: fixtureURL, targetFPS: 2.0)
 
-    XCTAssertGreaterThanOrEqual(frames.count, 2)
+    expect(frames.count) >= 2
   }
 
   func testHonorsMaxFramesCap() async throws {
@@ -35,14 +36,14 @@ final class VideoFrameSamplingTests: XCTestCase {
       originalURL: fixtureURL, targetFPS: 30.0, maxFrames: 2
     )
 
-    XCTAssertEqual(frames.count, 2)
+    expect(frames.count) == 2
   }
 
   func testRejectsInvalidTargetFPS() async throws {
     let fixtureURL = try fixtureURL("red_32x32_1f.mp4")
     do {
       _ = try await sampledVideoFrames(originalURL: fixtureURL, targetFPS: 0)
-      XCTFail("expected invalidTargetFPS")
+      fail("expected invalidTargetFPS")
     } catch VideoFrameSamplingError.invalidTargetFPS {
       // expected
     }

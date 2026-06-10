@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import Nimble
 import XCTest
 
 @testable import SwiftLMBackend
@@ -14,10 +15,10 @@ import XCTest
 final class SwiftLMServerConfigTests: XCTestCase {
   func testConfigDefaults() {
     let c = SwiftLMServerConfig(binaryPath: "/usr/bin/true")
-    XCTAssertEqual(c.host, "localhost")
-    XCTAssertEqual(c.port, 5_413)
-    XCTAssertNil(c.logFilePath)
-    XCTAssertEqual(c.readyTimeout, 300)
+    expect(c.host) == "localhost"
+    expect(c.port) == 5_413
+    expect(c.logFilePath) == nil
+    expect(c.readyTimeout) == 300
   }
 
   func testConfigPreservesCustomValues() {
@@ -28,11 +29,11 @@ final class SwiftLMServerConfigTests: XCTestCase {
       logFilePath: "/tmp/swiftlm.log",
       readyTimeout: 120
     )
-    XCTAssertEqual(c.binaryPath, "/tmp/swiftlm")
-    XCTAssertEqual(c.host, "[::1]")
-    XCTAssertEqual(c.port, 5_500)
-    XCTAssertEqual(c.logFilePath, "/tmp/swiftlm.log")
-    XCTAssertEqual(c.readyTimeout, 120)
+    expect(c.binaryPath) == "/tmp/swiftlm"
+    expect(c.host) == "[::1]"
+    expect(c.port) == 5_500
+    expect(c.logFilePath) == "/tmp/swiftlm.log"
+    expect(c.readyTimeout) == 120
   }
 
   func testStartThrowsWhenBinaryMissing() {
@@ -40,14 +41,9 @@ final class SwiftLMServerConfigTests: XCTestCase {
       model: "/tmp/nonexistent",
       config: SwiftLMServerConfig(binaryPath: "/definitely/does/not/exist/swiftlm")
     )
-    XCTAssertThrowsError(try server.start()) { error in
-      if case SwiftLMServerError.binaryNotFound(let path) = error {
-        XCTAssertEqual(path, "/definitely/does/not/exist/swiftlm")
-      } else {
-        XCTFail("expected .binaryNotFound, got \(error)")
-      }
-    }
-    XCTAssertFalse(server.isRunning)
+    expect { try server.start() }
+      .to(throwError(SwiftLMServerError.binaryNotFound("/definitely/does/not/exist/swiftlm")))
+    expect(server.isRunning) == false
   }
 
   func testStartCreatesMissingLogDirectory() throws {
@@ -72,6 +68,6 @@ final class SwiftLMServerConfigTests: XCTestCase {
     try server.start()
     server.stop()
 
-    XCTAssertTrue(FileManager.default.fileExists(atPath: logPath))
+    expect(FileManager.default.fileExists(atPath: logPath)) == true
   }
 }
