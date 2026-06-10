@@ -6,12 +6,13 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMCore
 
 final class SwiftLMCoreTests: XCTestCase {
   func testVersionIsNonEmpty() {
-    XCTAssertFalse(SwiftLMCore.version.isEmpty)
+    expect(SwiftLMCore.version.isEmpty) == false
   }
 }

@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMCore
@@ -18,10 +19,10 @@ final class ModelCapabilitiesTests: XCTestCase {
       path: "/tmp/model"
     )
 
-    XCTAssertEqual(descriptor.capabilities, .textOnly)
-    XCTAssertTrue(descriptor.capabilities.text)
-    XCTAssertFalse(descriptor.capabilities.vision)
-    XCTAssertFalse(descriptor.capabilities.video)
+    expect(descriptor.capabilities) == .textOnly
+    expect(descriptor.capabilities.text) == true
+    expect(descriptor.capabilities.vision) == false
+    expect(descriptor.capabilities.video) == false
   }
 
   func testCapabilitiesEncodeStableJSONKeys() throws {
@@ -29,10 +30,10 @@ final class ModelCapabilitiesTests: XCTestCase {
     let data = try JSONEncoder().encode(capabilities)
     let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
 
-    XCTAssertEqual(object?["text"] as? Bool, true)
-    XCTAssertEqual(object?["vision"] as? Bool, true)
-    XCTAssertEqual(object?["video"] as? Bool, true)
-    XCTAssertNil(object?["video_sampling_fps"])
+    expect(object?["text"] as? Bool) == true
+    expect(object?["vision"] as? Bool) == true
+    expect(object?["video"] as? Bool) == true
+    expect(object?["video_sampling_fps"]) == nil
   }
 
   func testVideoSamplingFPSRoundTripsThroughJSON() throws {
@@ -41,10 +42,10 @@ final class ModelCapabilitiesTests: XCTestCase {
     )
     let data = try JSONEncoder().encode(capabilities)
     let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-    XCTAssertEqual(object?["video_sampling_fps"] as? Double, 2.0)
+    expect(object?["video_sampling_fps"] as? Double) == 2.0
 
     let decoded = try JSONDecoder().decode(ModelCapabilities.self, from: data)
-    XCTAssertEqual(decoded, capabilities)
-    XCTAssertEqual(decoded.videoSamplingFPS, 2.0)
+    expect(decoded) == capabilities
+    expect(decoded.videoSamplingFPS) == 2.0
   }
 }
