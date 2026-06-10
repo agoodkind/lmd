@@ -1,81 +1,28 @@
 name: CI
 
-# Run on push to main and every PR. `concurrency` cancels stale runs
-# on the same branch so a push-heavy PR stops racing with itself.
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: build + test (macOS)
-    runs-on: macos-26
-    timeout-minutes: 30
-    env:
-      # Keep SwiftPM quiet and deterministic.
-      SWIFTPM_ENABLE_COMMAND_PLUGINS: "false"
-      # ccache wrapper sets CC="ccache clang" which SwiftPM/xcrun rejects as
-      # a single executable path. Disable until the wrapper is fixed.
-      LMD_ENABLE_CCACHE: "0"
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install ccache
-        run: brew install ccache
-
-      - name: Install Tuist
-        run: brew install tuist
-
-      # lmd-dev routes its build/generate/version through swift-mk, so the binary
-      # must be present before any lmd-dev step runs.
-      - name: Build swift-mk for toolchain routing
-        run: |
-          set -euo pipefail
-          src="$RUNNER_TEMP/swift-makefile"
-          git clone --depth 1 https://github.com/agoodkind/swift-makefile "$src"
-          swift build --package-path "$src" -c release --product swift-mk
-          echo "SWIFT_MK_BIN=$(swift build --package-path "$src" -c release --show-bin-path)/swift-mk" >> "$GITHUB_ENV"
-
-      - name: Show toolchain
-        run: swift Tools/lmd-dev.swift toolchain
-
-      - name: Preflight (Metal toolchain, etc.)
-        run: swift Tools/lmd-dev.swift preflight
-
-      - name: Cache build outputs
-        uses: actions/cache@v5
-        with:
-          path: |
-            .build
-            Tuist/.build
-            Derived
-            Products/Build
-            ~/Library/Caches/org.swift.swiftpm
-          key: build-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Tuist/Package.resolved', 'Project.swift', 'Tuist.swift') }}
-          restore-keys: |
-            build-${{ runner.os }}-
-
-      - name: Cache ccache
-        uses: actions/cache@v5
-        with:
-          path: ~/Library/Caches/ccache
-          key: ccache-${{ runner.os }}-${{ github.sha }}
-          restore-keys: |
-            ccache-${{ runner.os }}-
-
-      - name: Build (release)
-        run: swift Tools/lmd-dev.swift build Release
-
-      - name: Unit + snapshot + integration tests
-        run: swift Tools/lmd-dev.swift test
-
-      # `swift Tools/lmd-dev.swift smoke` is a developer convenience that spawns lmd-serve
-      # outside launchd and pokes its HTTP endpoints. It is intentionally
-      # not run in CI: the broker is a LaunchAgent in production and the
-      # XPC listener is guarded against non-launchd contexts, so a CI
-      # smoke without launchd registration is low-signal.
+  ci:
+    uses: agoodkind/swift-makefile/.github/workflows/_ci.yml@main
+    with:
+      runner: macos-26
+      brew-packages: ccache
+      setup-target: preflight
+      targets: '["build","test"]'
+      make-args: "CONFIG=Release"
+      extra-cache-paths: |
+        .build
+        Tuist/.build
+        Derived
+        Products/Build
+        ~/Library/Caches/org.swift.swiftpm
+        ~/Library/Caches/ccache
+    secrets: inherit

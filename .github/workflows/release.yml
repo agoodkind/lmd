@@ -1,127 +1,29 @@
 name: Release
 
-# Every push to main auto-tags and releases a signed + notarized bundle
-# of the five lmd CLIs. Modeled on agoodkind/go-makefile's release flow,
-# adapted for a SwiftPM project without goreleaser.
-#
-# Secrets required (set via `gh secret set`):
-#   APPLE_DEVELOPER_ID_P12_BASE64     single-identity Developer ID .p12
-#   APPLE_DEVELOPER_ID_P12_PASSWORD   import password for that .p12
-#   APPLE_CODE_SIGN_IDENTITY          SHA1 of the identity to use
-#   APPLE_TEAM_ID                     10-char team id
-#   APPLE_NOTARY_KEY_BASE64           notarytool API key (.p8)
-#   APPLE_NOTARY_KEY_ID               10-char key id
-#   APPLE_NOTARY_ISSUER_ID            issuer UUID
-
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
-concurrency:
-  group: release
-  cancel-in-progress: true
+# The caller must grant every permission the called workflow's jobs request.
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   release:
-    name: sign + notarize + release
-    runs-on: macos-26
-    timeout-minutes: 45
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - uses: agoodkind/swift-makefile/.github/actions/setup-build-env@main
-        with:
-          xcode-version: "latest-stable"
-          github-token: ${{ github.token }}
-
-      - name: Install ccache
-        run: brew install ccache
-
-      - name: Show toolchain
-        run: swift Tools/lmd-dev.swift toolchain
-
-      - name: Preflight (Metal toolchain, etc.)
-        run: swift Tools/lmd-dev.swift preflight
-
-      - name: Cache build outputs
-        uses: actions/cache@v5
-        with:
-          path: |
-            .build
-            Tuist/.build
-            Derived
-            Products/Build
-            ~/Library/Caches/org.swift.swiftpm
-          key: build-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Tuist/Package.resolved', 'Project.swift', 'Tuist.swift') }}
-          restore-keys: |
-            build-${{ runner.os }}-
-
-      - name: Cache ccache
-        uses: actions/cache@v5
-        with:
-          path: ~/Library/Caches/ccache
-          key: ccache-${{ runner.os }}-release-${{ github.sha }}
-          restore-keys: |
-            ccache-${{ runner.os }}-release-
-            ccache-${{ runner.os }}-
-
-      - name: Build (release)
-        env:
-          LMD_ENABLE_CCACHE: "1"
-        run: swift Tools/lmd-dev.swift build Release
-
-      - name: Import Developer ID certificate
-        env:
-          APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
-          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
-        run: swift Tools/lmd-dev.swift ci-import-cert
-
-      # Build swift-mk so ci-sign resolves the codesign identity through it
-      # (lmd-dev's signing-identity routing). It falls back to the explicit
-      # APPLE_CODE_SIGN_IDENTITY if this is unavailable, so signing never breaks.
-      - name: Build swift-mk for signing-identity routing
-        run: |
-          set -euo pipefail
-          src="$RUNNER_TEMP/swift-makefile"
-          git clone --depth 1 https://github.com/agoodkind/swift-makefile "$src"
-          swift build --package-path "$src" -c release --product swift-mk
-          echo "SWIFT_MK_BIN=$(swift build --package-path "$src" -c release --show-bin-path)/swift-mk" >> "$GITHUB_ENV"
-
-      - name: Codesign binaries
-        env:
-          APPLE_CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: swift Tools/lmd-dev.swift ci-sign
-
-      - name: Notarize
-        id: notarize
-        env:
-          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
-          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
-        run: swift Tools/lmd-dev.swift ci-notarize
-
-      - name: Compute release tag
-        id: tag
-        run: swift Tools/lmd-dev.swift release-tag
-
-      - name: Push tag
-        env:
-          TAG: ${{ steps.tag.outputs.tag }}
-        run: swift Tools/lmd-dev.swift push-tag
-
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.tag.outputs.tag }}
-          ARTIFACT: ${{ steps.notarize.outputs.artifact }}
-        run: swift Tools/lmd-dev.swift github-release
-
-      - name: Clean up temp keychain
-        if: always()
-        run: swift Tools/lmd-dev.swift cleanup-keychain
+    uses: agoodkind/swift-makefile/.github/workflows/_release.yml@main
+    with:
+      runner: macos-26
+      brew-packages: ccache
+      make-args: "LMD_ENABLE_CCACHE=1"
+      # lmd ships bare CLI binaries: lmd-dev notarizes its own zip inside the
+      # build hook (a zip of bare binaries cannot be stapled), so the shared
+      # notarize step is disabled; the pattern still drives attestation.
+      notarize: false
+      notarize-pattern: "*.zip"
+      signing-identity-name: "Developer ID Application: Alex Goodkind (H3BMXM4W7H)"
+      apple-team-id: H3BMXM4W7H
+    secrets: inherit
