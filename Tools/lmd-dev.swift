@@ -311,8 +311,6 @@ final class DevTool {
     switch command {
     case "help", "--help", "-h":
       try help()
-    case "toolchain":
-      try toolchain()
     case "build":
       try build(configuration: configuration(from: rest.first, defaultValue: "Release"))
     case "debug":
@@ -368,24 +366,10 @@ final class DevTool {
       try signLocal(targets: [])
       _ = try notarize(mode: .local)
       try writeLine("[dist] artifacts: \(productsDirectory().path)")
-    case "ci-import-cert":
-      try ciImportCertificate()
     case "ci-sign":
       try signCI()
     case "ci-notarize":
       _ = try notarize(mode: .ci)
-    case "release-tag":
-      try releaseTag()
-    case "push-tag":
-      try pushTag()
-    case "github-release":
-      try githubRelease()
-    case "cleanup-keychain":
-      try cleanupKeychain()
-    case "lint":
-      try lint()
-    case "format":
-      try format()
     default:
       throw ToolError.usage("unknown command: \(command)")
     }
@@ -434,10 +418,6 @@ final class DevTool {
         dist                    build, sign, notarize, and write the artifact path
       """
     )
-  }
-
-  private func toolchain() throws {
-    try runSwiftMk(["toolchain", "version"])
   }
 
   private func configuration(from rawValue: String?, defaultValue: String) throws -> String {
@@ -1447,129 +1427,6 @@ final class DevTool {
     return zipPath
   }
 
-  private func ciImportCertificate() throws {
-    let certificateData = try decodeBase64Environment("APPLE_DEVELOPER_ID_P12_BASE64")
-    let certificatePassword = try environment.required("APPLE_DEVELOPER_ID_P12_PASSWORD")
-    let keychainPassword =
-      environment.values["KEYCHAIN_PASSWORD"] ?? UUID().uuidString  // gitleaks:allow
-    let runnerTemp = environment.value("RUNNER_TEMP", default: NSTemporaryDirectory())
-    let keychainPath = URL(fileURLWithPath: runnerTemp).appendingPathComponent(
-      "lmd-build.keychain-db")
-    let scratch = try temporaryDirectory(prefix: "lmd-cert")
-    defer {
-      try? fileManager.removeItem(at: scratch)
-    }
-
-    let certificatePath = scratch.appendingPathComponent("cert.p12")
-    try certificateData.write(to: certificatePath, options: .atomic)
-
-    try runPassthrough("security", ["create-keychain", "-p", keychainPassword, keychainPath.path])
-    try runPassthrough("security", ["set-keychain-settings", "-lut", "7200", keychainPath.path])
-    try runPassthrough("security", ["unlock-keychain", "-p", keychainPassword, keychainPath.path])
-    try runPassthrough(
-      "security",
-      ["list-keychains", "-d", "user", "-s", keychainPath.path] + currentUserKeychains())
-    try runPassthrough(
-      "security",
-      [
-        "import",
-        certificatePath.path,
-        "-k",
-        keychainPath.path,
-        "-P",
-        certificatePassword,
-        "-f",
-        "pkcs12",
-        "-t",
-        "cert",
-        "-T",
-        "/usr/bin/codesign",
-        "-T",
-        "/usr/bin/security",
-      ]
-    )
-    try runPassthrough(
-      "security",
-      [
-        "set-key-partition-list",
-        "-S",
-        "apple-tool:,apple:,codesign:",
-        "-s",
-        "-k",
-        keychainPassword,
-        keychainPath.path,
-      ]
-    )
-    try appendGitHubEnvironment(name: "CI_KEYCHAIN_PATH", value: keychainPath.path)
-  }
-
-  private func releaseTag() throws {
-    let runNumber = Int(environment.value("GITHUB_RUN_NUMBER", default: "0")) ?? 0
-    let sha = try runCaptured("git", ["-C", repoRoot.path, "rev-parse", "--short", "HEAD"]).output
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    let tag = "\(releaseTagFormatter().string(from: Date()))-\(String(runNumber, radix: 16))-\(sha)"
-    try appendGitHubOutput(name: "tag", value: tag)
-    try writeLine("Release tag: \(tag)")
-  }
-
-  private func pushTag() throws {
-    let tag = try environment.required("TAG")
-    try runPassthrough("git", ["-C", repoRoot.path, "config", "user.name", "github-actions[bot]"])
-    try runPassthrough(
-      "git",
-      ["-C", repoRoot.path, "config", "user.email", "github-actions[bot]@users.noreply.github.com"])
-    try runPassthrough("git", ["-C", repoRoot.path, "tag", tag])
-    try runPassthrough("git", ["-C", repoRoot.path, "push", "origin", tag])
-  }
-
-  private func githubRelease() throws {
-    try runPassthrough(
-      "gh",
-      [
-        "release",
-        "create",
-        try environment.required("TAG"),
-        try environment.required("ARTIFACT"),
-        "--title",
-        try environment.required("TAG"),
-        "--notes",
-        "Signed + notarized build from \(environment.value("GITHUB_SHA", default: "unknown")). Bare CLI binaries cannot be stapled; first-launch Gatekeeper checks hit the network.",
-      ]
-    )
-  }
-
-  private func cleanupKeychain() {
-    guard let keychainPath = environment.values["CI_KEYCHAIN_PATH"], !keychainPath.isEmpty else {
-      return
-    }
-    guard fileManager.fileExists(atPath: keychainPath) else {
-      return
-    }
-    _ = try? runPassthrough("security", ["delete-keychain", keychainPath])
-  }
-
-  private func lint() throws {
-    do {
-      try runPassthrough("swift-format", ["lint", "--recursive", "Sources", "Tests", "Tools"])
-    } catch {
-      try writeLine("swift-format not installed or failed, skipping")
-    }
-    do {
-      try runPassthrough("swiftlint", ["--quiet"])
-    } catch {
-      try writeLine("swiftlint not installed or failed, skipping")
-    }
-  }
-
-  private func format() throws {
-    do {
-      try runPassthrough(
-        "swift-format", ["format", "--in-place", "--recursive", "Sources", "Tests", "Tools"])
-    } catch {
-      try writeLine("swift-format not installed or failed, skipping")
-    }
-  }
-
   private func tuistInstallAndGenerate() throws {
     // The generator name is data, bound to a constant, so swift-mk's build-tooling
     // rule does not read it as spawning tuist: swift-mk runs tuist itself.
@@ -1996,17 +1853,6 @@ final class DevTool {
     return CommandResult(status: process.terminationStatus, output: output)
   }
 
-  private func currentUserKeychains() throws -> [String] {
-    let result = try runCaptured("security", ["list-keychains", "-d", "user"])
-    return result.output
-      .components(separatedBy: .newlines)
-      .map { line in
-        line.trimmingCharacters(in: .whitespacesAndNewlines)
-          .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-      }
-      .filter { !$0.isEmpty }
-  }
-
   private func decodeBase64Environment(_ name: String) throws -> Data {
     let value = try environment.required(name)
     guard let data = Data(base64Encoded: value) else {
@@ -2017,13 +1863,6 @@ final class DevTool {
 
   private func appendGitHubOutput(name: String, value: String) throws {
     guard let path = environment.values["GITHUB_OUTPUT"], !path.isEmpty else {
-      return
-    }
-    try appendLine("\(name)=\(value)", to: URL(fileURLWithPath: path))
-  }
-
-  private func appendGitHubEnvironment(name: String, value: String) throws {
-    guard let path = environment.values["GITHUB_ENV"], !path.isEmpty else {
       return
     }
     try appendLine("\(name)=\(value)", to: URL(fileURLWithPath: path))
@@ -2083,13 +1922,6 @@ final class DevTool {
   private func artifactDateFormatter() -> DateFormatter {
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyyMMdd-HHmmss"
-    formatter.timeZone = TimeZone(secondsFromGMT: 0)
-    return formatter
-  }
-
-  private func releaseTagFormatter() -> DateFormatter {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyyMMddHHmm"
     formatter.timeZone = TimeZone(secondsFromGMT: 0)
     return formatter
   }

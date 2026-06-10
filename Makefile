@@ -38,13 +38,12 @@ include bootstrap.mk
         uninstall run-serve run-tui run-bench stop-serve start-serve restart-serve \
         test-daemon-up test-daemon-down test-daemon-status \
         snapshot-update log-smoke tui-qa smoke video-smoke \
-        sign notarize notary-setup dist ci-import-cert ci-sign ci-notarize \
-        release-tag push-tag github-release cleanup-keychain
+        sign notarize notary-setup dist ci-sign ci-notarize
 
 # lmd-dev shells out to $(SWIFT_MK_BIN) from these entry points, so each one
 # must build the binary first; without this a fresh checkout (CI) ran lmd-dev
 # before any swift-mk existed.
-toolchain preflight ci-sign release-tag push-tag github-release: swift-mk-bin
+toolchain preflight ci-sign: swift-mk-bin
 
 # Every dev-tool entry point that compiles or runs a product routes through the
 # gated `build` chokepoint first, so the lint gates cannot be bypassed by
@@ -56,7 +55,7 @@ debug install-debug test-integration snapshot-update \
         sign notarize dist: build
 
 toolchain:
-	@$(LMD_DEV) toolchain
+	@"$(SWIFT_MK_BIN)" toolchain version
 
 preflight:
 	@$(LMD_DEV) preflight
@@ -127,23 +126,8 @@ notarize:
 dist:
 	@CONFIG=Release $(LMD_DEV) dist
 
-ci-import-cert:
-	@$(LMD_DEV) ci-import-cert
-
 ci-sign:
 	@$(LMD_DEV) ci-sign
 
 ci-notarize:
 	@$(LMD_DEV) ci-notarize
-
-release-tag:
-	@$(LMD_DEV) release-tag
-
-push-tag:
-	@$(LMD_DEV) push-tag
-
-github-release:
-	@$(LMD_DEV) github-release
-
-cleanup-keychain:
-	@$(LMD_DEV) cleanup-keychain
