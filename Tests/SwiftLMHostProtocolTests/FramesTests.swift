@@ -1,3 +1,4 @@
+import Nimble
 import XCTest
 
 @testable import SwiftLMHostProtocol
@@ -18,7 +19,7 @@ final class FramesTests: XCTestCase {
       endpointPath: "/v1/chat/completions",
       headers: ["X-LMD-Request-ID": id.uuidString]
     )
-    XCTAssertEqual(try roundTrip(req), req)
+    expect(try self.roundTrip(req)) == req
   }
 
   func testEveryFrameCaseRoundTrips() throws {
@@ -36,13 +37,13 @@ final class FramesTests: XCTestCase {
       .metricsSnapshot(Data("{}".utf8)),
     ]
     for frame in frames {
-      XCTAssertEqual(try roundTrip(frame), frame, "frame \(frame) did not round-trip")
+      expect(try self.roundTrip(frame)) == frame
     }
   }
 
   func testThrottleLevelRoundTrips() throws {
     for level in [ThrottleLevel.none, .mild, .hard] {
-      XCTAssertEqual(try roundTrip(level), level, "level \(level) did not round-trip")
+      expect(try self.roundTrip(level)) == level
     }
   }
 
@@ -50,13 +51,13 @@ final class FramesTests: XCTestCase {
     let req = BackendRequest(
       requestID: UUID(), kind: .embedding, openAIBody: Data([4, 5, 6]), stream: false)
     let inbound = HostInbound.request(req)
-    XCTAssertEqual(try roundTrip(inbound), inbound)
+    expect(try self.roundTrip(inbound)) == inbound
   }
 
   func testHostInboundControlRoundTrips() throws {
     for level in [ThrottleLevel.none, .mild, .hard] {
       let inbound = HostInbound.control(.applyPowerThrottle(level))
-      XCTAssertEqual(try roundTrip(inbound), inbound, "control \(level) did not round-trip")
+      expect(try self.roundTrip(inbound)) == inbound
     }
   }
 }
