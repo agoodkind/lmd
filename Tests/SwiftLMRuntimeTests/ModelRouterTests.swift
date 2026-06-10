@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import SwiftLMHostProtocol
 import SwiftLMTrace
 import XCTest
@@ -174,9 +175,9 @@ final class ModelRouterTests: XCTestCase {
   func testFirstRouteSpawnsServer() async throws {
     let (router, created) = makeRouter()
     let server = try await router.routeAndBegin(desc("A", 20))
-    XCTAssertEqual(server.modelID, "A")
-    XCTAssertEqual(created().count, 1)
-    XCTAssertTrue(created().first?.didSpawn ?? false)
+    expect(server.modelID) == "A"
+    expect(created().count) == 1
+    expect(created().first?.didSpawn ?? false) == true
   }
 
   func testRepeatedRouteReusesServer() async throws {
@@ -184,7 +185,7 @@ final class ModelRouterTests: XCTestCase {
     _ = try await router.routeAndBegin(desc("A", 20))
     _ = try await router.routeAndBegin(desc("A", 20))
     _ = try await router.routeAndBegin(desc("A", 20))
-    XCTAssertEqual(created().count, 1, "should only spawn once for the same model id")
+    expect(created().count) == 1
   }
 
   func testRepeatedRoutePrunesStoppedServer() async throws {
@@ -195,24 +196,24 @@ final class ModelRouterTests: XCTestCase {
 
     let second = try await router.routeAndBegin(desc("A", 20))
 
-    XCTAssertTrue(first !== second)
-    XCTAssertEqual(created().count, 2, "stopped server should be replaced")
+    expect(first !== second) == true
+    expect(created().count) == 2
   }
 
   func testSecondModelSpawnsSecondServer() async throws {
     let (router, created) = makeRouter()
     let a = try await router.routeAndBegin(desc("A", 20))
     let b = try await router.routeAndBegin(desc("B", 20))
-    XCTAssertFalse(a === b)
-    XCTAssertEqual(created().count, 2)
+    expect(a === b) == false
+    expect(created().count) == 2
   }
 
   func testAdmitsWhenMemorySafe() async throws {
     let memory = MemoryModel(totalGB: 100)
     let (router, created) = makeRouter(reserveGB: 20, model: memory)
     _ = try await router.routeAndBegin(desc("A", 40))
-    XCTAssertEqual(created().count, 1)
-    XCTAssertFalse(created()[0].didStop, "no eviction when memory is already safe")
+    expect(created().count) == 1
+    expect(created()[0].didStop) == false
   }
 
   func testEvictsOldestIdleWhenHeadroomExceeded() async throws {
@@ -224,10 +225,10 @@ final class ModelRouterTests: XCTestCase {
     await router.requestDone(modelID: "B")
     let c = try await router.routeAndBegin(desc("C", 40))
     await router.requestDone(modelID: "C")
-    XCTAssertEqual(created().count, 3)
-    XCTAssertTrue(created()[0].didStop, "A should be evicted")
-    XCTAssertFalse(created()[1].didStop, "B should still be alive")
-    XCTAssertFalse(created()[2].didStop, "C should still be alive")
+    expect(created().count) == 3
+    expect(created()[0].didStop) == true
+    expect(created()[1].didStop) == false
+    expect(created()[2].didStop) == false
     _ = a
     _ = b
     _ = c
@@ -239,9 +240,9 @@ final class ModelRouterTests: XCTestCase {
     _ = try await router.routeAndBegin(desc("A", 30))
     await router.requestDone(modelID: "A")
     _ = try await router.routeAndBegin(desc("B", 30))
-    XCTAssertEqual(created().count, 2)
-    XCTAssertTrue(created()[0].didStop, "idle A is unloaded to make room")
-    XCTAssertFalse(created()[1].didStop, "B loads once memory recovers")
+    expect(created().count) == 2
+    expect(created()[0].didStop) == true
+    expect(created()[1].didStop) == false
   }
 
   func testRefusesWhenEvictingAllIdleStillInsufficient() async throws {
@@ -252,14 +253,14 @@ final class ModelRouterTests: XCTestCase {
     _ = try await router.routeAndBegin(desc("A", 40))
     do {
       _ = try await router.routeAndBegin(desc("B", 30))
-      XCTFail("expected insufficientHeadroom")
+      fail("expected insufficientHeadroom")
     } catch let err as ModelRouter.RouteError {
       guard case .insufficientHeadroom = err else {
-        XCTFail("expected insufficientHeadroom, got \(err)")
+        fail("expected insufficientHeadroom, got \(err)")
         return
       }
     }
-    XCTAssertFalse(created()[0].didStop, "busy model is never evicted")
+    expect(created()[0].didStop) == false
   }
 
   func testPressureForcesEvictionEvenWhenBytesFine() async throws {
@@ -270,8 +271,8 @@ final class ModelRouterTests: XCTestCase {
     // Byte count alone leaves plenty of room, but the system reports pressure.
     memory.setUnderPressure(true)
     _ = try await router.routeAndBegin(desc("B", 10))
-    XCTAssertTrue(created()[0].didStop, "pressure forces the idle model to unload")
-    XCTAssertFalse(created()[1].didStop, "B still loads after relief")
+    expect(created()[0].didStop) == true
+    expect(created()[1].didStop) == false
   }
 
   func testEnforceHeadroomFreesIdleUnderExternalPressure() async throws {
@@ -283,7 +284,7 @@ final class ModelRouterTests: XCTestCase {
     // memory below the reserve with no load event to trigger the check.
     memory.setExternalUsed(gb: 70)
     await router.enforceHeadroom()
-    XCTAssertTrue(created()[0].didStop, "idle A is unloaded to restore the reserve")
+    expect(created()[0].didStop) == true
   }
 
   func testThrowsWhenCannotFit() async throws {
@@ -291,12 +292,12 @@ final class ModelRouterTests: XCTestCase {
     let (router, _) = makeRouter(reserveGB: 0, model: memory)
     do {
       _ = try await router.routeAndBegin(desc("Huge", 50))
-      XCTFail("expected error")
+      fail("expected error")
     } catch let err as ModelRouter.RouteError {
       if case .insufficientHeadroom = err {
         return
       }
-      XCTFail("expected insufficientHeadroom, got \(err)")
+      fail("expected insufficientHeadroom, got \(err)")
     }
   }
 
@@ -307,7 +308,7 @@ final class ModelRouterTests: XCTestCase {
     await router.requestDone(modelID: "A")
     await router.requestDone(modelID: "B")
     await router.shutdownAll()
-    XCTAssertTrue(created().allSatisfy(\.didStop))
+    expect(created().allSatisfy(\.didStop)) == true
   }
 
   func testUnloadAllowsNextServerToLoad() async throws {
@@ -316,9 +317,9 @@ final class ModelRouterTests: XCTestCase {
     await router.requestDone(modelID: "A")
     await router.unload(modelID: "A")
     _ = try await router.routeAndBegin(desc("B", 10))
-    XCTAssertEqual(created().count, 2)
-    XCTAssertTrue(created()[0].didStop)
-    XCTAssertFalse(created()[1].didStop)
+    expect(created().count) == 2
+    expect(created()[0].didStop) == true
+    expect(created()[1].didStop) == false
   }
 
   func testRouterPublishesTypedLifecycleEvents() async throws {
@@ -331,13 +332,10 @@ final class ModelRouterTests: XCTestCase {
     await router.requestDone(modelID: "A")
     await router.unload(modelID: "A")
 
-    XCTAssertEqual(
-      events.getAll(),
-      [
-        .modelSpawned(modelID: "A", kind: .chat),
-        .modelUnloaded(modelID: "A", kind: .chat),
-      ]
-    )
+    expect(events.getAll()) == [
+      .modelSpawned(modelID: "A", kind: .chat),
+      .modelUnloaded(modelID: "A", kind: .chat),
+    ]
   }
 
   func testHeadroomEvictionPublishesModelEvictedLifecycleEvent() async throws {
@@ -355,16 +353,13 @@ final class ModelRouterTests: XCTestCase {
     await router.requestDone(modelID: "B")
     _ = try await router.routeAndBegin(desc("C", 40))
 
-    XCTAssertTrue(created()[0].didStop)
-    XCTAssertEqual(
-      events.getAll(),
-      [
-        .modelSpawned(modelID: "A", kind: .chat),
-        .modelSpawned(modelID: "B", kind: .chat),
-        .modelEvicted(modelID: "A", kind: .chat),
-        .modelSpawned(modelID: "C", kind: .chat),
-      ]
-    )
+    expect(created()[0].didStop) == true
+    expect(events.getAll()) == [
+      .modelSpawned(modelID: "A", kind: .chat),
+      .modelSpawned(modelID: "B", kind: .chat),
+      .modelEvicted(modelID: "A", kind: .chat),
+      .modelSpawned(modelID: "C", kind: .chat),
+    ]
   }
 
   func testHeadroomEvictionPublishesEmbeddingEvictedLifecycleEvent() async throws {
@@ -387,28 +382,25 @@ final class ModelRouterTests: XCTestCase {
     _ = try await router.routeAndBegin(desc("chat", 50))
 
     let snapshot = await router.snapshot()
-    XCTAssertEqual(snapshot.loaded.map(\.modelID), ["chat"])
-    XCTAssertEqual(
-      events.getAll(),
-      [
-        .modelSpawned(modelID: "embed", kind: .embedding),
-        .modelEvicted(modelID: "embed", kind: .embedding),
-        .modelSpawned(modelID: "chat", kind: .chat),
-      ]
-    )
+    expect(snapshot.loaded.map(\.modelID)) == ["chat"]
+    expect(events.getAll()) == [
+      .modelSpawned(modelID: "embed", kind: .embedding),
+      .modelEvicted(modelID: "embed", kind: .embedding),
+      .modelSpawned(modelID: "chat", kind: .chat),
+    ]
   }
 
   func testBrokerEventMapsRouterEvictionsToModelEvictedKind() {
     let modelEvent = BrokerEvent(routerEvent: .modelEvicted(modelID: "A", kind: .chat))
-    XCTAssertEqual(modelEvent.kind, .modelEvicted)
-    XCTAssertEqual(modelEvent.model, "A")
-    XCTAssertEqual(modelEvent.message, "evicted chat model=A")
+    expect(modelEvent.kind) == .modelEvicted
+    expect(modelEvent.model) == "A"
+    expect(modelEvent.message) == "evicted chat model=A"
 
     let embeddingEvent = BrokerEvent(
       routerEvent: .modelEvicted(modelID: "embed", kind: .embedding))
-    XCTAssertEqual(embeddingEvent.kind, .modelEvicted)
-    XCTAssertEqual(embeddingEvent.model, "embed")
-    XCTAssertEqual(embeddingEvent.message, "evicted embedding model=embed")
+    expect(embeddingEvent.kind) == .modelEvicted
+    expect(embeddingEvent.model) == "embed"
+    expect(embeddingEvent.message) == "evicted embedding model=embed"
   }
 
   func testConcurrentEmbeddingRoutesShareLoadingTask() async throws {
@@ -429,13 +421,13 @@ final class ModelRouterTests: XCTestCase {
     await delayedSpawner.release()
 
     let routedServers = try await [firstServer, secondServer]
-    XCTAssertTrue(routedServers[0] === routedServers[1])
+    expect(routedServers[0] === routedServers[1]) == true
     let delayedSpawnCount = await delayedSpawner.spawnCount()
-    XCTAssertEqual(delayedSpawnCount, 1)
+    expect(delayedSpawnCount) == 1
 
     let snapshot = await router.snapshot()
-    XCTAssertEqual(snapshot.loaded.count, 1)
-    XCTAssertEqual(snapshot.loaded.first?.inFlightRequests, 2)
+    expect(snapshot.loaded.count) == 1
+    expect(snapshot.loaded.first?.inFlightRequests) == 2
   }
 
   func testEmbeddingLoadFailureClearsLoadingStateForRetry() async throws {
@@ -451,18 +443,18 @@ final class ModelRouterTests: XCTestCase {
 
     do {
       _ = try await router.routeEmbeddingAndBegin(model)
-      XCTFail("expected first embedding load to fail")
+      fail("expected first embedding load to fail")
     } catch let error as ModelRouter.RouteError {
       guard case .backendLaunchFailed = error else {
-        XCTFail("expected backendLaunchFailed, got \(error)")
+        fail("expected backendLaunchFailed, got \(error)")
         return
       }
     }
 
     let routedServer = try await router.routeEmbeddingAndBegin(model)
-    XCTAssertTrue(routedServer === embeddingServer)
+    expect(routedServer === embeddingServer) == true
     let retrySpawnCount = await retrySpawner.spawnCount()
-    XCTAssertEqual(retrySpawnCount, 2)
+    expect(retrySpawnCount) == 2
   }
 
   // MARK: - Concurrency queue
@@ -493,13 +485,12 @@ final class ModelRouterTests: XCTestCase {
     async let second = router.routeAndBegin(model)
     for _ in 0..<20 { await Task.yield() }
     var snapshot = await router.snapshot()
-    XCTAssertEqual(
-      snapshot.loaded.first?.inFlightRequests, 1, "second request should queue, not be admitted")
+    expect(snapshot.loaded.first?.inFlightRequests) == 1
 
     await router.requestDone(modelID: model.id)
     _ = try await second
     snapshot = await router.snapshot()
-    XCTAssertEqual(snapshot.loaded.first?.inFlightRequests, 1)
+    expect(snapshot.loaded.first?.inFlightRequests) == 1
   }
 
   func testEmbeddingContentionQueuesThenProceeds() async throws {
@@ -510,12 +501,12 @@ final class ModelRouterTests: XCTestCase {
     async let second = router.routeEmbeddingAndBegin(model)
     for _ in 0..<20 { await Task.yield() }
     var snapshot = await router.snapshot()
-    XCTAssertEqual(snapshot.loaded.first?.inFlightRequests, 1)
+    expect(snapshot.loaded.first?.inFlightRequests) == 1
 
     await router.embeddingRequestDone(modelID: model.id)
     _ = try await second
     snapshot = await router.snapshot()
-    XCTAssertEqual(snapshot.loaded.first?.inFlightRequests, 1)
+    expect(snapshot.loaded.first?.inFlightRequests) == 1
   }
 
   func testChatQueueTimeoutSurfacesConcurrencyLimit() async throws {
@@ -526,10 +517,10 @@ final class ModelRouterTests: XCTestCase {
 
     do {
       _ = try await router.routeAndBegin(model)
-      XCTFail("expected concurrencyLimitExceeded after the queue wait timed out")
+      fail("expected concurrencyLimitExceeded after the queue wait timed out")
     } catch let error as ModelRouter.RouteError {
       guard case .concurrencyLimitExceeded = error else {
-        XCTFail("expected concurrencyLimitExceeded, got \(error)")
+        fail("expected concurrencyLimitExceeded, got \(error)")
         return
       }
     }
@@ -543,10 +534,10 @@ final class ModelRouterTests: XCTestCase {
 
     do {
       _ = try await router.routeEmbeddingAndBegin(model)
-      XCTFail("expected concurrencyLimitExceeded after the queue wait timed out")
+      fail("expected concurrencyLimitExceeded after the queue wait timed out")
     } catch let error as ModelRouter.RouteError {
       guard case .concurrencyLimitExceeded = error else {
-        XCTFail("expected concurrencyLimitExceeded, got \(error)")
+        fail("expected concurrencyLimitExceeded, got \(error)")
         return
       }
     }
@@ -560,14 +551,14 @@ final class ModelRouterTests: XCTestCase {
       _ = try await router.routeAndBegin(model)  // four admitted without waiting
     }
     let snapshot = await router.snapshot()
-    XCTAssertEqual(snapshot.loaded.first?.inFlightRequests, 4)
+    expect(snapshot.loaded.first?.inFlightRequests) == 4
 
     do {
       _ = try await router.routeAndBegin(model)  // fifth queues, then times out
-      XCTFail("expected the fifth request to queue and time out")
+      fail("expected the fifth request to queue and time out")
     } catch let error as ModelRouter.RouteError {
       guard case .concurrencyLimitExceeded = error else {
-        XCTFail("expected concurrencyLimitExceeded, got \(error)")
+        fail("expected concurrencyLimitExceeded, got \(error)")
         return
       }
     }
@@ -584,7 +575,7 @@ final class ModelRouterTests: XCTestCase {
 
     do {
       _ = try await second
-      XCTFail("expected the drained waiter to surface an error rather than hang")
+      fail("expected the drained waiter to surface an error rather than hang")
     } catch is ModelRouter.RouteError {
       // Expected: a drained waiter resolves instead of hanging.
     }
@@ -609,7 +600,7 @@ final class ModelRouterTests: XCTestCase {
     }
     _ = await [w0, w1, w2]
     let recorded = await order.values()
-    XCTAssertEqual(recorded, [0, 1, 2])
+    expect(recorded) == [0, 1, 2]
   }
 }
 

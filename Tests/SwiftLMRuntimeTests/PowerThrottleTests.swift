@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import SwiftLMHostProtocol
 import XCTest
 
@@ -67,8 +68,8 @@ final class RouterPowerThrottleTests: XCTestCase {
     await router.applyPowerThrottle(.mild)
     let concurrency = await router.embeddingMaxConcurrency
     let pacing = await router.embeddingPacing()
-    XCTAssertEqual(concurrency, 2)
-    XCTAssertEqual(pacing, 75_000_000)
+    expect(concurrency) == 2
+    expect(pacing) == 75_000_000
   }
 
   func testHardCapsConcurrencyAndPaces() async {
@@ -76,8 +77,8 @@ final class RouterPowerThrottleTests: XCTestCase {
     await router.applyPowerThrottle(.hard)
     let concurrency = await router.embeddingMaxConcurrency
     let pacing = await router.embeddingPacing()
-    XCTAssertEqual(concurrency, 1)
-    XCTAssertEqual(pacing, 250_000_000)
+    expect(concurrency) == 1
+    expect(pacing) == 250_000_000
   }
 
   func testNoneRestoresConfigured() async {
@@ -86,25 +87,25 @@ final class RouterPowerThrottleTests: XCTestCase {
     await router.applyPowerThrottle(.none)
     let concurrency = await router.embeddingMaxConcurrency
     let pacing = await router.embeddingPacing()
-    XCTAssertEqual(concurrency, 4)
-    XCTAssertEqual(pacing, 0)
+    expect(concurrency) == 4
+    expect(pacing) == 0
   }
 
   func testNeverRaisesAboveConfiguredCeiling() async {
     let router = makeRouter(embeddingMaxConcurrency: 1)
     await router.applyPowerThrottle(.mild)
     let concurrency = await router.embeddingMaxConcurrency
-    XCTAssertEqual(concurrency, 1)
+    expect(concurrency) == 1
   }
 
   func testUnboundedConfiguredUsesLevelCapThenRestoresToNil() async {
     let router = makeRouter(embeddingMaxConcurrency: nil)
     await router.applyPowerThrottle(.mild)
     let mild = await router.embeddingMaxConcurrency
-    XCTAssertEqual(mild, 2)
+    expect(mild) == 2
     await router.applyPowerThrottle(.none)
     let restored = await router.embeddingMaxConcurrency
-    XCTAssertNil(restored)
+    expect(restored) == nil
   }
 
   func testServerSpawnedWhileThrottledInheritsLevel() async throws {
@@ -120,7 +121,7 @@ final class RouterPowerThrottleTests: XCTestCase {
     let model = ModelDescriptor(
       id: "/tmp/embed", displayName: "embed", path: "/tmp/embed", sizeBytes: 0, kind: .embedding)
     _ = try await router.routeEmbeddingAndBegin(model)
-    XCTAssertEqual(server.appliedLevels, [.mild])
+    expect(server.appliedLevels) == [.mild]
   }
 
   // MARK: - Halt (refuse new, drain in-flight)
@@ -128,16 +129,16 @@ final class RouterPowerThrottleTests: XCTestCase {
   func testHardHaltsAdmissionMildAndNoneDoNot() async {
     let router = makeRouter(embeddingMaxConcurrency: 4)
     let initial = await router.isPowerHalted()
-    XCTAssertFalse(initial)
+    expect(initial) == false
     await router.applyPowerThrottle(.mild)
     let mild = await router.isPowerHalted()
-    XCTAssertFalse(mild)
+    expect(mild) == false
     await router.applyPowerThrottle(.hard)
     let hard = await router.isPowerHalted()
-    XCTAssertTrue(hard)
+    expect(hard) == true
     await router.applyPowerThrottle(.none)
     let cleared = await router.isPowerHalted()
-    XCTAssertFalse(cleared)
+    expect(cleared) == false
   }
 
   func testHardRefusesNewChatBeforeSpawning() async {
@@ -147,14 +148,14 @@ final class RouterPowerThrottleTests: XCTestCase {
       id: "/tmp/chat", displayName: "chat", path: "/tmp/chat", sizeBytes: 0, kind: .chat)
     do {
       _ = try await router.routeAndBegin(model)
-      XCTFail("expected powerPaused")
+      fail("expected powerPaused")
     } catch let error as ModelRouter.RouteError {
       guard case .powerPaused = error else {
-        XCTFail("expected powerPaused, got \(error)")
+        fail("expected powerPaused, got \(error)")
         return
       }
     } catch {
-      XCTFail("unexpected error \(error)")
+      fail("unexpected error \(error)")
     }
   }
 
@@ -169,14 +170,14 @@ final class RouterPowerThrottleTests: XCTestCase {
       id: "/tmp/embed", displayName: "embed", path: "/tmp/embed", sizeBytes: 0, kind: .embedding)
     do {
       _ = try await router.routeEmbeddingAndBegin(model)
-      XCTFail("expected powerPaused")
+      fail("expected powerPaused")
     } catch let error as ModelRouter.RouteError {
       guard case .powerPaused = error else {
-        XCTFail("expected powerPaused, got \(error)")
+        fail("expected powerPaused, got \(error)")
         return
       }
     } catch {
-      XCTFail("unexpected error \(error)")
+      fail("unexpected error \(error)")
     }
   }
 }

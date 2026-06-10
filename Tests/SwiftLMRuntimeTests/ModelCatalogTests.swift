@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMCore
@@ -44,14 +45,14 @@ final class ModelCatalogTests: XCTestCase {
 
     let catalog = ModelCatalog(roots: [tempDir.path])
     let models = catalog.allModels()
-    XCTAssertEqual(models.count, 2)
+    expect(models.count) == 2
 
     let names = Set(models.map(\.displayName))
-    XCTAssertEqual(names, ["Qwen-Tiny", "Qwen-Small"])
+    expect(names) == ["Qwen-Tiny", "Qwen-Small"]
 
     let tiny = models.first { $0.displayName == "Qwen-Tiny" }
-    XCTAssertEqual(tiny?.slug, "mlx-community/Qwen-Tiny")
-    XCTAssertGreaterThanOrEqual(tiny?.sizeBytes ?? 0, 1_024)
+    expect(tiny?.slug) == "mlx-community/Qwen-Tiny"
+    expect(tiny?.sizeBytes ?? 0) >= 1_024
   }
 
   func testIgnoresNonModelDirectories() throws {
@@ -60,19 +61,19 @@ final class ModelCatalogTests: XCTestCase {
     try Data("hi".utf8).write(to: bogus.appendingPathComponent("readme.txt"))
 
     let catalog = ModelCatalog(roots: [tempDir.path])
-    XCTAssertTrue(catalog.allModels().isEmpty)
+    expect(catalog.allModels().isEmpty) == true
   }
 
   func testMissingRootIsIgnored() {
     let catalog = ModelCatalog(roots: ["/definitely/not/there"])
-    XCTAssertTrue(catalog.allModels().isEmpty)
+    expect(catalog.allModels().isEmpty) == true
   }
 
   func testSortedByDisplayName() throws {
     try makeFakeModel(publisher: "mlx-community", name: "Zeta", sizeBytes: 1)
     try makeFakeModel(publisher: "mlx-community", name: "Alpha", sizeBytes: 1)
     let models = ModelCatalog(roots: [tempDir.path]).allModels()
-    XCTAssertEqual(models.map(\.displayName), ["Alpha", "Zeta"])
+    expect(models.map(\.displayName)) == ["Alpha", "Zeta"]
   }
 
   // Regression: when the same model lives in both the LM Studio
@@ -96,8 +97,8 @@ final class ModelCatalogTests: XCTestCase {
 
     let catalog = ModelCatalog(roots: [tempDir.path])
     let models = catalog.allModels()
-    XCTAssertEqual(models.count, 1, "should dedup duplicate slug across roots")
-    XCTAssertGreaterThanOrEqual(models.first?.sizeBytes ?? 0, 4_096, "kept the larger entry")
+    expect(models.count) == 1
+    expect(models.first?.sizeBytes ?? 0) >= 4_096
   }
 
   // Regression: the HF cache stores models at
@@ -119,8 +120,8 @@ final class ModelCatalogTests: XCTestCase {
 
     let catalog = ModelCatalog(roots: [hub.path])
     let models = catalog.allModels()
-    XCTAssertEqual(models.count, 1)
-    XCTAssertEqual(models.first?.displayName, "Qwen3.5-4B-MLX-4bit")
-    XCTAssertEqual(models.first?.slug, "mlx-community/Qwen3.5-4B-MLX-4bit")
+    expect(models.count) == 1
+    expect(models.first?.displayName) == "Qwen3.5-4B-MLX-4bit"
+    expect(models.first?.slug) == "mlx-community/Qwen3.5-4B-MLX-4bit"
   }
 }

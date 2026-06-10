@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMRuntime
@@ -113,10 +114,10 @@ final class BenchOrchestratorTests: XCTestCase {
     let backend = FakeBackend()
     let orch = BenchOrchestrator(config: cfg, backend: backend)
     let (done, failed) = await orch.run()
-    XCTAssertEqual(done, 6)
-    XCTAssertEqual(failed, 0)
-    XCTAssertEqual(backend.loaded, ["m1", "m2"])
-    XCTAssertEqual(backend.calls.count, 6)
+    expect(done) == 6
+    expect(failed) == 0
+    expect(backend.loaded) == ["m1", "m2"]
+    expect(backend.calls.count) == 6
   }
 
   func testSkipsExistingResults() async throws {
@@ -142,9 +143,9 @@ final class BenchOrchestratorTests: XCTestCase {
     let backend = FakeBackend()
     let orch = BenchOrchestrator(config: cfg, backend: backend)
     let (done, failed) = await orch.run()
-    XCTAssertEqual(done, 0)
-    XCTAssertEqual(failed, 0)
-    XCTAssertTrue(backend.calls.isEmpty)
+    expect(done) == 0
+    expect(failed) == 0
+    expect(backend.calls.isEmpty) == true
   }
 
   func testLoadFailureSkipsCellsForThatModelOnly() async throws {
@@ -160,7 +161,7 @@ final class BenchOrchestratorTests: XCTestCase {
     backend.failModelID = "broken"
     let orch = BenchOrchestrator(config: cfg, backend: backend)
     let (done, failed) = await orch.run()
-    XCTAssertEqual(done, 1)
-    XCTAssertEqual(failed, 1)
+    expect(done) == 1
+    expect(failed) == 1
   }
 }

@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMRuntime
@@ -17,20 +18,20 @@ final class HeadroomPolicyTests: XCTestCase {
     // 100 available, load needs 40, keep 20 free -> 60 remains, nothing to free.
     let free = HeadroomPolicy.bytesToFree(
       availableBytes: 100 * gb, needing: 40 * gb, reserveBytes: 20 * gb)
-    XCTAssertEqual(free, 0)
+    expect(free) == 0
   }
 
   func testFreeNeededWhenLoadWouldBreachReserve() {
     // 50 available, load needs 40, keep 20 free -> short by 10.
     let free = HeadroomPolicy.bytesToFree(
       availableBytes: 50 * gb, needing: 40 * gb, reserveBytes: 20 * gb)
-    XCTAssertEqual(free, 10 * gb)
+    expect(free) == 10 * gb
   }
 
   func testNeverNegative() {
     let free = HeadroomPolicy.bytesToFree(
       availableBytes: 200 * gb, needing: 1 * gb, reserveBytes: 20 * gb)
-    XCTAssertEqual(free, 0)
+    expect(free) == 0
   }
 }
 
@@ -39,7 +40,7 @@ final class EvictionPolicyTests: XCTestCase {
 
   func testNothingToFreeReturnsEmpty() {
     let plan = EvictionPolicy.planEvictionToFree(candidates: [], bytesToFree: 0)
-    XCTAssertTrue(plan.isEmpty)
+    expect(plan.isEmpty) == true
   }
 
   func testEvictsOldestIdleFirst() {
@@ -52,7 +53,7 @@ final class EvictionPolicyTests: XCTestCase {
       lastUsed: now.addingTimeInterval(-600), inFlightRequests: 0)
     // Need to free 10 GB. The oldest idle model alone (A, 20 GB) covers it.
     let plan = EvictionPolicy.planEvictionToFree(candidates: [b, a], bytesToFree: 10 * gb)
-    XCTAssertEqual(plan, ["A"])
+    expect(plan) == ["A"]
   }
 
   func testNeverEvictsBusyModels() {
@@ -65,7 +66,7 @@ final class EvictionPolicyTests: XCTestCase {
       lastUsed: now.addingTimeInterval(-60), inFlightRequests: 0)
     let plan = EvictionPolicy.planEvictionToFree(
       candidates: [busy, idleSmall], bytesToFree: 5 * gb)
-    XCTAssertEqual(plan, ["idle"])
+    expect(plan) == ["idle"]
   }
 
   func testReturnsAllIdleWhenInsufficient() {
@@ -78,7 +79,7 @@ final class EvictionPolicyTests: XCTestCase {
     // Need 40 GB but only the 10 GB idle model can move. Return it anyway so the
     // caller unloads it and re-measures.
     let plan = EvictionPolicy.planEvictionToFree(candidates: [busy, idle], bytesToFree: 40 * gb)
-    XCTAssertEqual(plan, ["idle"])
+    expect(plan) == ["idle"]
   }
 
   func testEvictsMultipleIfNeeded() {
@@ -91,7 +92,7 @@ final class EvictionPolicyTests: XCTestCase {
       lastUsed: now.addingTimeInterval(-1_800), inFlightRequests: 0)
     // Need 15 GB. One model frees 10, so both are needed, oldest first.
     let plan = EvictionPolicy.planEvictionToFree(candidates: [b, a], bytesToFree: 15 * gb)
-    XCTAssertEqual(plan, ["A", "B"])
+    expect(plan) == ["A", "B"]
   }
 
   func testEvictsChatBeforeEmbeddingWhenBothIdle() {
@@ -104,6 +105,6 @@ final class EvictionPolicyTests: XCTestCase {
       lastUsed: now.addingTimeInterval(-3_600), inFlightRequests: 0, isEmbedding: true)
     // Need 30 GB. Chat goes first even though it is older than the embedding cutoff.
     let plan = EvictionPolicy.planEvictionToFree(candidates: [embed, chat], bytesToFree: 30 * gb)
-    XCTAssertEqual(plan, ["chat"])
+    expect(plan) == ["chat"]
   }
 }

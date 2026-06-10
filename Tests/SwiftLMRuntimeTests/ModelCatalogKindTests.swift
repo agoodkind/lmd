@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMCore
@@ -37,7 +38,7 @@ final class ModelCatalogKindTests: XCTestCase {
     try writeConfig(dir, value: CatalogConfigFixture(modelType: "llama"))
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "m", slug: nil, fileManager: .default)
-    XCTAssertEqual(kind, .embedding)
+    expect(kind) == .embedding
   }
 
   func testModulesJsonImpliesEmbedding() throws {
@@ -46,7 +47,7 @@ final class ModelCatalogKindTests: XCTestCase {
     try writeConfig(dir, value: CatalogConfigFixture(modelType: "llama"))
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "m", slug: nil, fileManager: .default)
-    XCTAssertEqual(kind, .embedding)
+    expect(kind) == .embedding
   }
 
   func testArchitectureBertImpliesEmbedding() throws {
@@ -60,7 +61,7 @@ final class ModelCatalogKindTests: XCTestCase {
     )
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "m", slug: nil, fileManager: .default)
-    XCTAssertEqual(kind, .embedding)
+    expect(kind) == .embedding
   }
 
   func testSnowflakeArcticArchitectureImpliesEmbedding() throws {
@@ -71,7 +72,7 @@ final class ModelCatalogKindTests: XCTestCase {
     )
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "m", slug: nil, fileManager: .default)
-    XCTAssertEqual(kind, .embedding)
+    expect(kind) == .embedding
   }
 
   func testNVIDIAMistralBidirectionalArchitectureImpliesEmbedding() throws {
@@ -89,7 +90,7 @@ final class ModelCatalogKindTests: XCTestCase {
       slug: "nvidia/NV-EmbedCode-7b-v1",
       fileManager: .default
     )
-    XCTAssertEqual(kind, .embedding)
+    expect(kind) == .embedding
   }
 
   func testModelTypeBertImpliesEmbedding() throws {
@@ -97,7 +98,7 @@ final class ModelCatalogKindTests: XCTestCase {
     try writeConfig(dir, value: CatalogConfigFixture(modelType: "bert"))
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "m", slug: nil, fileManager: .default)
-    XCTAssertEqual(kind, .embedding)
+    expect(kind) == .embedding
   }
 
   func testLlamaStaysChat() throws {
@@ -111,7 +112,7 @@ final class ModelCatalogKindTests: XCTestCase {
     )
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "qwen", slug: nil, fileManager: .default)
-    XCTAssertEqual(kind, .chat)
+    expect(kind) == .chat
   }
 
   func testNameHeuristicEmbed() throws {
@@ -119,7 +120,7 @@ final class ModelCatalogKindTests: XCTestCase {
     try writeConfig(dir, value: CatalogConfigFixture(modelType: "custom"))
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "foo-embed-bar", slug: nil, fileManager: .default)
-    XCTAssertEqual(kind, .embedding)
+    expect(kind) == .embedding
   }
 
   func testNameHeuristicBge() throws {
@@ -127,7 +128,7 @@ final class ModelCatalogKindTests: XCTestCase {
     try writeConfig(dir, value: CatalogConfigFixture(modelType: "custom"))
     let kind = ModelCatalog.inferModelKind(
       modelDir: dir, displayName: "model-x", slug: "org/bge-small", fileManager: .default)
-    XCTAssertEqual(kind, .embedding)
+    expect(kind) == .embedding
   }
 }
 

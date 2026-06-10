@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMRuntime
@@ -26,7 +27,7 @@ final class JSONEnforcementTests: XCTestCase {
       "model": "x",
       "messages": [["role": "user", "content": "hi"]],
     ])
-    XCTAssertNil(injectJSONInstructionIfNeeded(&json))
+    expect(injectJSONInstructionIfNeeded(&json)) == nil
   }
 
   func testResponseFormatTextIsNoOp() {
@@ -35,7 +36,7 @@ final class JSONEnforcementTests: XCTestCase {
       "messages": [["role": "user", "content": "hi"]],
       "response_format": ["type": "text"],
     ])
-    XCTAssertNil(injectJSONInstructionIfNeeded(&json))
+    expect(injectJSONInstructionIfNeeded(&json)) == nil
   }
 
   func testSystemMentioningJSONStillGetsJSONSchemaInstruction() {
@@ -59,14 +60,14 @@ final class JSONEnforcementTests: XCTestCase {
       ],
     ])
     let out = injectJSONInstructionIfNeeded(&json)
-    XCTAssertNotNil(out)
+    expect(out) != nil
 
     let parsed = decode(out)
     let messages = parsed?["messages"] as? [[String: Any]] ?? []
     let sysContent = (messages.first?["content"] as? String) ?? ""
-    XCTAssertTrue(sysContent.contains("Return JSON only."))
-    XCTAssertTrue(sysContent.contains("You MUST respond with a single valid JSON value."))
-    XCTAssertTrue(sysContent.contains("conform to this JSON schema"))
+    expect(sysContent.contains("Return JSON only.")) == true
+    expect(sysContent.contains("You MUST respond with a single valid JSON value.")) == true
+    expect(sysContent.contains("conform to this JSON schema")) == true
   }
 
   // MARK: - Injection paths
@@ -78,15 +79,15 @@ final class JSONEnforcementTests: XCTestCase {
       "response_format": ["type": "json_object"],
     ])
     let out = injectJSONInstructionIfNeeded(&json)
-    XCTAssertNotNil(out)
+    expect(out) != nil
 
     let parsed = decode(out)
     let messages = parsed?["messages"] as? [[String: Any]] ?? []
-    XCTAssertEqual(messages.count, 2)
-    XCTAssertEqual(messages.first?["role"] as? String, "system")
+    expect(messages.count) == 2
+    expect(messages.first?["role"] as? String) == "system"
     let content = (messages.first?["content"] as? String) ?? ""
-    XCTAssertTrue(content.contains("JSON"))
-    XCTAssertEqual(messages.last?["role"] as? String, "user")
+    expect(content.contains("JSON")) == true
+    expect(messages.last?["role"] as? String) == "user"
   }
 
   func testJSONObjectAppendsToExistingSystemMessage() {
@@ -99,14 +100,14 @@ final class JSONEnforcementTests: XCTestCase {
       "response_format": ["type": "json_object"],
     ])
     let out = injectJSONInstructionIfNeeded(&json)
-    XCTAssertNotNil(out)
+    expect(out) != nil
 
     let parsed = decode(out)
     let messages = parsed?["messages"] as? [[String: Any]] ?? []
-    XCTAssertEqual(messages.count, 2)
+    expect(messages.count) == 2
     let sysContent = (messages.first?["content"] as? String) ?? ""
-    XCTAssertTrue(sysContent.contains("You are a helpful assistant."))
-    XCTAssertTrue(sysContent.contains("JSON"))
+    expect(sysContent.contains("You are a helpful assistant.")) == true
+    expect(sysContent.contains("JSON")) == true
   }
 
   func testJSONSchemaIncludesSchemaInInstruction() {
@@ -127,15 +128,15 @@ final class JSONEnforcementTests: XCTestCase {
       ],
     ])
     let out = injectJSONInstructionIfNeeded(&json)
-    XCTAssertNotNil(out)
+    expect(out) != nil
 
     let parsed = decode(out)
     let messages = parsed?["messages"] as? [[String: Any]] ?? []
     let sysContent = (messages.first?["content"] as? String) ?? ""
-    XCTAssertTrue(sysContent.contains("conform to this JSON schema"))
+    expect(sysContent.contains("conform to this JSON schema")) == true
     // The schema body is embedded with sorted keys.
-    XCTAssertTrue(sysContent.contains("\"properties\""))
-    XCTAssertTrue(sysContent.contains("\"name\""))
+    expect(sysContent.contains("\"properties\"")) == true
+    expect(sysContent.contains("\"name\"")) == true
   }
 
   func testJSONSchemaWithoutSchemaBodyStillInjectsBaseInstruction() {
@@ -148,12 +149,12 @@ final class JSONEnforcementTests: XCTestCase {
       ],
     ])
     let out = injectJSONInstructionIfNeeded(&json)
-    XCTAssertNotNil(out)
+    expect(out) != nil
     let parsed = decode(out)
     let messages = parsed?["messages"] as? [[String: Any]] ?? []
     let sysContent = (messages.first?["content"] as? String) ?? ""
-    XCTAssertTrue(sysContent.contains("JSON"))
-    XCTAssertFalse(sysContent.contains("conform to this JSON schema"))
+    expect(sysContent.contains("JSON")) == true
+    expect(sysContent.contains("conform to this JSON schema")) == false
   }
 
   func testExactExistingJSONSchemaInstructionIsNoOp() {
@@ -175,12 +176,12 @@ final class JSONEnforcementTests: XCTestCase {
     ])
     let first = injectJSONInstructionIfNeeded(&json)
     let parsed = decode(first)
-    XCTAssertNotNil(parsed)
+    expect(parsed) != nil
 
     guard var rewritten = parsed else {
-      XCTFail("expected rewritten payload")
+      fail("expected rewritten payload")
       return
     }
-    XCTAssertNil(injectJSONInstructionIfNeeded(&rewritten))
+    expect(injectJSONInstructionIfNeeded(&rewritten)) == nil
   }
 }

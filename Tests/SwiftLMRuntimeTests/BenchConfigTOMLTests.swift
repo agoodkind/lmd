@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMRuntime
@@ -44,26 +45,26 @@ final class BenchConfigTOMLTests: XCTestCase {
       thinking = true
       """
     let cfg = try loadBenchConfig(fromTOMLText: toml)
-    XCTAssertEqual(cfg.promptsDir, "/tmp/prompts")
-    XCTAssertEqual(cfg.resultsDir, "/tmp/results")
-    XCTAssertEqual(cfg.repoPath, "/repo")
-    XCTAssertEqual(cfg.runLabel, "nightly")
-    XCTAssertFalse(cfg.skipExisting)
-    XCTAssertEqual(cfg.testTimeoutSeconds, 600)
-    XCTAssertEqual(cfg.parallelismPerModel, 2)
+    expect(cfg.promptsDir) == "/tmp/prompts"
+    expect(cfg.resultsDir) == "/tmp/results"
+    expect(cfg.repoPath) == "/repo"
+    expect(cfg.runLabel) == "nightly"
+    expect(cfg.skipExisting) == false
+    expect(cfg.testTimeoutSeconds) == 600
+    expect(cfg.parallelismPerModel) == 2
 
-    XCTAssertEqual(cfg.models.count, 2)
-    XCTAssertEqual(cfg.models[0].id, "qwen3-30b")
-    XCTAssertEqual(cfg.models[0].contextSize, 131_072)
-    XCTAssertEqual(cfg.models[1].id, "qwen3-4b")
-    XCTAssertEqual(cfg.models[1].maxTokensOverride, 4_096)
+    expect(cfg.models.count) == 2
+    expect(cfg.models[0].id) == "qwen3-30b"
+    expect(cfg.models[0].contextSize) == 131_072
+    expect(cfg.models[1].id) == "qwen3-4b"
+    expect(cfg.models[1].maxTokensOverride) == 4_096
 
-    XCTAssertEqual(cfg.variants.count, 2)
-    XCTAssertEqual(cfg.variants[0].name, "review")
-    XCTAssertEqual(cfg.variants[0].promptGlob, "review/*.md")
-    XCTAssertEqual(cfg.variants[0].maxInputBytes, 200_000)
-    XCTAssertFalse(cfg.variants[0].thinking)
-    XCTAssertTrue(cfg.variants[1].thinking)
+    expect(cfg.variants.count) == 2
+    expect(cfg.variants[0].name) == "review"
+    expect(cfg.variants[0].promptGlob) == "review/*.md"
+    expect(cfg.variants[0].maxInputBytes) == 200_000
+    expect(cfg.variants[0].thinking) == false
+    expect(cfg.variants[1].thinking) == true
   }
 
   func testDefaultsAppliedWhenOmitted() throws {
@@ -79,11 +80,11 @@ final class BenchConfigTOMLTests: XCTestCase {
       prompt_glob = "*"
       """
     let cfg = try loadBenchConfig(fromTOMLText: toml)
-    XCTAssertTrue(cfg.skipExisting)  // default true
-    XCTAssertEqual(cfg.testTimeoutSeconds, 900)  // default 900
-    XCTAssertEqual(cfg.parallelismPerModel, 1)  // default 1
-    XCTAssertEqual(cfg.variants[0].maxInputBytes, 300_000)  // default
-    XCTAssertEqual(cfg.variants[0].maxTokens, 8_192)  // default
+    expect(cfg.skipExisting) == true  // default true
+    expect(cfg.testTimeoutSeconds) == 900  // default 900
+    expect(cfg.parallelismPerModel) == 1  // default 1
+    expect(cfg.variants[0].maxInputBytes) == 300_000  // default
+    expect(cfg.variants[0].maxTokens) == 8_192  // default
   }
 
   // MARK: - Error cases
@@ -99,12 +100,14 @@ final class BenchConfigTOMLTests: XCTestCase {
       name = "v"
       prompt_glob = "*"
       """
-    XCTAssertThrowsError(try loadBenchConfig(fromTOMLText: toml)) { err in
-      guard case BenchConfigTOMLError.typeMismatch(let k, _, let got) = err else {
-        return XCTFail("expected typeMismatch, got \(err)")
-      }
-      XCTAssertEqual(k, "prompts_dir")
-      XCTAssertEqual(got, "missing")
+    do {
+      _ = try loadBenchConfig(fromTOMLText: toml)
+      fail("expected typeMismatch")
+    } catch BenchConfigTOMLError.typeMismatch(let k, _, let got) {
+      expect(k) == "prompts_dir"
+      expect(got) == "missing"
+    } catch {
+      fail("expected typeMismatch, got \(error)")
     }
   }
 
@@ -117,9 +120,8 @@ final class BenchConfigTOMLTests: XCTestCase {
       name = "v"
       prompt_glob = "*"
       """
-    XCTAssertThrowsError(try loadBenchConfig(fromTOMLText: toml)) { err in
-      XCTAssertEqual(err as? BenchConfigTOMLError, BenchConfigTOMLError.emptyModels)
-    }
+    expect { try loadBenchConfig(fromTOMLText: toml) }
+      .to(throwError(BenchConfigTOMLError.emptyModels))
   }
 
   func testSingleBracketTablesRejected() {
@@ -130,7 +132,7 @@ final class BenchConfigTOMLTests: XCTestCase {
       [extra]
       foo = 1
       """
-    XCTAssertThrowsError(try loadBenchConfig(fromTOMLText: toml))
+    expect { try loadBenchConfig(fromTOMLText: toml) }.to(throwError())
   }
 
   func testDuplicateKeyRejected() {
@@ -146,10 +148,16 @@ final class BenchConfigTOMLTests: XCTestCase {
       name = "v"
       prompt_glob = "*"
       """
-    XCTAssertThrowsError(try loadBenchConfig(fromTOMLText: toml)) { err in
-      guard case BenchConfigTOMLError.duplicateKey = err else {
-        return XCTFail("expected duplicateKey, got \(err)")
+    do {
+      _ = try loadBenchConfig(fromTOMLText: toml)
+      fail("expected duplicateKey")
+    } catch let error as BenchConfigTOMLError {
+      if case .duplicateKey = error {
+        return
       }
+      fail("expected duplicateKey, got \(error)")
+    } catch {
+      fail("expected duplicateKey, got \(error)")
     }
   }
 
@@ -169,7 +177,7 @@ final class BenchConfigTOMLTests: XCTestCase {
       prompt_glob = "*"
       """
     let cfg = try loadBenchConfig(fromTOMLText: toml)
-    XCTAssertEqual(cfg.promptsDir, "/p")
+    expect(cfg.promptsDir) == "/p"
   }
 
   func testUnderscoreNumericSeparators() throws {
@@ -187,8 +195,8 @@ final class BenchConfigTOMLTests: XCTestCase {
       prompt_glob = "*"
       """
     let cfg = try loadBenchConfig(fromTOMLText: toml)
-    XCTAssertEqual(cfg.testTimeoutSeconds, 1_800)
-    XCTAssertEqual(cfg.models[0].contextSize, 262_144)
+    expect(cfg.testTimeoutSeconds) == 1_800
+    expect(cfg.models[0].contextSize) == 262_144
   }
 
   func testEscapesInStrings() throws {
@@ -204,7 +212,7 @@ final class BenchConfigTOMLTests: XCTestCase {
       prompt_glob = "foo\\\"bar"
       """
     let cfg = try loadBenchConfig(fromTOMLText: toml)
-    XCTAssertEqual(cfg.promptsDir, "/a\nb")
-    XCTAssertEqual(cfg.variants[0].promptGlob, "foo\"bar")
+    expect(cfg.promptsDir) == "/a\nb"
+    expect(cfg.variants[0].promptGlob) == "foo\"bar"
   }
 }

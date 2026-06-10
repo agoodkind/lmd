@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMRuntime
@@ -51,7 +52,7 @@ final class BenchConfigTests: XCTestCase {
     )
     let matrix = cfg.expandMatrix()
     // 2 models x (2 review + 1 chat) = 6 cells
-    XCTAssertEqual(matrix.count, 6)
+    expect(matrix.count) == 6
   }
 
   func testGlobExcludesUnmatchedFiles() throws {
@@ -66,8 +67,8 @@ final class BenchConfigTests: XCTestCase {
       variants: [BenchVariant(name: "review", promptGlob: "review-*.txt")]
     )
     let matrix = cfg.expandMatrix()
-    XCTAssertEqual(matrix.count, 1)
-    XCTAssertEqual(matrix.first?.promptFilename, "review-security.txt")
+    expect(matrix.count) == 1
+    expect(matrix.first?.promptFilename) == "review-security.txt"
   }
 
   func testEmptyPromptsDirYieldsEmptyMatrix() {
@@ -77,7 +78,7 @@ final class BenchConfigTests: XCTestCase {
       models: [BenchModelSpec(id: "a")],
       variants: [BenchVariant(name: "review", promptGlob: "*.txt")]
     )
-    XCTAssertTrue(cfg.expandMatrix().isEmpty)
+    expect(cfg.expandMatrix().isEmpty) == true
   }
 
   // MARK: - Cell paths
@@ -89,10 +90,7 @@ final class BenchConfigTests: XCTestCase {
       promptFilename: "review-security.txt"
     )
     let path = cell.resultPath(under: "/tmp/out")
-    XCTAssertEqual(
-      path,
-      "/tmp/out/mlx-community_Qwen3-Coder-30B/review-security.json"
-    )
+    expect(path) == "/tmp/out/mlx-community_Qwen3-Coder-30B/review-security.json"
   }
 
   func testResultPathStripsTxtExtension() {
@@ -102,9 +100,6 @@ final class BenchConfigTests: XCTestCase {
       promptFilename: "hello.world.txt"
     )
     // Only the final .txt should be stripped.
-    XCTAssertEqual(
-      cell.resultPath(under: "/r"),
-      "/r/m/hello.world.json"
-    )
+    expect(cell.resultPath(under: "/r")) == "/r/m/hello.world.json"
   }
 }

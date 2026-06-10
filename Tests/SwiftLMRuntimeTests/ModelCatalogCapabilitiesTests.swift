@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMCore
@@ -43,10 +44,8 @@ final class ModelCatalogCapabilitiesTests: XCTestCase {
       fileManager: .default
     )
 
-    XCTAssertEqual(
-      capabilities,
-      ModelCapabilities(text: true, vision: true, video: true, videoSamplingFPS: 2.0)
-    )
+    expect(capabilities)
+      == ModelCapabilities(text: true, vision: true, video: true, videoSamplingFPS: 2.0)
   }
 
   func testQwen25VLWithoutVideoTokenAdvertisesVisionOnly() throws {
@@ -61,7 +60,7 @@ final class ModelCatalogCapabilitiesTests: XCTestCase {
       fileManager: .default
     )
 
-    XCTAssertEqual(capabilities, ModelCapabilities(text: true, vision: true, video: false))
+    expect(capabilities) == ModelCapabilities(text: true, vision: true, video: false)
   }
 
   func testEmbeddingKindRemainsTextOnlyEvenWithVideoMetadata() throws {
@@ -80,7 +79,7 @@ final class ModelCatalogCapabilitiesTests: XCTestCase {
       fileManager: .default
     )
 
-    XCTAssertEqual(capabilities, .textOnly)
+    expect(capabilities) == .textOnly
   }
 
   func testQwen25VLDeclaresTwoFPSSamplingRate() throws {
@@ -99,7 +98,7 @@ final class ModelCatalogCapabilitiesTests: XCTestCase {
       fileManager: .default
     )
 
-    XCTAssertEqual(capabilities.videoSamplingFPS, 2.0)
+    expect(capabilities.videoSamplingFPS) == 2.0
   }
 
   func testCatalogAttachesDetectedCapabilitiesToDescriptor() throws {
@@ -120,10 +119,8 @@ final class ModelCatalogCapabilitiesTests: XCTestCase {
     let root = modelDir.deletingLastPathComponent().deletingLastPathComponent()
     let models = ModelCatalog(roots: [root.path]).allModels()
 
-    XCTAssertEqual(
-      models.first?.capabilities,
-      ModelCapabilities(text: true, vision: true, video: true, videoSamplingFPS: 2.0)
-    )
+    expect(models.first?.capabilities)
+      == ModelCapabilities(text: true, vision: true, video: true, videoSamplingFPS: 2.0)
   }
 
   private func write(filename: String, directory: URL? = nil, json: String) throws {

@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMRuntime
@@ -13,17 +14,17 @@ import XCTest
 final class FanCurveTests: XCTestCase {
   func testTempBelowCurveReturnsFloor() {
     let rpm = rpmForTemp(40, curve: FanCoordinatorConfig.defaultCurve)
-    XCTAssertEqual(rpm, 2_500)
+    expect(rpm) == 2_500
   }
 
   func testTempAboveCurveReturnsCeiling() {
     let rpm = rpmForTemp(99, curve: FanCoordinatorConfig.defaultCurve)
-    XCTAssertEqual(rpm, 10_000)
+    expect(rpm) == 10_000
   }
 
   func testMidCurveInterpolates() {
     let rpm = rpmForTemp(57.5, curve: FanCoordinatorConfig.defaultCurve)
-    XCTAssertEqual(rpm, 3_000, accuracy: 50)
+    expect(Double(rpm)) == (expected: 3_000.0, delta: 50.0)
   }
 }
 
@@ -33,7 +34,7 @@ final class ActivityFloorTests: XCTestCase {
       cpuPercent: 0, gpuPercent: 85,
       pressureFreePct: 100, llmActive: false
     )
-    XCTAssertGreaterThanOrEqual(floor, 4_500)
+    expect(floor) >= 4_500
   }
 
   func testPressureLowRaisesFloor() {
@@ -41,7 +42,7 @@ final class ActivityFloorTests: XCTestCase {
       cpuPercent: 0, gpuPercent: 0,
       pressureFreePct: 5, llmActive: false
     )
-    XCTAssertGreaterThanOrEqual(floor, 4_500)
+    expect(floor) >= 4_500
   }
 
   func testLLMActiveRaisesFloorEvenAtLowGPU() {
@@ -53,7 +54,7 @@ final class ActivityFloorTests: XCTestCase {
       cpuPercent: 0, gpuPercent: 0,
       pressureFreePct: 100, llmActive: true
     )
-    XCTAssertGreaterThan(withLLM, baseline)
+    expect(withLLM) > baseline
   }
 
   func testIdleReturnsZero() {
@@ -61,7 +62,7 @@ final class ActivityFloorTests: XCTestCase {
       cpuPercent: 0, gpuPercent: 0,
       pressureFreePct: 100, llmActive: false
     )
-    XCTAssertEqual(floor, 0)
+    expect(floor) == 0
   }
 }
 
@@ -137,13 +138,13 @@ final class FanCoordinatorStateTests: XCTestCase {
   func testIdleStaysIdleWithoutLLM() async throws {
     let (coord, _) = makeCoordinator()
     try await coord.apply(.init(cpuTempC: 40, gpuTempC: 42, llmLoaded: false))
-    XCTAssertEqual(coord.state, .idle)
+    expect(coord.state) == .idle
   }
 
   func testIdleTransitionsToActiveWhenLLMLoaded() async throws {
     let (coord, _) = makeCoordinator()
     try await coord.apply(.init(cpuTempC: 60, gpuTempC: 60, llmLoaded: true))
-    XCTAssertEqual(coord.state, .active)
+    expect(coord.state) == .active
   }
 
   func testActiveToCoolingWhenLLMUnloaded() async throws {
@@ -153,13 +154,13 @@ final class FanCoordinatorStateTests: XCTestCase {
         cpuTempC: 80, gpuTempC: 85,
         cpuPercent: 30, gpuPercent: 90,
         pressureFreePct: 50, llmLoaded: true))
-    XCTAssertEqual(coord.state, .active)
+    expect(coord.state) == .active
     try await coord.apply(
       .init(
         cpuTempC: 80, gpuTempC: 85,
         cpuPercent: 5, gpuPercent: 0,
         pressureFreePct: 50, llmLoaded: false))
-    XCTAssertEqual(coord.state, .cooling)
+    expect(coord.state) == .cooling
   }
 
   /// Active ramp interpolates from takeover baseline toward the temperature-
@@ -190,7 +191,7 @@ final class FanCoordinatorStateTests: XCTestCase {
       now: t0.addingTimeInterval(5)
     )
     // At 50% ramp: (4000 + 5800) / 2 = 4900.
-    XCTAssertEqual(mock.lastAsyncRpm[0] ?? 0, 4_900, accuracy: 50)
+    expect(Double(mock.lastAsyncRpm[0] ?? 0)) == (expected: 4_900.0, delta: 50.0)
   }
 
   func testActiveFullBlastAtSmoothedTemp() async throws {
@@ -209,7 +210,7 @@ final class FanCoordinatorStateTests: XCTestCase {
       FanInputs(cpuTempC: 95, gpuTempC: 95, llmLoaded: true),
       now: Date()
     )
-    XCTAssertEqual(mock.lastAsyncRpm[0], 10_000)
+    expect(mock.lastAsyncRpm[0]) == 10_000
   }
 
   /// 75°C (the new default full-blast threshold) should trip full-blast during
@@ -229,7 +230,7 @@ final class FanCoordinatorStateTests: XCTestCase {
       FanInputs(cpuTempC: 75, gpuTempC: 75, llmLoaded: true),
       now: Date()
     )
-    XCTAssertEqual(mock.lastAsyncRpm[0], 10_000)
+    expect(mock.lastAsyncRpm[0]) == 10_000
   }
 
   /// Failing SMC max read must not prevent the coordinator from writing a
@@ -259,7 +260,7 @@ final class FanCoordinatorStateTests: XCTestCase {
       now: base.addingTimeInterval(20)
     )
     // gpu=90% with llm active → floor 5800; curve(50°C) = 2500; steady = 5800.
-    XCTAssertEqual(mock.lastAsyncRpm[0] ?? 0, 5_800, accuracy: 50)
+    expect(Double(mock.lastAsyncRpm[0] ?? 0)) == (expected: 5_800.0, delta: 50.0)
   }
 
   /// After LLM unloads, fans hold their active RPM for holdSeconds before
@@ -291,21 +292,21 @@ final class FanCoordinatorStateTests: XCTestCase {
       now: t0.addingTimeInterval(1)
     )
     let activeRpm = mock.lastAsyncRpm[0] ?? 0
-    XCTAssertGreaterThan(activeRpm, 4_000)
+    expect(activeRpm) > 4_000
 
     // Unload LLM: enters .cooling, starts hold phase.
     try await coord.apply(
       FanInputs(cpuTempC: 55, gpuTempC: 55, gpuPercent: 0, llmLoaded: false),
       now: t0.addingTimeInterval(2)
     )
-    XCTAssertEqual(coord.state, .cooling)
+    expect(coord.state) == .cooling
 
     // Mid-hold (45s into 90s hold): still holding activeRpm.
     try await coord.apply(
       FanInputs(cpuTempC: 55, gpuTempC: 55, gpuPercent: 0, llmLoaded: false),
       now: t0.addingTimeInterval(45)
     )
-    XCTAssertEqual(mock.lastAsyncRpm[0] ?? 0, activeRpm)
+    expect(mock.lastAsyncRpm[0] ?? 0) == activeRpm
   }
 
   /// After the hold window elapses, fans ramp down toward the cooling steady
@@ -338,7 +339,7 @@ final class FanCoordinatorStateTests: XCTestCase {
       now: t0.addingTimeInterval(1)
     )
     let activeRpm = mock.lastAsyncRpm[0] ?? 0
-    XCTAssertGreaterThan(activeRpm, 4_000)
+    expect(activeRpm) > 4_000
 
     try await coord.apply(
       FanInputs(cpuTempC: 55, gpuTempC: 55, gpuPercent: 0, llmLoaded: false),
@@ -352,7 +353,7 @@ final class FanCoordinatorStateTests: XCTestCase {
       now: t0.addingTimeInterval(22)
     )
     let midRampRpm = mock.lastAsyncRpm[0] ?? 0
-    XCTAssertLessThan(midRampRpm, activeRpm)
+    expect(midRampRpm) < activeRpm
 
     // Past ramp end (t0+40): at steady cooling target.
     try await coord.apply(
@@ -360,7 +361,7 @@ final class FanCoordinatorStateTests: XCTestCase {
       now: t0.addingTimeInterval(40)
     )
     let finalRpm = mock.lastAsyncRpm[0] ?? 0
-    XCTAssertLessThan(finalRpm, midRampRpm)
+    expect(finalRpm) < midRampRpm
   }
 
   /// A failed baseline set during takeover is logged but does not drop the fan
@@ -406,8 +407,8 @@ final class FanCoordinatorStateTests: XCTestCase {
       now: t0.addingTimeInterval(1)
     )
     // Both fans stay in the active set; the tick loop writes to both.
-    XCTAssertGreaterThan(mock.lastAsyncRpm[0] ?? 0, 0)
-    XCTAssertGreaterThan(mock.lastAsyncRpm[1] ?? 0, 0)
-    XCTAssertEqual(coord.state, .active)
+    expect(mock.lastAsyncRpm[0] ?? 0) > 0
+    expect(mock.lastAsyncRpm[1] ?? 0) > 0
+    expect(coord.state) == .active
   }
 }
