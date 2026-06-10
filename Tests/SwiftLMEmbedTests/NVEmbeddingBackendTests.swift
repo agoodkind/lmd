@@ -7,6 +7,7 @@
 //
 
 import MLX
+import Nimble
 import SwiftLMCore
 import XCTest
 
@@ -25,17 +26,17 @@ final class NVEmbeddingBackendTests: XCTestCase {
     let family = try EmbeddingBackendSelector.select(descriptor: descriptor)
 
     guard case .nvidiaMistralBidirectional(let metadata) = family else {
-      XCTFail("expected NVIDIA backend, got \(family)")
+      fail("expected NVIDIA backend, got \(family)")
       return
     }
-    XCTAssertEqual(metadata.modelType, "mistralbidirectional")
-    XCTAssertEqual(metadata.architecture, "MistralBiDirectionalModel")
-    XCTAssertEqual(metadata.embeddingDimension, 4_096)
-    XCTAssertEqual(metadata.maxSequenceLength, 4_096)
-    XCTAssertEqual(metadata.poolingMode, .meanTokens)
-    XCTAssertTrue(metadata.includePrompt)
-    XCTAssertEqual(metadata.padTokenID, 2)
-    XCTAssertEqual(metadata.paddingSide, .left)
+    expect(metadata.modelType) == "mistralbidirectional"
+    expect(metadata.architecture) == "MistralBiDirectionalModel"
+    expect(metadata.embeddingDimension) == 4_096
+    expect(metadata.maxSequenceLength) == 4_096
+    expect(metadata.poolingMode) == .meanTokens
+    expect(metadata.includePrompt) == true
+    expect(metadata.padTokenID) == 2
+    expect(metadata.paddingSide) == .left
   }
 
   func testExistingMLXEmbedderMetadataSelectsMLXBackend() throws {
@@ -49,7 +50,7 @@ final class NVEmbeddingBackendTests: XCTestCase {
 
     let family = try EmbeddingBackendSelector.select(descriptor: descriptor)
 
-    XCTAssertEqual(family, .mlx)
+    expect(family) == .mlx
   }
 
   func testUnsupportedEmbeddingMetadataFailsClearly() throws {
@@ -61,21 +62,28 @@ final class NVEmbeddingBackendTests: XCTestCase {
     )
     let descriptor = descriptor(path: modelDirectory)
 
-    XCTAssertThrowsError(try EmbeddingBackendSelector.select(descriptor: descriptor)) { error in
-      guard
-        case EmbeddingBackendSelectionError.unsupportedEmbeddingBackend(
-          let modelID,
-          let modelType,
-          let architectures
-        ) = error
-      else {
-        XCTFail("unexpected error \(error)")
-        return
-      }
-      XCTAssertEqual(modelID, descriptor.id)
-      XCTAssertEqual(modelType, "custom_embed")
-      XCTAssertEqual(architectures, ["CustomEmbeddingModel"])
-      XCTAssertTrue(String(describing: error).contains("unsupported embedding backend"))
+    do {
+      _ = try EmbeddingBackendSelector.select(descriptor: descriptor)
+      fail("expected unsupported embedding backend")
+    } catch EmbeddingBackendSelectionError.unsupportedEmbeddingBackend(
+      let modelID,
+      let modelType,
+      let architectures
+    ) {
+      expect(modelID) == descriptor.id
+      expect(modelType) == "custom_embed"
+      expect(architectures) == ["CustomEmbeddingModel"]
+      expect(
+        String(
+          describing: EmbeddingBackendSelectionError.unsupportedEmbeddingBackend(
+            modelID: modelID,
+            modelType: modelType,
+            architectures: architectures
+          )
+        ).contains("unsupported embedding backend")
+      ) == true
+    } catch {
+      fail("unexpected error \(error)")
     }
   }
 
@@ -91,12 +99,12 @@ final class NVEmbeddingBackendTests: XCTestCase {
       modelDir: modelDirectory
     )
 
-    XCTAssertEqual(metadata.embeddingDimension, 128)
-    XCTAssertEqual(metadata.maxSequenceLength, 512)
-    XCTAssertEqual(metadata.poolingMode, .meanTokens)
-    XCTAssertFalse(metadata.includePrompt)
-    XCTAssertEqual(metadata.padTokenID, 0)
-    XCTAssertEqual(metadata.paddingSide, .right)
+    expect(metadata.embeddingDimension) == 128
+    expect(metadata.maxSequenceLength) == 512
+    expect(metadata.poolingMode) == .meanTokens
+    expect(metadata.includePrompt) == false
+    expect(metadata.padTokenID) == 0
+    expect(metadata.paddingSide) == .right
   }
 
   func testMeanPoolingExcludesPaddingAndNormalizes() throws {
@@ -122,7 +130,7 @@ final class NVEmbeddingBackendTests: XCTestCase {
       )
       pooled.eval()
 
-      XCTAssertEqual(pooled.shape, [2, 2])
+      expect(pooled.shape) == [2, 2]
       assertVector(pooled[0].asArray(Float.self), approximately: [0.6, 0.8])
       assertVector(pooled[1].asArray(Float.self), approximately: [1.0, 0.0])
     }
@@ -155,11 +163,11 @@ final class NVEmbeddingBackendTests: XCTestCase {
       )
       pooled.eval()
 
-      XCTAssertEqual(pooled.shape, [2, 8])
-      XCTAssertEqual(pooled[0].asArray(Float.self).count, 8)
-      XCTAssertEqual(pooled[1].asArray(Float.self).count, 8)
-      XCTAssertEqual(l2Norm(pooled[0].asArray(Float.self)), 1.0, accuracy: 0.0001)
-      XCTAssertEqual(l2Norm(pooled[1].asArray(Float.self)), 1.0, accuracy: 0.0001)
+      expect(pooled.shape) == [2, 8]
+      expect(pooled[0].asArray(Float.self).count) == 8
+      expect(pooled[1].asArray(Float.self).count) == 8
+      expect(self.l2Norm(pooled[0].asArray(Float.self))) == (expected: 1.0, delta: 0.0001)
+      expect(self.l2Norm(pooled[1].asArray(Float.self))) == (expected: 1.0, delta: 0.0001)
     }
   }
 
@@ -284,12 +292,12 @@ final class NVEmbeddingBackendTests: XCTestCase {
   private func assertVector(
     _ actual: [Float],
     approximately expected: [Float],
-    file: StaticString = #filePath,
+    file: String = #filePath,
     line: UInt = #line
   ) {
-    XCTAssertEqual(actual.count, expected.count, file: file, line: line)
+    expect(file: file, line: line, actual.count) == expected.count
     for (actualValue, expectedValue) in zip(actual, expected) {
-      XCTAssertEqual(actualValue, expectedValue, accuracy: 0.0001, file: file, line: line)
+      expect(file: file, line: line, actualValue) == (expected: expectedValue, delta: 0.0001)
     }
   }
 

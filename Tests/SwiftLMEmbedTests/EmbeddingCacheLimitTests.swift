@@ -16,6 +16,7 @@
 //  test environment.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMEmbed
@@ -26,7 +27,7 @@ final class EmbeddingCacheLimitTests: XCTestCase {
   /// same change so the rationale stays in sync with the runtime.
   func testCacheLimitBytesContract() {
     let expected = 2 * 1_024 * 1_024 * 1_024
-    XCTAssertEqual(NVEmbeddingBackend.cacheLimitBytes, expected)
-    XCTAssertEqual(MLXEmbeddingBackend.cacheLimitBytes, expected)
+    expect(NVEmbeddingBackend.cacheLimitBytes) == expected
+    expect(MLXEmbeddingBackend.cacheLimitBytes) == expected
   }
 }
