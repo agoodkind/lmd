@@ -1,3 +1,4 @@
+import Nimble
 import SwiftLMHostProtocol
 import XCTest
 
@@ -10,13 +11,13 @@ final class HostArgumentsTests: XCTestCase {
       "--kind", "embedding",
       "--host-service", "io.goodkind.lmd.host",
     ])
-    XCTAssertEqual(args?.modelPath, "/models/arctic")
-    XCTAssertEqual(args?.kind, .embedding)
-    XCTAssertEqual(args?.hostService, "io.goodkind.lmd.host")
-    XCTAssertNil(args?.swiftLMBinaryPath)
-    XCTAssertNil(args?.swiftLMLogPath)
-    XCTAssertNil(args?.contextLength)
-    XCTAssertNil(args?.videoSamplingFPS)
+    expect(args?.modelPath) == "/models/arctic"
+    expect(args?.kind) == .embedding
+    expect(args?.hostService) == "io.goodkind.lmd.host"
+    expect(args?.swiftLMBinaryPath) == nil
+    expect(args?.swiftLMLogPath) == nil
+    expect(args?.contextLength) == nil
+    expect(args?.videoSamplingFPS) == nil
   }
 
   func testParsesVideoSamplingFPS() {
@@ -26,9 +27,9 @@ final class HostArgumentsTests: XCTestCase {
       "--host-service", "io.goodkind.lmd.host",
       "--video-sampling-fps", "2.0",
     ])
-    XCTAssertEqual(args?.modelPath, "/models/qwen-vl")
-    XCTAssertEqual(args?.kind, .video)
-    XCTAssertEqual(args?.videoSamplingFPS, 2.0)
+    expect(args?.modelPath) == "/models/qwen-vl"
+    expect(args?.kind) == .video
+    expect(args?.videoSamplingFPS) == 2.0
   }
 
   func testParsesChatSwiftLMFields() {
@@ -40,22 +41,22 @@ final class HostArgumentsTests: XCTestCase {
       "--swiftlm-log-path", "/tmp/swiftlm.log",
       "--context-length", "8192",
     ])
-    XCTAssertEqual(args?.modelPath, "/models/qwen")
-    XCTAssertEqual(args?.kind, .chat)
-    XCTAssertEqual(args?.swiftLMBinaryPath, "/usr/local/bin/SwiftLM")
-    XCTAssertEqual(args?.swiftLMLogPath, "/tmp/swiftlm.log")
-    XCTAssertEqual(args?.contextLength, 8_192)
+    expect(args?.modelPath) == "/models/qwen"
+    expect(args?.kind) == .chat
+    expect(args?.swiftLMBinaryPath) == "/usr/local/bin/SwiftLM"
+    expect(args?.swiftLMLogPath) == "/tmp/swiftlm.log"
+    expect(args?.contextLength) == 8_192
   }
 
   func testRejectsUnknownKind() {
     let args = HostArguments.parse([
       "--model", "/m", "--kind", "bogus", "--host-service", "s",
     ])
-    XCTAssertNil(args)
+    expect(args) == nil
   }
 
   func testRejectsMissingField() {
     let args = HostArguments.parse(["--model", "/m", "--kind", "chat"])
-    XCTAssertNil(args)
+    expect(args) == nil
   }
 }
