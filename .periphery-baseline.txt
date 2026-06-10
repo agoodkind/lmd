@@ -1,6 +1,74 @@
-# periphery: generated_at=2026-06-08T05:00:23Z
-Sources/SwiftLMRuntime/FanCoordinator.swift:500:101: error: '==' is not a postfix unary operator	# periphery:first_added=2026-06-08T05:00:23Z last_seen=2026-06-08T05:00:23Z
-Sources/SwiftLMRuntime/FanCoordinator.swift:500:103: error: consecutive statements on a line must be separated by ';'	# periphery:first_added=2026-06-08T05:00:23Z last_seen=2026-06-08T05:00:23Z
-Sources/SwiftLMRuntime/FanCoordinator.swift:500:104: warning: boolean literal is unused [#no-usage]	# periphery:first_added=2026-06-08T05:00:23Z last_seen=2026-06-08T05:00:23Z
-Sources/SwiftLMRuntime/FanCoordinator.swift:502:82: error: cannot use optional chaining on non-optional value of type 'TimeInterval' (aka 'Double')	# periphery:first_added=2026-06-08T05:00:23Z last_seen=2026-06-08T05:00:23Z
-Sources/SwiftLMRuntime/FanCoordinator.swift:502:82: error: static member 'infinity' cannot be used on instance of type 'TimeInterval' (aka 'Double')	# periphery:first_added=2026-06-08T05:00:23Z last_seen=2026-06-08T05:00:23Z
+# periphery: generated_at=2026-06-10T04:28:38Z
+Sources/SwiftLMMonitor/SensorSampler.swift:53:15: warning: Assign-only property 'macmonProcess' is assigned, but never used	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMMonitor/Sensors/Battery.swift:12:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMMonitor/Sensors/MacmonClient.swift:12:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMMonitor/Sensors/MemoryPressure.swift:12:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMMonitor/Sensors/SwapUsage.swift:12:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMMonitor/Sensors/VMStat.swift:12:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMMonitor/ShellExec.swift:12:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMRuntime/BenchConfig.swift:18:1: warning: Unused imported module 'SwiftLMCore'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMRuntime/BenchConfig.swift:20:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMRuntime/BenchConfigTOML.swift:184:14: warning: Unused function 'isIdentifier(_:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMRuntime/BenchOrchestrator.swift:18:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMRuntime/BrokerBenchBackend.swift:23:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMRuntime/EventBus.swift:16:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMRuntime/JSONEnforcement.swift:12:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMRuntime/ModelServer.swift:12:1: warning: Unused imported module 'SwiftLMCore'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMTUI/Panels/BenchTab.swift:178:9: warning: Assign-only property 'skipped' is assigned, but never used	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMTUI/Panels/MonitorTab.swift:17:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/SwiftLMTUI/Screen.swift:12:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-bench/LMDBenchTool.swift:196:15: warning: Unused property 'session'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-bench/LMDBenchTool.swift:24:19: warning: Unused typealias 'LibSwiftLMServer'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-bench/LMDBenchTool.swift:271:16: warning: Unused function 'fetchMacmon()'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-bench/LMDBenchTool.swift:289:16: warning: Unused function 'readBattery()'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-bench/LMDBenchTool.swift:41:5: warning: Unused property 'logPath'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-bench/LMDBenchTool.swift:448:16: warning: Unused function 'runCommandCaptureOut(_:args:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-bench/LMDBenchTool.swift:474:6: warning: Unused function 'baseName(_:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-bench/LMDBenchTool.swift:54:5: warning: Unused property 'fancurveAgentPath'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-model-host/ChatHost.swift:269:15: warning: Assign-only property 'requestID' is assigned, but never used	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-model-host/ChatHost.swift:274:15: warning: Assign-only property 'firstTokenNanoseconds' is assigned, but never used	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-serve/BrokerEventsSequence.swift:34:17: warning: Assign-only property 'stream' is assigned, but never used	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-serve/HubDownloadCoordinator.swift:13:1: warning: Unused imported module 'SwiftLMCore'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-serve/SwiftLMD.swift:173:7: warning: Assign-only property 'catalog' is assigned, but never used	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-serve/SwiftLMD.swift:243:8: warning: Unused struct 'ChatCompletionRequest'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-serve/SwiftLMD.swift:57:25: warning: Unused property 'isoFormatter'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd-tui/LMDTUIHost.swift:162:8: warning: Unused function 'reset()'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:119:14: warning: Unused function 'unloadCommand(request:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:136:14: warning: Unused function 'embedCommand(modelId:text:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:162:14: warning: Unused function 'pullCommand(slug:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:209:14: warning: Unused function 'rmCommand(modelId:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:241:14: warning: Unused function 'runBenchFromConfig(configPath:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:25:13: warning: Unused property 'log'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:27:6: warning: Unused enum 'PullCommandError'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:287:14: warning: Unused function 'runBenchFromConfigSync(configPath:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:297:14: warning: Unused function 'listCatalog()'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:31:14: warning: Unused function 'say(_:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:341:14: warning: Unused function 'resolveSiblingBinary(_:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:348:14: warning: Unused function 'runServeBinary()'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:35:14: warning: Unused function 'sayErr(_:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:365:14: warning: Unused function 'remappedArguments()'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:383:8: warning: Unused struct 'LMDCommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:39:14: warning: Unused function 'openBroker()'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:408:8: warning: Unused struct 'LMDServeCommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:420:8: warning: Unused struct 'LMDTUICommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:432:8: warning: Unused struct 'LMDBenchCommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:445:8: warning: Unused struct 'LMDBenchRunCommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:459:8: warning: Unused struct 'LMDQACommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:500:8: warning: Unused struct 'LMDListCommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:512:8: warning: Unused struct 'LMDStatusCommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:51:14: warning: Unused function 'statusCommand()'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:523:8: warning: Unused struct 'LMDLoadCommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:561:8: warning: Unused struct 'LMDUnloadCommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:581:8: warning: Unused struct 'LMDEmbedCommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:598:8: warning: Unused struct 'LMDPullCommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:613:8: warning: Unused struct 'LMDRmCommand'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Sources/lmd/main.swift:93:14: warning: Unused function 'loadCommand(request:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Tests/IntegrationTests/HostSpawnTests.swift:1:1: warning: Unused imported module 'SwiftLMHostProtocol'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Tests/IntegrationTests/XPCBrokerTests.swift:150:16: warning: Unused function 'buildBrokerEnvironment(host:port:swiftLM:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Tests/IntegrationTests/XPCBrokerTests.swift:197:14: warning: Unused function 'waitForProcessExit(_:timeout:)'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Tests/SwiftLMRuntimeTests/BenchOrchestratorTests.swift:15:9: warning: Assign-only property 'model' is assigned, but never used	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Tests/SwiftLMRuntimeTests/BenchOrchestratorTests.swift:16:9: warning: Assign-only property 'variant' is assigned, but never used	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Tests/SwiftLMRuntimeTests/BenchOrchestratorTests.swift:17:9: warning: Assign-only property 'prompt' is assigned, but never used	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Tests/SwiftLMRuntimeTests/FanCoordinatorTests.swift:107:7: warning: Assign-only property 'lastPriority' is assigned, but never used	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Tests/SwiftLMRuntimeTests/ModelRouterTests.swift:20:7: warning: Assign-only property 'kind' is assigned, but never used	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
+Tests/SwiftLMRuntimeTests/ModelRouterTests.swift:39:7: warning: Unused property 'appliedThrottleLevels'	# periphery:first_added=2026-06-10T04:28:38Z last_seen=2026-06-10T04:28:38Z
