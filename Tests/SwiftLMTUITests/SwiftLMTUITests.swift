@@ -6,12 +6,13 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMTUI
 
 final class SwiftLMTUITests: XCTestCase {
   func testVersionIsNonEmpty() {
-    XCTAssertFalse(SwiftLMTUI.version.isEmpty)
+    expect(SwiftLMTUI.version.isEmpty) == false
   }
 }

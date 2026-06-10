@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMTUI
@@ -20,17 +21,17 @@ final class EventsTabTests: XCTestCase {
       )
     }
     // Capped: only the last 3 survive.
-    XCTAssertEqual(tab.entries.count, 3)
-    XCTAssertEqual(tab.entries.first?.model, "m2")
-    XCTAssertEqual(tab.entries.last?.model, "m4")
+    expect(tab.entries.count) == 3
+    expect(tab.entries.first?.model) == "m2"
+    expect(tab.entries.last?.model) == "m4"
   }
 
   func testClearWipes() {
     let tab = EventsTab()
     tab.append(EventEntry(kind: "note"))
     tab.clear()
-    XCTAssertTrue(tab.entries.isEmpty)
-    XCTAssertEqual(tab.scrollOffset, 0)
+    expect(tab.entries.isEmpty) == true
+    expect(tab.scrollOffset) == 0
   }
 
   func testScrollUpDownClamps() {
@@ -39,16 +40,16 @@ final class EventsTabTests: XCTestCase {
       tab.append(EventEntry(kind: "note"))
     }
     tab.scrollUp(100)
-    XCTAssertEqual(tab.scrollOffset, 4)  // count - 1
+    expect(tab.scrollOffset) == 4  // count - 1
     tab.scrollDown(100)
-    XCTAssertEqual(tab.scrollOffset, 0)
+    expect(tab.scrollOffset) == 0
   }
 
   func testCKeyClears() {
     let tab = EventsTab()
     tab.append(EventEntry(kind: "x"))
     _ = tab.handleChar("c")
-    XCTAssertTrue(tab.entries.isEmpty)
+    expect(tab.entries.isEmpty) == true
   }
 
   // MARK: - Snapshots

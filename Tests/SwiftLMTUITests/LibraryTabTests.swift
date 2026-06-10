@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMTUI
@@ -31,15 +32,15 @@ final class LibraryTabTests: XCTestCase {
   func testJKNavigates() {
     let tab = LibraryTab()
     tab.entries = fixtureEntries()
-    XCTAssertEqual(tab.selection, 0)
+    expect(tab.selection) == 0
     _ = tab.handle(.key(.scrollDown))
-    XCTAssertEqual(tab.selection, 1)
+    expect(tab.selection) == 1
     _ = tab.handle(.key(.scrollDown))
-    XCTAssertEqual(tab.selection, 2)
+    expect(tab.selection) == 2
     _ = tab.handle(.key(.scrollDown))  // clamp at last
-    XCTAssertEqual(tab.selection, 2)
+    expect(tab.selection) == 2
     _ = tab.handle(.key(.scrollUp))
-    XCTAssertEqual(tab.selection, 1)
+    expect(tab.selection) == 1
   }
 
   func testLoadCharProducesCommand() {
@@ -48,10 +49,10 @@ final class LibraryTabTests: XCTestCase {
     _ = tab.handle(.key(.scrollDown))  // selection now 1 = Beta
     let action = tab.handleChar("l")
     if case .command(let name, let payload) = action {
-      XCTAssertEqual(name, "preload")
-      XCTAssertEqual(payload["model"], "b")
+      expect(name) == "preload"
+      expect(payload["model"]) == "b"
     } else {
-      XCTFail("expected preload command, got \(action)")
+      fail("expected preload command, got \(action)")
     }
   }
 
@@ -60,9 +61,9 @@ final class LibraryTabTests: XCTestCase {
     tab.entries = fixtureEntries()
     let action = tab.handleChar("u")
     if case .command(let name, _) = action {
-      XCTAssertEqual(name, "unload")
+      expect(name) == "unload"
     } else {
-      XCTFail("expected unload, got \(action)")
+      fail("expected unload, got \(action)")
     }
   }
 
@@ -72,12 +73,12 @@ final class LibraryTabTests: XCTestCase {
     let buf = BufferedScreen(rows: 30, cols: 160)
     tab.render(into: buf, contentRows: 1...25)
     let combined = buf.rowsPainted.values.joined(separator: "\n")
-    XCTAssertTrue(combined.contains("loaded"))
-    XCTAssertTrue(combined.contains("idle"))
-    XCTAssertTrue(combined.contains("busy"))
-    XCTAssertTrue(combined.contains("Alpha"))
-    XCTAssertTrue(combined.contains("Beta"))
-    XCTAssertTrue(combined.contains("Gamma"))
+    expect(combined.contains("loaded")) == true
+    expect(combined.contains("idle")) == true
+    expect(combined.contains("busy")) == true
+    expect(combined.contains("Alpha")) == true
+    expect(combined.contains("Beta")) == true
+    expect(combined.contains("Gamma")) == true
   }
 
   func testEmptyEntriesShowsMessage() {
@@ -85,6 +86,6 @@ final class LibraryTabTests: XCTestCase {
     let buf = BufferedScreen(rows: 10, cols: 80)
     tab.render(into: buf, contentRows: 1...8)
     let combined = buf.rowsPainted.values.joined(separator: "\n")
-    XCTAssertTrue(combined.contains("no models found"))
+    expect(combined.contains("no models found")) == true
   }
 }

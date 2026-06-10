@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMTUI
@@ -24,8 +25,8 @@ final class MonitorTabTests: XCTestCase {
     tab.render(into: buf, contentRows: 1...25)
     // The "flow" row should mention discharging somewhere.
     let combined = buf.rowsPainted.values.joined(separator: "\n")
-    XCTAssertTrue(combined.contains("discharging"), "expected discharging label, got:\n\(combined)")
-    XCTAssertTrue(combined.contains("-15.0 W"))
+    expect(combined.contains("discharging")) == true
+    expect(combined.contains("-15.0 W")) == true
   }
 
   func testRendersChargingInGreen() {
@@ -40,14 +41,14 @@ final class MonitorTabTests: XCTestCase {
     let buf = BufferedScreen(rows: 30, cols: 80)
     tab.render(into: buf, contentRows: 1...25)
     let combined = buf.rowsPainted.values.joined(separator: "\n")
-    XCTAssertTrue(combined.contains("+25.0 W"))
-    XCTAssertTrue(combined.contains("charging"))
+    expect(combined.contains("+25.0 W")) == true
+    expect(combined.contains("charging")) == true
   }
 
   func testQuitActionOnQKey() {
     let tab = MonitorTab()
     let action = tab.handle(.key(.quit))
-    if case .quit = action {} else { XCTFail("expected .quit, got \(action)") }
+    if case .quit = action {} else { fail("expected .quit, got \(action)") }
   }
 
   func testSnapshotParsesFromJSON() {
@@ -64,10 +65,10 @@ final class MonitorTabTests: XCTestCase {
       "ac_state": "charging",
     ]
     let snap = MonitorSnapshot.from(json: json)
-    XCTAssertEqual(snap.cpuTempC, 55)
-    XCTAssertEqual(snap.gpuTempC, 60)
-    XCTAssertEqual(snap.battPct, 77)
-    XCTAssertEqual(snap.battWattsSigned, -5.5)
-    XCTAssertEqual(snap.acState, "charging")
+    expect(snap.cpuTempC) == 55
+    expect(snap.gpuTempC) == 60
+    expect(snap.battPct) == 77
+    expect(snap.battWattsSigned) == -5.5
+    expect(snap.acState) == "charging"
   }
 }

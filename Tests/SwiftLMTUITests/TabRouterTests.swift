@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMTUI
@@ -38,7 +39,7 @@ final class TabRouterTests: XCTestCase {
     let a = StubTab(label: "a", title: "A")
     let b = StubTab(label: "b", title: "B")
     let router = TabRouter(tabs: [a, b])
-    XCTAssertEqual(router.activeTab?.label, "a")
+    expect(router.activeTab?.label) == "a"
   }
 
   func testRenderFanoutsToActiveOnly() {
@@ -47,9 +48,9 @@ final class TabRouterTests: XCTestCase {
     let router = TabRouter(tabs: [a, b])
     let buf = BufferedScreen(rows: 20, cols: 80)
     router.render(into: buf, contentRows: 3...18)
-    XCTAssertEqual(a.renderCalls, 1)
-    XCTAssertEqual(b.renderCalls, 0)
-    XCTAssertEqual(buf.rowsPainted[3], "a-rendered")
+    expect(a.renderCalls) == 1
+    expect(b.renderCalls) == 0
+    expect(buf.rowsPainted[3]) == "a-rendered"
   }
 
   func testSwitchActionChangesActiveTab() {
@@ -58,7 +59,7 @@ final class TabRouterTests: XCTestCase {
     a.nextAction = .switchTo(tab: "b")
     let router = TabRouter(tabs: [a, b])
     _ = router.handle(.key(.scrollDown))
-    XCTAssertEqual(router.activeTab?.label, "b")
+    expect(router.activeTab?.label) == "b"
   }
 
   func testSwitchToMissingTabIsNoOp() {
@@ -66,7 +67,7 @@ final class TabRouterTests: XCTestCase {
     a.nextAction = .switchTo(tab: "ghost")
     let router = TabRouter(tabs: [a])
     _ = router.handle(.key(.scrollDown))
-    XCTAssertEqual(router.activeTab?.label, "a")
+    expect(router.activeTab?.label) == "a"
   }
 
   func testInputForwardedToActiveTab() {
@@ -75,8 +76,8 @@ final class TabRouterTests: XCTestCase {
     let router = TabRouter(tabs: [a, b])
     _ = router.handle(.key(.scrollDown))
     _ = router.handle(.tick)
-    XCTAssertEqual(a.seenInputs.count, 2)
-    XCTAssertTrue(b.seenInputs.isEmpty)
+    expect(a.seenInputs.count) == 2
+    expect(b.seenInputs.isEmpty) == true
   }
 
   func testQuitActionPassesThroughToCaller() {
@@ -84,6 +85,6 @@ final class TabRouterTests: XCTestCase {
     a.nextAction = .quit
     let router = TabRouter(tabs: [a])
     let action = router.handle(.key(.quit))
-    if case .quit = action {} else { XCTFail("expected .quit, got \(action)") }
+    if case .quit = action {} else { fail("expected .quit, got \(action)") }
   }
 }

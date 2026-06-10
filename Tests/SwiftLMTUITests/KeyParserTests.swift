@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMTUI
@@ -21,31 +22,31 @@ final class KeyParserTests: XCTestCase {
   }
 
   func testLetterKeys() {
-    XCTAssertEqual(parse("j"), .scrollDown)
-    XCTAssertEqual(parse("k"), .scrollUp)
-    XCTAssertEqual(parse("g"), .top)
-    XCTAssertEqual(parse("G"), .bottom)
-    XCTAssertEqual(parse("q"), .quit)
-    XCTAssertEqual(parse(" "), .pageDown)
+    expect(self.parse("j")) == .scrollDown
+    expect(self.parse("k")) == .scrollUp
+    expect(self.parse("g")) == .top
+    expect(self.parse("G")) == .bottom
+    expect(self.parse("q")) == .quit
+    expect(self.parse(" ")) == .pageDown
   }
 
   func testControlC() {
-    XCTAssertEqual(parseByte(0x03), .quit)
+    expect(self.parseByte(0x03)) == .quit
   }
 
   func testArrowKeys() {
-    XCTAssertEqual(parse("\u{001B}[A"), .scrollUp)
-    XCTAssertEqual(parse("\u{001B}[B"), .scrollDown)
+    expect(self.parse("\u{001B}[A")) == .scrollUp
+    expect(self.parse("\u{001B}[B")) == .scrollDown
   }
 
   func testPageKeys() {
-    XCTAssertEqual(parse("\u{001B}[5"), .pageUp)
-    XCTAssertEqual(parse("\u{001B}[6"), .pageDown)
+    expect(self.parse("\u{001B}[5")) == .pageUp
+    expect(self.parse("\u{001B}[6")) == .pageDown
   }
 
   func testUnknownBytesAlwaysAdvance() {
     let ev = parse("Z")
-    XCTAssertTrue(ev.consumed >= 1)
+    expect(ev.consumed >= 1) == true
   }
 
   func testIncompleteCSIDoesNotCrash() {
@@ -53,7 +54,7 @@ final class KeyParserTests: XCTestCase {
     let ev = KeyParser.parse(bytes, start: 0, length: bytes.count)
     if case .unknown = ev {
     } else {
-      XCTFail("incomplete CSI should map to .unknown, got \(ev)")
+      fail("incomplete CSI should map to .unknown, got \(ev)")
     }
   }
 }

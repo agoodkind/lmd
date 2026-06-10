@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import Nimble
 import XCTest
 
 @testable import SwiftLMTUI
@@ -18,7 +19,7 @@ final class BenchTabTests: XCTestCase {
     t.models = ["m"]
     t.variants = ["v"]
     t.set(model: "m", variant: "v", status: .passed)
-    XCTAssertEqual(t.cells["m::v"], .passed)
+    expect(t.cells["m::v"]) == .passed
   }
 
   func testClearResetsEverything() {
@@ -29,15 +30,15 @@ final class BenchTabTests: XCTestCase {
     t.statusLine = "running"
     t.set(model: "m", variant: "v", status: .passed)
     t.clear()
-    XCTAssertTrue(t.cells.isEmpty)
-    XCTAssertEqual(t.statusLine, "")
-    XCTAssertNil(t.startedAt)
+    expect(t.cells.isEmpty) == true
+    expect(t.statusLine) == ""
+    expect(t.startedAt) == nil
   }
 
   func testQuitInputProducesQuitAction() {
     let t = BenchTab()
     let result = t.handle(.key(.quit))
-    if case .quit = result { /* ok */  } else { XCTFail("expected .quit, got \(result)") }
+    if case .quit = result { /* ok */  } else { fail("expected .quit, got \(result)") }
   }
 
   // MARK: - Snapshots
