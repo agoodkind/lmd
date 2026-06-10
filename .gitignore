@@ -22,3 +22,4 @@ Products/
 
 # Editors (personal / machine-specific)
 .vscode/
+.config/mise/conf.d/swift-mk.toml
