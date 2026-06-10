@@ -10,35 +10,36 @@
 //
 
 import Foundation
+import Nimble
 import XCTest
 
 final class CLICompatibilityTests: XCTestCase {
   func testRootHelpFromLmdBinary() throws {
     let binary = try resolveBinary("lmd")
     let result = try run(binary: binary, arguments: ["--help"])
-    XCTAssertEqual(result.status, 0)
-    XCTAssertTrue(result.output.contains("SUBCOMMANDS:") || result.output.contains("OVERVIEW:"))
+    expect(result.status) == 0
+    expect(result.output.contains("SUBCOMMANDS:") || result.output.contains("OVERVIEW:")) == true
   }
 
   func testTUICompatibilityLinkShowsTUIHelp() throws {
     let binary = try resolveBinary("lmd-tui")
     let result = try run(binary: binary, arguments: ["--help"])
-    XCTAssertEqual(result.status, 0)
-    XCTAssertTrue(result.output.contains("Launch the multi-tab TUI."))
+    expect(result.status) == 0
+    expect(result.output.contains("Launch the multi-tab TUI.")) == true
   }
 
   func testBenchCompatibilityLinkShowsBenchHelp() throws {
     let binary = try resolveBinary("lmd-bench")
     let result = try run(binary: binary, arguments: ["--help"])
-    XCTAssertEqual(result.status, 0)
-    XCTAssertTrue(result.output.contains("Run the benchmark orchestrator."))
+    expect(result.status) == 0
+    expect(result.output.contains("Run the benchmark orchestrator.")) == true
   }
 
   func testQACompatibilityLinkShowsQAHelp() throws {
     let binary = try resolveBinary("lmd-qa")
     let result = try run(binary: binary, arguments: ["--help"])
-    XCTAssertEqual(result.status, 0)
-    XCTAssertTrue(result.output.contains("Run the TUI QA harness."))
+    expect(result.status) == 0
+    expect(result.output.contains("Run the TUI QA harness.")) == true
   }
 
   private func run(binary: URL, arguments: [String]) throws -> (status: Int32, output: String) {

@@ -34,6 +34,7 @@
 
 import Darwin
 import Foundation
+import Nimble
 import XCTest
 
 final class TUILaunchTests: XCTestCase {
@@ -52,7 +53,7 @@ final class TUILaunchTests: XCTestCase {
   private func launchAndExitTest(
     binaryName: String,
     expectedMarker: String,
-    file: StaticString = #filePath,
+    file: String = #filePath,
     line: UInt = #line
   ) throws {
     let binary = try resolveBinary(binaryName)
@@ -143,15 +144,13 @@ final class TUILaunchTests: XCTestCase {
         throw XCTSkip("lmd-tui reported the broker unavailable on its launch path")
       }
       let snapshot = outputBuffer.snapshot()
-      XCTFail(
+      fail(
         """
         \(binaryName) did not paint marker '\(expectedMarker)' within \
         \(Int(markerTimeoutSeconds))s.
         Output captured (\(snapshot.count) bytes): \
         \(String(data: snapshot.prefix(500), encoding: .utf8) ?? "<non-utf8>")
-        """,
-        file: file, line: line
-      )
+        """, file: file, line: line)
       return
     }
 
@@ -162,10 +161,7 @@ final class TUILaunchTests: XCTestCase {
       proc.terminate()
       _ = try? proc.waitUntilExit2(timeout: 1.0)
       close(master)
-      XCTFail(
-        "\(binaryName) did not exit within 5s of SIGINT",
-        file: file, line: line
-      )
+      fail("\(binaryName) did not exit within 5s of SIGINT", file: file, line: line)
       return
     }
     close(master)
@@ -173,12 +169,10 @@ final class TUILaunchTests: XCTestCase {
     let code = proc.terminationStatus
     let reason = proc.terminationReason
     // Accept: normal exit with 0, or terminated-by-signal (SIGINT).
-    XCTAssertTrue(
+    expect(
+      file: file, line: line,
       (reason == .exit && code == 0)
-        || (reason == .uncaughtSignal && code == SIGINT),
-      "\(binaryName) exit code=\(code) reason=\(reason) (expected 0/SIGINT)",
-      file: file, line: line
-    )
+        || (reason == .uncaughtSignal && code == SIGINT)) == true
   }
 
   // MARK: - Binary resolution

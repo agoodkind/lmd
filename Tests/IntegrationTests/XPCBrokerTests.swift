@@ -11,6 +11,7 @@
 //
 
 import Foundation
+import Nimble
 import SwiftLMControl
 import SwiftLMCore
 import SwiftLMRuntime
@@ -55,11 +56,11 @@ final class XPCBrokerTests: XCTestCase {
       expected: true,
       client: client
     )
-    XCTAssertTrue(loaded, "model should be loaded after preload")
+    expect(loaded) == true
 
     let vectors = try await client.embed(model: model.id, inputs: ["integration test sentence"])
-    XCTAssertEqual(vectors.count, 1)
-    XCTAssertFalse(vectors[0].isEmpty)
+    expect(vectors.count) == 1
+    expect(vectors[0].isEmpty) == false
 
     _ = try await client.unload(model: model.id)
     let reachedUnloaded = try await waitForModelPresence(
@@ -67,7 +68,7 @@ final class XPCBrokerTests: XCTestCase {
       expected: false,
       client: client
     )
-    XCTAssertTrue(reachedUnloaded, "model should be unloaded after unload")
+    expect(reachedUnloaded) == true
   }
 
   // MARK: - Helpers

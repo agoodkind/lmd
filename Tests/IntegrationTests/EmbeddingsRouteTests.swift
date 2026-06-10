@@ -11,6 +11,7 @@
 //
 
 import Foundation
+import Nimble
 import SwiftLMCore
 import SwiftLMRuntime
 import XCTest
@@ -53,7 +54,7 @@ final class EmbeddingsRouteTests: XCTestCase {
         throw XCTSkip(
           "embeddings endpoint unavailable in environment: status=\(embStatus), body=\(embText)")
       }
-      XCTAssertEqual(embStatus, 200, "embeddings body: \(embText)")
+      expect(embStatus) == 200
     }
     guard let embJson = try? JSONSerialization.jsonObject(with: embBody) as? [String: Any],
       let rows = embJson["data"] as? [[String: Any]]
@@ -61,28 +62,28 @@ final class EmbeddingsRouteTests: XCTestCase {
       if embText.contains("Failed to load the default metallib") {
         throw XCTSkip("MLX metallib unavailable in environment: \(embText)")
       }
-      XCTFail("invalid embeddings JSON")
+      fail("invalid embeddings JSON")
       return
     }
-    XCTAssertEqual(rows.count, 2)
+    expect(rows.count) == 2
     for row in rows {
       let vec = embeddingVector(from: row)
-      XCTAssertGreaterThan(vec.count, 0)
+      expect(vec.count) > 0
       if let expectedDimension {
-        XCTAssertEqual(vec.count, expectedDimension)
+        expect(vec.count) == expectedDimension
       }
     }
 
     let (loadedStatus, loadedBody) = await httpGet(url: "\(base)/swiftlmd/loaded")
-    XCTAssertEqual(loadedStatus, 200)
+    expect(loadedStatus) == 200
     guard let loaded = try? JSONSerialization.jsonObject(with: loadedBody) as? [String: Any],
       let models = loaded["models"] as? [[String: Any]]
     else {
-      XCTFail("invalid loaded JSON")
+      fail("invalid loaded JSON")
       return
     }
     let kinds = models.compactMap { $0["kind"] as? String }
-    XCTAssertTrue(kinds.contains("embedding"), "loaded models: \(models)")
+    expect(kinds.contains("embedding")) == true
   }
 
   // MARK: - Helpers
@@ -118,19 +119,19 @@ final class EmbeddingsRouteTests: XCTestCase {
     slug: String
   ) async throws {
     let (status, body) = await httpGet(url: "\(baseURL)/v1/models")
-    XCTAssertEqual(status, 200)
+    expect(status) == 200
     guard
       let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
       let data = json["data"] as? [[String: Any]]
     else {
-      XCTFail("invalid /v1/models JSON")
+      fail("invalid /v1/models JSON")
       return
     }
     let model = data.first { row in
       row["id"] as? String == slug
     }
     let unwrappedModel = try XCTUnwrap(model, "missing \(slug) from /v1/models")
-    XCTAssertEqual(unwrappedModel["kind"] as? String, "embedding")
+    expect(unwrappedModel["kind"] as? String) == "embedding"
   }
 
   private func waitForHealth(url: String, deadlineSeconds: Int) async throws {
@@ -140,7 +141,7 @@ final class EmbeddingsRouteTests: XCTestCase {
       if status == 200 { return }
       try await Task.sleep(nanoseconds: 500_000_000)
     }
-    XCTFail("broker did not become healthy at \(url)")
+    fail("broker did not become healthy at \(url)")
   }
 
   private func httpGet(url: String) async -> (Int, Data) {
