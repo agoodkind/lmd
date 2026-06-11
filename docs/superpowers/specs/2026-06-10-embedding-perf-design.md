@@ -38,11 +38,36 @@ The cap lives in `EmbeddingCacheLimit.swift` (`LMD_MLX_CACHE_LIMIT_GB=2`). One f
 
 - Token-budget batching lands in both layers. lmd enforces it exactly; lm-semantic-search shapes its requests approximately.
 - bf16 happened as a one-off local disk conversion, already executed (see Phase 2).
-- The MLX cache cap moves to 8GB for the embedding host. The env override and the battery shrink stay as they are.
+- Every tuning value is a configuration knob in the existing config systems (BrokerConfig env vars from the LaunchAgent plist for lmd; config.json for lm-semantic-search). Nothing is hardcoded. Knobs that can be derived from the workload default to auto-sizing, with an explicit value always winning. The full knob table is in the Configuration section.
 - Embedding concurrency drops to 1, with a priority lane so small interactive requests skip the bulk queue.
 - The query instruction prefix in lm-semantic-search is in scope. It is a quality fix riding the same client change.
 - Rollout is instrument-first. Phase 0 lands measurement and config tweaks before any code fix, and every later phase ships with before and after bench numbers.
 - The job-progress rendering UX in lm-semantic-search is out of scope here (tracked separately).
+
+## Configuration
+
+All knobs flow through the systems each repo already uses: lmd reads env vars through `BrokerConfig` (set in the LaunchAgent plist) and plumbs them to the embedding host the same way `LMD_EMBEDDING_MAX_CONCURRENCY` and `LMD_MLX_CACHE_LIMIT_GB` travel today; lm-semantic-search reads `~/.config/lm-semantic-search/config.json`.
+
+lmd knobs:
+
+| Knob | Default | Meaning |
+| --- | --- | --- |
+| `LMD_EMBEDDING_MAX_CONCURRENCY` | 1 | Concurrent embedding requests admitted to the host (exists today; default changes from 4). |
+| `LMD_EMBED_BATCH_TOKEN_BUDGET` | auto | Padded-slot budget per forward (rows times sub-batch max length). Auto sizes from free unified memory at load: the largest budget whose worst-case transients fit inside the cache cap, clamped to 2,048 to 32,768 and rounded to a multiple of 1,024. An explicit number wins. |
+| `LMD_EMBED_BATCH_MAX_ROWS` | 256 | Row cap per sub-batch regardless of budget. |
+| `LMD_EMBED_PRIORITY_MAX_INPUTS` | 2 | A request with at most this many inputs takes the priority lane. |
+| `LMD_EMBED_PRIORITY_MAX_TOKENS` | 2048 | A request under this many real tokens takes the priority lane. |
+| `LMD_EMBED_PRIORITY_LANE` | true | Setting false demotes the queue to plain FIFO (the starvation escape hatch). |
+| `LMD_MLX_CACHE_LIMIT_GB` | auto | MLX allocator cache cap (exists today as a fixed number). Auto sizes to roughly 2x the worst-case sub-batch transient at the loaded dtype, clamped to 2GiB to 16GiB. An explicit number wins. The hard-throttle 512MiB shrink stays. |
+
+Auto-sizing detail: budget and cache cap solve the same equation from opposite ends (transient bytes per slot at the model's hidden size and dtype). When both are auto, the cache cap resolves first from free memory, then the budget fits inside it. The chosen values are logged at host spawn (`spawn_runtime_ready` extras) and exposed as gauges so a bench run records what it actually measured.
+
+lm-semantic-search knobs (config.json):
+
+| Knob | Default | Meaning |
+| --- | --- | --- |
+| `embeddingBatchTokenBudget` | 6000 | Estimated-token budget per request (bytes divided by 4). Replaces count-32 batching; `embeddingBatchSize` stays as a row-count ceiling. |
+| `queryInstructionPrefix` | per-model | Prefix applied to query-time embeddings only. Defaults to the NV-EmbedCode instruct string when the model id matches NV-EmbedCode, empty otherwise. |
 
 ## Phase 0: measure first, plus the free config tweaks
 
@@ -56,25 +81,27 @@ New metrics, emitted by the embedding host through the existing `SwiftLMMetrics`
 
 New bench mode: `lmd bench embed`. Today lmd-bench is chat only. The embed mode feeds either a corpus file (one input per line) or a synthetic corpus shaped like the conversation data (median near 93 tokens, long tail past 1,000). It reports real tokens per second, padded slots per second, per-batch p50 and p95 latency, and `mlx_peak`.
 
-Config tweaks in the LaunchAgent plist and defaults:
+Config changes in this phase:
 
-- `LMD_EMBEDDING_MAX_CONCURRENCY` goes from 4 to 1. The Phase 1 priority lane restores interactive latency.
-- The embedding cache default goes from 2GiB to 8GiB (`EmbeddingCacheLimit.swift` plus `LMD_MLX_CACHE_LIMIT_GB=8`). The hard-throttle 512MiB shrink stays.
+- `LMD_EMBEDDING_MAX_CONCURRENCY` default goes from 4 to 1. The Phase 1 priority lane restores interactive latency.
+- `LMD_MLX_CACHE_LIMIT_GB` gains the `auto` mode (Configuration section). Until Phase 1 lands a budget to size against, auto resolves to 8GiB on this machine; the plist drops its hardcoded `2`.
 
-Done when: a baseline `lmd bench embed` run is recorded, and the new metrics show up in `/swiftlmd/metrics` and `/metrics`.
+Done when: a baseline `lmd bench embed` run is recorded, the new metrics show up in `/swiftlmd/metrics` and `/metrics`, and the resolved knob values appear in the spawn log and gauges.
 
 ## Phase 1: token-budget batching and the priority lane (lmd)
 
 In `NVEmbeddingBackend.embed`, after tokenization:
 
 1. Sort the encoded inputs by token length.
-2. Pack sub-batches greedily under a padded-slot budget: rows times the sub-batch max length stays at or under `LMD_EMBED_BATCH_TOKEN_BUDGET` (default 8192 slots), with a cap of 256 rows.
+2. Pack sub-batches greedily under the padded-slot budget: rows times the sub-batch max length stays at or under the resolved `LMD_EMBED_BATCH_TOKEN_BUDGET`, with at most `LMD_EMBED_BATCH_MAX_ROWS` rows.
 3. Run one forward per sub-batch, one after another.
 4. Reassemble the pooled rows in the original input order before returning.
 
 Edge rules: an input longer than the whole budget gets its own sub-batch, and the existing 4096-token truncation still applies first. If any sub-batch fails, the whole request fails. That preserves the current all-or-nothing contract; no partial vectors.
 
-Priority lane: the `EmbeddingHost` actor serializes all forwards through one queue. A request with at most 2 inputs, or under 2,048 real tokens, enqueues at the front. Bulk work can afford this: after the batching fix, a bulk sub-batch costs single-digit seconds, so a priority jump delays bulk by at most one sub-batch.
+Priority lane: the `EmbeddingHost` actor serializes all forwards through one queue. A request within `LMD_EMBED_PRIORITY_MAX_INPUTS` inputs or under `LMD_EMBED_PRIORITY_MAX_TOKENS` real tokens enqueues at the front. Bulk work can afford this: after the batching fix, a bulk sub-batch costs single-digit seconds, so a priority jump delays bulk by at most one sub-batch.
+
+This phase also activates the auto-sizing pair: the cache cap resolves from free memory, the budget fits inside it, and both land in the spawn log and gauges.
 
 Done when: `lmd_embed_padding_ratio` p50 is below 0.10 on the conversation-shaped bench corpus, bench throughput is at least 5x the Phase 0 baseline, and a single-input embed finishes in under 2 seconds while a bulk run is active.
 
@@ -94,8 +121,8 @@ Still to do in this phase:
 
 ## Phase 3: client-side shaping and the query prefix (lm-semantic-search)
 
-- Replace the count-32 batching in `insertChunksBatched` with an estimated-token budget. The estimate is bytes divided by 4; the budget is roughly 6,000 estimated tokens per request. The server enforces exact counts anyway, so estimation error only changes request granularity.
-- Add a `queryInstructionPrefix` config field. For NV-EmbedCode it defaults to `Instruct: Retrieve code or text relevant to the query.\nQuery: `, applied only to query-time embeddings in the search path. Document embeddings stay bare, so every stored vector remains valid. Other models default to no prefix.
+- Replace the count-32 batching in `insertChunksBatched` with the `embeddingBatchTokenBudget` knob (estimate: bytes divided by 4; `embeddingBatchSize` stays as a row ceiling). The server enforces exact counts anyway, so estimation error only changes request granularity.
+- Add the `queryInstructionPrefix` knob. For NV-EmbedCode it defaults to `Instruct: Retrieve code or text relevant to the query.\nQuery: `, applied only to query-time embeddings in the search path. Document embeddings stay bare, so every stored vector remains valid. Other models default to no prefix.
 
 Done when: ingest requests arrive at lmd within 2x of the slot budget, and a retrieval spot check on 20 known-answer queries does not regress (the prefix may improve it).
 
@@ -113,8 +140,9 @@ Re-run a real conversation ingest after all phases. Targets, with the old number
 
 - A sub-batch forward failure fails the whole request through the existing typed error frame. No partial vectors.
 - A bf16 quality-gate failure means swapping the directories back to fp32. No code rollback is needed.
-- The 8GiB cache cap carries a known risk: the cap exists because the cache once grew from 4KB to 40GB in 80 seconds. The Phase 0 bench memory report catches a recurrence before any code lands.
-- If the priority lane starves bulk work (bulk latency p95 regresses past 2x), a config flag demotes it to plain FIFO.
+- A larger cache cap carries a known risk: the 2GiB cap exists because the cache once grew from 4KB to 40GB in 80 seconds. Auto-sizing keeps the cap proportional to the workload instead of unbounded, and the Phase 0 bench memory report catches a recurrence before any code lands.
+- If the priority lane starves bulk work (bulk latency p95 regresses past 2x), `LMD_EMBED_PRIORITY_LANE=false` demotes it to plain FIFO.
+- Auto-sizing misjudging a machine is recoverable by pinning the knob to an explicit value; explicit always wins and every resolved value is logged at spawn.
 
 ## Out of scope
 
