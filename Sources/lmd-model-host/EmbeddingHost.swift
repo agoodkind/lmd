@@ -9,6 +9,7 @@
 //  `done`, or a single `failed` frame on any error.
 //
 
+import AppLogger
 import Dispatch
 import Foundation
 import SwiftLMBackend
@@ -18,14 +19,23 @@ import SwiftLMHostProtocol
 import SwiftLMMetrics
 import SwiftLMTrace
 
+private let log = AppLogger.logger(category: "EmbeddingHost")
+
 /// In-process embedding serving for `lmd-model-host`. Holds the loaded backend
 /// and turns a `BackendRequest` into the broker-facing frame sequence.
 actor EmbeddingHost {
   private let modelPath: String
+  let tuning: EmbeddingRuntimeTuning
+  private let queue: EmbeddingJobQueue
   private var backend: EmbeddingBackendProtocol?
 
-  init(modelPath: String) {
+  init(modelPath: String, tuning: EmbeddingRuntimeTuning = .fallback) {
     self.modelPath = modelPath
+    self.tuning = tuning
+    self.queue = EmbeddingJobQueue(
+      maxConcurrent: tuning.maxConcurrentForwards,
+      laneEnabled: tuning.priorityLaneEnabled
+    )
   }
 
   /// Build the descriptor and load the embedding backend. The catalog keys a
@@ -38,9 +48,15 @@ actor EmbeddingHost {
       path: modelPath,
       kind: .embedding
     )
-    let backend = try EmbeddingBackendFactory.makeBackend(descriptor: descriptor)
+    let backend = try EmbeddingBackendFactory.makeBackend(
+      descriptor: descriptor,
+      tuning: self.tuning
+    )
     try await backend.launch()
     self.backend = backend
+    log.notice(
+      "embedding.host_tuning slot_budget=\(self.tuning.slotBudget, privacy: .public) max_rows=\(self.tuning.maxRows, privacy: .public) forwards=\(self.tuning.maxConcurrentForwards, privacy: .public) lane=\(self.tuning.priorityLaneEnabled, privacy: .public)"
+    )
   }
 
   /// Apply a battery throttle level to the loaded backend so it shrinks the MLX
@@ -100,6 +116,17 @@ actor EmbeddingHost {
         attributes: ["error": "bad embeddings input: \(error)"]
       )
       return [.failed(requestID: request.requestID, message: "bad embeddings input: \(error)")]
+    }
+    let realTokens = backend.countTokens(inputs: inputs)
+    let priority =
+      inputs.count <= tuning.priorityMaxInputs || realTokens < tuning.priorityMaxTokens
+    await queue.acquire(priority: priority)
+    let queue = self.queue
+    defer {
+      // `defer` cannot await, so this task releases the actor-owned slot after every exit.
+      Task {
+        await queue.release()
+      }
     }
     let vectors: [[Float]]
     do {

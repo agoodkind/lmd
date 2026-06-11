@@ -23,6 +23,11 @@ final class BrokerConfigTests: XCTestCase {
     env[BrokerConfigKey.swiftlmBinary.rawValue] = "/usr/bin/true"
     env[BrokerConfigKey.chatMaxConcurrency.rawValue] = "4"
     env[BrokerConfigKey.embeddingMaxConcurrency.rawValue] = "4"
+    env[BrokerConfigKey.embedBatchTokenBudget.rawValue] = ""
+    env[BrokerConfigKey.embedBatchMaxRows.rawValue] = "256"
+    env[BrokerConfigKey.embedPriorityMaxInputs.rawValue] = "2"
+    env[BrokerConfigKey.embedPriorityMaxTokens.rawValue] = "2048"
+    env[BrokerConfigKey.embedPriorityLane.rawValue] = "true"
     env[BrokerConfigKey.batteryThrottlePct.rawValue] = "20"
     env[BrokerConfigKey.batteryMildPct.rawValue] = "35"
     env[BrokerConfigKey.batteryResumePct.rawValue] = "80"
@@ -35,6 +40,20 @@ final class BrokerConfigTests: XCTestCase {
     env[BrokerConfigKey.promptCacheEnabled.rawValue] = "true"
     env[BrokerConfigKey.mlxCacheLimitGB.rawValue] = "2"
     return env
+  }
+
+  private func fixtureSource(
+    overrides: [BrokerConfigKey: String] = [:],
+    removing removedKeys: [BrokerConfigKey] = []
+  ) -> BrokerConfigSource {
+    var env = completeEnvironment()
+    for (key, value) in overrides {
+      env[key.rawValue] = value
+    }
+    for key in removedKeys {
+      env.removeValue(forKey: key.rawValue)
+    }
+    return EnvironmentConfigSource(environment: env)
   }
 
   private func config(_ env: [String: String]) throws -> BrokerConfig {
@@ -64,6 +83,11 @@ final class BrokerConfigTests: XCTestCase {
     expect(config.swiftlmBinary) == "/usr/bin/true"
     expect(config.chatMaxConcurrency) == 4
     expect(config.embeddingMaxConcurrency) == 4
+    expect(config.embedBatchTokenBudget) == nil
+    expect(config.embedBatchMaxRows) == 256
+    expect(config.embedPriorityMaxInputs) == 2
+    expect(config.embedPriorityMaxTokens) == 2_048
+    expect(config.embedPriorityLaneEnabled) == true
     expect(config.batteryThrottlePct) == 20
     expect(config.batteryMildPct) == 35
     expect(config.batteryResumePct) == 80
@@ -74,7 +98,44 @@ final class BrokerConfigTests: XCTestCase {
     expect(config.sampleInterval) == (expected: 15, delta: 0.0001)
     expect(config.promptCacheEnabled) == true
     expect(config.promptCacheMaxTokens) == nil
-    expect(config.mlxCacheLimitBytes) == 2 * 1_073_741_824
+    expect(config.mlxCacheLimitGB) == 2.0
+  }
+
+  func testEmbedKnobsParseExplicitValues() throws {
+    let config = try BrokerConfig(
+      source: fixtureSource(overrides: [
+        .embedBatchTokenBudget: "8192",
+        .embedBatchMaxRows: "128",
+        .embedPriorityMaxInputs: "4",
+        .embedPriorityMaxTokens: "1024",
+        .embedPriorityLane: "false",
+        .mlxCacheLimitGB: "4",
+      ]))
+    expect(config.embedBatchTokenBudget) == 8_192
+    expect(config.embedBatchMaxRows) == 128
+    expect(config.embedPriorityMaxInputs) == 4
+    expect(config.embedPriorityMaxTokens) == 1_024
+    expect(config.embedPriorityLaneEnabled) == false
+    expect(config.mlxCacheLimitGB) == 4.0
+  }
+
+  func testEmbedBudgetAndCacheBlankMeansAuto() throws {
+    let config = try BrokerConfig(
+      source: fixtureSource(overrides: [
+        .embedBatchTokenBudget: "",
+        .mlxCacheLimitGB: "",
+      ]))
+    expect(config.embedBatchTokenBudget).to(beNil())
+    expect(config.mlxCacheLimitGB).to(beNil())
+  }
+
+  func testEmbedKnobsMissingKeyFailsNamingTheKey() {
+    expect {
+      try BrokerConfig(source: self.fixtureSource(removing: [.embedBatchMaxRows]))
+    }.to(
+      throwError { (error: BrokerConfigError) in
+        expect(error.problems.map(\.key)).to(contain(.embedBatchMaxRows))
+      })
   }
 
   func testEveryKeyIsRequired() {

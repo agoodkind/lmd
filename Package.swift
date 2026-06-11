@@ -118,6 +118,7 @@ let package = Package(
         "SwiftLMCore",
         "SwiftLMBackend",
         "SwiftLMTrace",
+        "SwiftLMMetrics",
         .product(name: "MLXEmbedders", package: "mlx-swift-lm"),
         .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
         .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
@@ -285,6 +286,15 @@ let package = Package(
         .product(name: "Nimble", package: "Nimble"),
       ],
       path: "Tests/SwiftLMMonitorTests",
+      swiftSettings: strictConcurrency
+    ),
+    .testTarget(
+      name: "LMDBenchToolTests",
+      dependencies: [
+        "LMDBenchTool",
+        .product(name: "Nimble", package: "Nimble"),
+      ],
+      path: "Tests/LMDBenchToolTests",
       swiftSettings: strictConcurrency
     ),
     .testTarget(

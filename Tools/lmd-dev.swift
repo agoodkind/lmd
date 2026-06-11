@@ -1422,7 +1422,6 @@ final class DevTool {
     return environmentMap
   }
 
-
   private func buildDirectory(configuration: String) -> URL {
     productsDirectory().appendingPathComponent("Build").appendingPathComponent(configuration)
   }

@@ -34,6 +34,7 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
   // Sampling rate forwarded to a video host so it samples frames at the rate the
   // model's preprocessor expects. nil for non-video kinds.
   private let videoSamplingFPS: Double?
+  private let embeddingTuning: EmbeddingHostTuning?
 
   private let lock = NSLock()
   private var process: Process?
@@ -53,7 +54,8 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
     swiftLMBinaryPath: String? = nil,
     swiftLMLogPath: String? = nil,
     contextLength: Int? = nil,
-    videoSamplingFPS: Double? = nil
+    videoSamplingFPS: Double? = nil,
+    embeddingTuning: EmbeddingHostTuning? = nil
   ) {
     self.modelID = descriptor.id
     self.sizeBytes = descriptor.sizeBytes
@@ -66,6 +68,7 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
     self.swiftLMLogPath = swiftLMLogPath
     self.contextLength = contextLength
     self.videoSamplingFPS = videoSamplingFPS
+    self.embeddingTuning = embeddingTuning
   }
 
   var isRunning: Bool {
@@ -162,6 +165,17 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
     }
     if let contextLength {
       arguments.append(contentsOf: ["--context-length", String(contextLength)])
+    }
+    if let embeddingTuning {
+      arguments.append(contentsOf: [
+        "--mlx-cache-limit-bytes", String(embeddingTuning.cacheLimitBytes),
+        "--embed-slot-budget", String(embeddingTuning.slotBudget),
+        "--embed-max-rows", String(embeddingTuning.maxRows),
+        "--embed-priority-max-inputs", String(embeddingTuning.priorityMaxInputs),
+        "--embed-priority-max-tokens", String(embeddingTuning.priorityMaxTokens),
+        "--embed-priority-lane", embeddingTuning.priorityLaneEnabled ? "1" : "0",
+        "--embed-max-forwards", String(embeddingTuning.maxConcurrentForwards),
+      ])
     }
     proc.arguments = arguments
     let stdinPipe = Pipe()

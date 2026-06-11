@@ -87,6 +87,7 @@ let testTargetNames = [
   "SwiftLMBackendTests",
   "SwiftLMEmbedTests",
   "SwiftLMMonitorTests",
+  "LMDBenchToolTests",
   "SwiftLMMetricsTests",
   "SwiftLMRuntimeTests",
   "SwiftLMControlTests",
@@ -165,6 +166,7 @@ let project = Project(
         .target(name: "SwiftLMCore"),
         .target(name: "SwiftLMBackend"),
         .target(name: "SwiftLMTrace"),
+        .target(name: "SwiftLMMetrics"),
         .external(name: "MLXEmbedders"),
         .external(name: "MLXLMCommon"),
         .external(name: "MLXHuggingFace"),
@@ -320,6 +322,12 @@ let project = Project(
     testTarget(
       "SwiftLMMonitorTests",
       dependencies: [.target(name: "SwiftLMMonitor")]
+    ),
+    testTarget(
+      "LMDBenchToolTests",
+      dependencies: [
+        .target(name: "LMDBenchTool")
+      ]
     ),
     testTarget(
       "SwiftLMMetricsTests",

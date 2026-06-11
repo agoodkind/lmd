@@ -493,20 +493,15 @@ final class ModelRouterTests: XCTestCase {
     expect(snapshot.loaded.first?.inFlightRequests) == 1
   }
 
-  func testEmbeddingContentionQueuesThenProceeds() async throws {
+  func testEmbeddingContentionAdmitsPastRouterLimit() async throws {
     let router = makeEmbeddingRouter(embeddingMaxConcurrency: 1)
     let model = embeddingDesc("embed", 10)
-    _ = try await router.routeEmbeddingAndBegin(model)  // loads, holds the only slot
+    let first = try await router.routeEmbeddingAndBegin(model)
+    let second = try await router.routeEmbeddingAndBegin(model)
 
-    async let second = router.routeEmbeddingAndBegin(model)
-    for _ in 0..<20 { await Task.yield() }
-    var snapshot = await router.snapshot()
-    expect(snapshot.loaded.first?.inFlightRequests) == 1
-
-    await router.embeddingRequestDone(modelID: model.id)
-    _ = try await second
-    snapshot = await router.snapshot()
-    expect(snapshot.loaded.first?.inFlightRequests) == 1
+    expect(first === second) == true
+    let snapshot = await router.snapshot()
+    expect(snapshot.loaded.first?.inFlightRequests) == 2
   }
 
   func testChatQueueTimeoutSurfacesConcurrencyLimit() async throws {
@@ -526,21 +521,15 @@ final class ModelRouterTests: XCTestCase {
     }
   }
 
-  func testEmbeddingQueueTimeoutSurfacesConcurrencyLimit() async throws {
+  func testEmbeddingQueueTimeoutDoesNotRejectAtRouterLimit() async throws {
     let router = makeEmbeddingRouter(embeddingMaxConcurrency: 1)
     await router.setQueueTimeoutNanos(50_000_000)
     let model = embeddingDesc("embed", 10)
-    _ = try await router.routeEmbeddingAndBegin(model)  // never released
+    _ = try await router.routeEmbeddingAndBegin(model)
+    _ = try await router.routeEmbeddingAndBegin(model)
 
-    do {
-      _ = try await router.routeEmbeddingAndBegin(model)
-      fail("expected concurrencyLimitExceeded after the queue wait timed out")
-    } catch let error as ModelRouter.RouteError {
-      guard case .concurrencyLimitExceeded = error else {
-        fail("expected concurrencyLimitExceeded, got \(error)")
-        return
-      }
-    }
+    let snapshot = await router.snapshot()
+    expect(snapshot.loaded.first?.inFlightRequests) == 2
   }
 
   func testChatDefaultWidthAdmitsUpToLimitThenQueues() async throws {

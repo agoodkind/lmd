@@ -49,7 +49,10 @@ public enum EmbeddingBackendSelectionError: Equatable, Sendable, UnsupportedEmbe
 }
 
 public enum EmbeddingBackendFactory {
-  public static func makeBackend(descriptor: ModelDescriptor) throws -> EmbeddingBackendProtocol {
+  public static func makeBackend(
+    descriptor: ModelDescriptor,
+    tuning: EmbeddingRuntimeTuning = .fallback
+  ) throws -> EmbeddingBackendProtocol {
     let family = try EmbeddingBackendSelector.select(descriptor: descriptor)
     switch family {
     case .mlx:
@@ -59,7 +62,7 @@ public enum EmbeddingBackendFactory {
       log.info(
         "embedding.backend_selected model=\(descriptor.id, privacy: .public) backend=nvidia_mistral_bidirectional"
       )
-      return NVEmbeddingBackend(descriptor: descriptor, metadata: metadata)
+      return NVEmbeddingBackend(descriptor: descriptor, metadata: metadata, tuning: tuning)
     }
   }
 }

@@ -48,6 +48,36 @@ final class HostArgumentsTests: XCTestCase {
     expect(args?.contextLength) == 8_192
   }
 
+  func testParsesEmbeddingTuningFlags() {
+    let args = HostArguments.parse([
+      "--model", "/m", "--kind", "embedding", "--host-service", "svc",
+      "--mlx-cache-limit-bytes", "8589934592",
+      "--embed-slot-budget", "23552",
+      "--embed-max-rows", "256",
+      "--embed-priority-max-inputs", "2",
+      "--embed-priority-max-tokens", "2048",
+      "--embed-priority-lane", "1",
+      "--embed-max-forwards", "1",
+    ])
+    expect(args?.mlxCacheLimitBytes) == 8_589_934_592
+    expect(args?.embedSlotBudget) == 23_552
+    expect(args?.embedMaxRows) == 256
+    expect(args?.embedPriorityMaxInputs) == 2
+    expect(args?.embedPriorityMaxTokens) == 2_048
+    expect(args?.embedPriorityLane) == true
+    expect(args?.embedMaxForwards) == 1
+  }
+
+  func testEmbeddingTuningFlagsAreOptional() {
+    let args = HostArguments.parse([
+      "--model", "/m", "--kind", "embedding", "--host-service", "svc",
+    ])
+    expect(args).toNot(beNil())
+    expect(args?.mlxCacheLimitBytes).to(beNil())
+    expect(args?.embedSlotBudget).to(beNil())
+    expect(args?.embedPriorityLane) == true
+  }
+
   func testRejectsUnknownKind() {
     let args = HostArguments.parse([
       "--model", "/m", "--kind", "bogus", "--host-service", "s",

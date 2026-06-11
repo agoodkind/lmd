@@ -99,6 +99,18 @@ final class SnapshotSinkFactoryTests: XCTestCase {
     expect(found.last) == (expected: 3.0, delta: 1e-9)
   }
 
+  func testObserveValueLandsInSnapshotHistogram() {
+    SwiftLMMetrics.bootstrap(process: "test", sourceID: "test-source")
+    SwiftLMMetrics.observeValue("test_unitless_histogram", 0.916)
+    SwiftLMMetrics.observeValue("test_unitless_histogram", 0.1)
+    let snapshot = SwiftLMMetrics.sink.snapshot()
+    let histogram = snapshot.metrics.histograms.first { $0.name == "test_unitless_histogram" }
+    expect(histogram).toNot(beNil())
+    expect(histogram?.count) == 2
+    expect(histogram?.last) == 0.1
+    expect(histogram?.max) == 0.916
+  }
+
   func testSourceIdStampedOnEverySeries() {
     let sink = configuredSink(sourceID: "host:chat:/models/x")
     sink.makeCounter(label: "c", dimensions: []).increment(by: 1)

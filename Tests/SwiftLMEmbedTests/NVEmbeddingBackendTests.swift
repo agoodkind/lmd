@@ -136,6 +136,24 @@ final class NVEmbeddingBackendTests: XCTestCase {
     }
   }
 
+  func testPoolingPromotesBF16HiddenStatesToFloat32() throws {
+    try withMLXMetallib {
+      let hiddenStates = MLXArray([
+        3.0 as Float, 4.0, 9.0, 12.0, 100.0, 100.0,
+      ]).reshaped(1, 3, 2).asType(.bfloat16)
+      let attentionMask = MLXArray([1 as Int32, 1, 0]).reshaped(1, 3)
+      let pooled = NVEmbeddingBackend.poolHiddenStates(
+        hiddenStates: hiddenStates,
+        attentionMask: attentionMask,
+        metadata: metadata(dimension: 2)
+      )
+      pooled.eval()
+
+      expect(pooled.dtype) == .float32
+      assertVector(pooled[0].asArray(Float.self), approximately: [0.6, 0.8])
+    }
+  }
+
   func testTinyMistralAdapterReturnsNormalizedBatchVectors() throws {
     try withMLXMetallib {
       let configuration = NVMistralBiDirectionalConfiguration(
@@ -168,6 +186,42 @@ final class NVEmbeddingBackendTests: XCTestCase {
       expect(pooled[1].asArray(Float.self).count) == 8
       expect(self.l2Norm(pooled[0].asArray(Float.self))) == (expected: 1.0, delta: 0.0001)
       expect(self.l2Norm(pooled[1].asArray(Float.self))) == (expected: 1.0, delta: 0.0001)
+    }
+  }
+
+  func testPackedEmbedMatchesSingleBatchVectors() throws {
+    try withMLXMetallib {
+      let configuration = NVMistralBiDirectionalConfiguration(
+        hiddenSize: 8,
+        hiddenLayers: 1,
+        intermediateSize: 16,
+        attentionHeads: 2,
+        keyValueHeads: 1,
+        vocabularySize: 32
+      )
+      let model = NVMistralBiDirectionalModel(configuration)
+      let encoded: [[Int]] = [[1, 3, 4, 5, 6], [1, 5], [1, 7, 8]]
+      let meta = metadata(dimension: 8)
+
+      let single = NVEmbeddingBackend.forwardEncoded(
+        encoded: encoded,
+        model: model,
+        metadata: meta,
+        slotBudget: 1_000,
+        maxRows: 256
+      )
+      let packed = NVEmbeddingBackend.forwardEncoded(
+        encoded: encoded,
+        model: model,
+        metadata: meta,
+        slotBudget: 6,
+        maxRows: 2
+      )
+
+      expect(packed.count) == 3
+      for (singleRow, packedRow) in zip(single, packed) {
+        assertVector(packedRow, approximately: singleRow)
+      }
     }
   }
 

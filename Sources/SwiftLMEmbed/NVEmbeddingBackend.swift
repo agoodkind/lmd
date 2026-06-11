@@ -7,6 +7,7 @@
 //
 
 import AppLogger
+import Dispatch
 import Foundation
 import MLX
 import MLXHuggingFace
@@ -14,6 +15,7 @@ import MLXLMCommon
 import MLXNN
 import SwiftLMBackend
 import SwiftLMCore
+import SwiftLMMetrics
 import SwiftLMTrace
 import Tokenizers
 
@@ -78,16 +80,24 @@ public enum NVEmbeddingPaddingSide: String, Codable, Equatable, Sendable {
 }
 
 public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sendable {
+  private static let nanosecondsPerSecond = 1_000_000_000.0
+
   private let descriptor: ModelDescriptor
   private let metadata: NVEmbeddingMetadata
+  private let tuning: EmbeddingRuntimeTuning
   private var runtime: NVEmbeddingRuntime?
 
   public var modelID: String { descriptor.id }
   public var sizeBytes: Int64 { descriptor.sizeBytes }
 
-  public init(descriptor: ModelDescriptor, metadata: NVEmbeddingMetadata) {
+  public init(
+    descriptor: ModelDescriptor,
+    metadata: NVEmbeddingMetadata,
+    tuning: EmbeddingRuntimeTuning = .fallback
+  ) {
     self.descriptor = descriptor
     self.metadata = metadata
+    self.tuning = tuning
   }
 
   private var traceBackendObjectID: String {
@@ -210,26 +220,44 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
     )
   }
 
+  public func countTokens(inputs: [String]) -> Int {
+    guard let runtime else {
+      return EmbeddingBackendTokenEstimator.countTokens(inputs: inputs)
+    }
+    return EmbeddingBackendTokenEstimator.countTokens(
+      encodedInputs: encodeInputs(inputs, tokenizer: runtime.tokenizer)
+    )
+  }
+
   public func embed(inputs: [String]) throws -> [[Float]] {
     guard let runtime else {
       throw NVEmbeddingRuntimeError.modelNotLoaded
     }
+    let requestStarted = DispatchTime.now()
     BackendTrace.debug(
       phase: TracePhase.Embedding.requestPreTokenize.rawValue,
       context: requestContext(),
       snapshot: .current(),
       extras: ["input_count": "\(inputs.count)"]
     )
-    let batch = tokenize(inputs: inputs, tokenizer: runtime.tokenizer)
+    let encoded = encodeInputs(inputs, tokenizer: runtime.tokenizer)
+    let forwardPlan = Self.makeForwardPlan(
+      encoded: encoded,
+      slotBudget: tuning.slotBudget,
+      maxRows: tuning.maxRows
+    )
+    let aggregateStats = forwardPlan.stats
     BackendTrace.debug(
       phase: TracePhase.Embedding.requestPostTokenize.rawValue,
       context: requestContext(),
       snapshot: .current(),
       extras: [
-        "batch_size": "\(batch.stats.batchSize)",
-        "max_seq_len": "\(batch.stats.maxSeqLen)",
-        "total_tokens": "\(batch.stats.totalTokens)",
-        "padding_ratio": String(format: "%.4f", batch.stats.paddingRatio),
+        "batch_size": "\(aggregateStats.batchSize)",
+        "max_seq_len": "\(aggregateStats.maxSeqLen)",
+        "padding_ratio": String(format: "%.4f", aggregateStats.paddingRatio),
+        "padded_slots": "\(aggregateStats.totalPaddedSlots)",
+        "sub_batches": "\(aggregateStats.groupCount)",
+        "total_tokens": "\(aggregateStats.totalTokens)",
       ]
     )
     BackendTrace.debug(
@@ -237,52 +265,156 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
       context: requestContext(),
       snapshot: .current()
     )
-    let hiddenStates = runtime.model(batch.inputIDs, attentionMask: batch.attentionMask)
+    let result = Self.executeForwardPlan(
+      encoded: encoded,
+      model: runtime.model,
+      metadata: metadata,
+      plan: forwardPlan
+    )
     BackendTrace.debug(
       phase: TracePhase.Embedding.requestPostForward.rawValue,
       context: requestContext(),
       snapshot: .current()
-    )
-    let pooled = Self.poolHiddenStates(
-      hiddenStates: hiddenStates,
-      attentionMask: batch.attentionMask,
-      metadata: metadata
     )
     BackendTrace.debug(
       phase: TracePhase.Embedding.requestPostPool.rawValue,
       context: requestContext(),
       snapshot: .current()
     )
-    pooled.eval()
     BackendTrace.debug(
       phase: TracePhase.Embedding.requestPostEval.rawValue,
       context: requestContext(),
       snapshot: .current()
     )
-
-    let batchCount = pooled.shape[0]
-    var rows: [[Float]] = []
-    rows.reserveCapacity(batchCount)
-    for i in 0..<batchCount {
-      rows.append(pooled[i].asArray(Float.self))
+    let elapsedSeconds =
+      Double(DispatchTime.now().uptimeNanoseconds - requestStarted.uptimeNanoseconds)
+      / Self.nanosecondsPerSecond
+    SwiftLMMetrics.observeValue("lmd_embed_padding_ratio", result.stats.paddingRatio)
+    SwiftLMMetrics.observeValue(
+      "lmd_embed_batch_tokens_real",
+      Double(result.stats.totalTokens))
+    SwiftLMMetrics.observeValue(
+      "lmd_embed_batch_tokens_padded",
+      Double(result.stats.totalPaddedSlots))
+    if elapsedSeconds > 0 {
+      SwiftLMMetrics.observeValue(
+        "lmd_embed_tokens_per_second",
+        Double(result.stats.totalTokens) / elapsedSeconds)
     }
+
     BackendTrace.debug(
       phase: TracePhase.Embedding.requestPreReturn.rawValue,
       context: requestContext(),
       snapshot: .current(),
-      extras: ["row_count": "\(rows.count)"]
+      extras: ["row_count": "\(result.rows.count)"]
     )
-    return rows
+    return result.rows
   }
 
-  func tokenize(inputs: [String], tokenizer: any MLXLMCommon.Tokenizer) -> NVEmbeddingBatch {
-    var encodedInputs = inputs.map { input in
+  func encodeInputs(_ inputs: [String], tokenizer: any MLXLMCommon.Tokenizer) -> [[Int]] {
+    inputs.map { input in
       let encoded = tokenizer.encode(text: input, addSpecialTokens: true)
       if encoded.count > metadata.maxSequenceLength {
         return Array(encoded.prefix(metadata.maxSequenceLength))
       }
       return encoded
     }
+  }
+
+  func padEncoded(_ encodedGroup: [[Int]]) -> NVEmbeddingBatch {
+    Self.padEncoded(encodedGroup, metadata: metadata)
+  }
+
+  func tokenize(inputs: [String], tokenizer: any MLXLMCommon.Tokenizer) -> NVEmbeddingBatch {
+    let encoded = encodeInputs(inputs, tokenizer: tokenizer)
+    return padEncoded(encoded)
+  }
+
+  static func forwardEncoded(
+    encoded: [[Int]],
+    model: NVMistralBiDirectionalModel,
+    metadata: NVEmbeddingMetadata,
+    slotBudget: Int,
+    maxRows: Int
+  ) -> [[Float]] {
+    forwardEncodedWithStats(
+      encoded: encoded,
+      model: model,
+      metadata: metadata,
+      slotBudget: slotBudget,
+      maxRows: maxRows
+    ).rows
+  }
+
+  static func forwardEncodedWithStats(
+    encoded: [[Int]],
+    model: NVMistralBiDirectionalModel,
+    metadata: NVEmbeddingMetadata,
+    slotBudget: Int,
+    maxRows: Int
+  ) -> NVEmbeddingForwardResult {
+    let plan = makeForwardPlan(
+      encoded: encoded,
+      slotBudget: slotBudget,
+      maxRows: maxRows
+    )
+    return executeForwardPlan(
+      encoded: encoded,
+      model: model,
+      metadata: metadata,
+      plan: plan
+    )
+  }
+
+  private static func makeForwardPlan(
+    encoded: [[Int]],
+    slotBudget: Int,
+    maxRows: Int
+  ) -> NVEmbeddingForwardPlan {
+    let lengths = encoded.map(\.count)
+    let groups = EmbeddingBatchPacker.pack(
+      lengths: lengths,
+      slotBudget: slotBudget,
+      maxRows: maxRows
+    )
+    let stats = NVEmbeddingAggregateStats.from(encoded: encoded, groups: groups)
+    return NVEmbeddingForwardPlan(groups: groups, stats: stats)
+  }
+
+  private static func executeForwardPlan(
+    encoded: [[Int]],
+    model: NVMistralBiDirectionalModel,
+    metadata: NVEmbeddingMetadata,
+    plan: NVEmbeddingForwardPlan
+  ) -> NVEmbeddingForwardResult {
+    var rows = Array(repeating: [Float](), count: encoded.count)
+
+    for group in plan.groups {
+      let encodedGroup = group.map { encoded[$0] }
+      let batch = padEncoded(encodedGroup, metadata: metadata)
+      let hiddenStates = model(batch.inputIDs, attentionMask: batch.attentionMask)
+      let pooled = poolHiddenStates(
+        hiddenStates: hiddenStates,
+        attentionMask: batch.attentionMask,
+        metadata: metadata
+      )
+      pooled.eval()
+
+      // EmbeddingBatchPacker covers each original index exactly once, so this
+      // loop assigns every result slot exactly once while preserving request order.
+      for (rowOffset, originalIndex) in group.enumerated() {
+        rows[originalIndex] = pooled[rowOffset].asArray(Float.self)
+      }
+    }
+
+    return NVEmbeddingForwardResult(rows: rows, stats: plan.stats)
+  }
+
+  static func padEncoded(
+    _ encodedGroup: [[Int]],
+    metadata: NVEmbeddingMetadata
+  ) -> NVEmbeddingBatch {
+    var encodedInputs = encodedGroup
     if encodedInputs.isEmpty {
       encodedInputs = [[]]
     }
@@ -330,12 +462,15 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
     attentionMask: MLXArray,
     metadata: NVEmbeddingMetadata
   ) -> MLXArray {
-    let mask = attentionMask.asType(hiddenStates.dtype)
+    // Mean-pool and L2-normalize in fp32: the division and normalization are the
+    // most precision-sensitive steps, and the cast costs one elementwise pass.
+    let hiddenStates32 = hiddenStates.asType(.float32)
+    let mask = attentionMask.asType(.float32)
     let expandedMask = mask.expandedDimensions(axes: [-1])
-    let summed = sum(hiddenStates * expandedMask, axis: 1)
+    let summed = sum(hiddenStates32 * expandedMask, axis: 1)
     let counts = MLX.maximum(
       sum(mask, axis: -1, keepDims: true),
-      MLXArray(Float(1.0)).asType(hiddenStates.dtype)
+      MLXArray(Float(1.0)).asType(.float32)
     )
     var pooled = summed / counts
     if metadata.embeddingDimension < pooled.dim(-1) {
@@ -344,6 +479,60 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
     return pooled.l2Normalized()
   }
 }
+
+// MARK: - Forward Planning
+
+struct NVEmbeddingForwardResult: Sendable {
+  let rows: [[Float]]
+  let stats: NVEmbeddingAggregateStats
+}
+
+struct NVEmbeddingForwardPlan: Sendable {
+  let groups: [[Int]]
+  let stats: NVEmbeddingAggregateStats
+}
+
+struct NVEmbeddingAggregateStats: Sendable {
+  let batchSize: Int
+  let maxSeqLen: Int
+  let totalTokens: Int
+  let totalPaddedSlots: Int
+  let groupCount: Int
+
+  var paddingRatio: Double {
+    guard totalPaddedSlots > 0 else {
+      return 0.0
+    }
+    return 1.0 - Double(totalTokens) / Double(totalPaddedSlots)
+  }
+
+  static func from(encoded: [[Int]], groups: [[Int]]) -> NVEmbeddingAggregateStats {
+    var maxSeqLen = 0
+    var totalTokens = 0
+    var totalPaddedSlots = 0
+
+    for group in groups {
+      var groupMaxSeqLen = 1
+      for index in group {
+        let tokenCount = encoded[index].count
+        totalTokens += tokenCount
+        groupMaxSeqLen = max(groupMaxSeqLen, tokenCount)
+      }
+      maxSeqLen = max(maxSeqLen, groupMaxSeqLen)
+      totalPaddedSlots += group.count * groupMaxSeqLen
+    }
+
+    return NVEmbeddingAggregateStats(
+      batchSize: encoded.count,
+      maxSeqLen: maxSeqLen,
+      totalTokens: totalTokens,
+      totalPaddedSlots: totalPaddedSlots,
+      groupCount: groups.count
+    )
+  }
+}
+
+// MARK: - Batch Tensors
 
 struct NVEmbeddingBatch {
   let inputIDs: MLXArray

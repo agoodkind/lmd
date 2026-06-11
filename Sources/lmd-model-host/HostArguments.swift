@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import SwiftLMEmbed
 import SwiftLMHostProtocol
 
 struct HostArguments: Equatable {
@@ -24,43 +25,92 @@ struct HostArguments: Equatable {
   /// passes it so the video host samples at the same rate the in-process backend
   /// did. nil for non-video kinds or a video model with no detected rate.
   let videoSamplingFPS: Double?
+  let mlxCacheLimitBytes: Int?
+  let embedSlotBudget: Int?
+  let embedMaxRows: Int?
+  let embedPriorityMaxInputs: Int?
+  let embedPriorityMaxTokens: Int?
+  /// The priority-lane switch carried by `--embed-priority-lane`. A host
+  /// launched without the flag runs with the fallback (lane enabled), the same
+  /// value the broker sends by default, so absence and default agree.
+  let embedPriorityLane: Bool
+  let embedMaxForwards: Int?
 
-  /// Parse `--model <path> --kind <chat|embedding|video> --host-service <name>`
-  /// plus the optional `--video-sampling-fps <double>`. Returns nil when any
-  /// required field is missing or the kind is unrecognized.
+  /// Parse the required host fields plus optional chat, video, and embedding
+  /// tuning flags. Returns nil when any required field is missing or the kind is
+  /// unrecognized.
   static func parse(_ argv: [String]) -> HostArguments? {
-    var model: String?
-    var kindRaw: String?
-    var service: String?
-    var swiftLMBinaryPath: String?
-    var swiftLMLogPath: String?
-    var contextLength: Int?
-    var videoSamplingFPS: Double?
+    var parsedModel: String?
+    var parsedKindRaw: String?
+    var parsedService: String?
+    var parsedSwiftLMBinaryPath: String?
+    var parsedSwiftLMLogPath: String?
+    var parsedContextLength: Int?
+    var parsedVideoSamplingFPS: Double?
+    var parsedMlxCacheLimitBytes: Int?
+    var parsedEmbedSlotBudget: Int?
+    var parsedEmbedMaxRows: Int?
+    var parsedEmbedPriorityMaxInputs: Int?
+    var parsedEmbedPriorityMaxTokens: Int?
+    var parsedEmbedPriorityLane = EmbeddingRuntimeTuning.fallback.priorityLaneEnabled
+    var parsedEmbedMaxForwards: Int?
     var index = 0
     while index + 1 < argv.count {
       switch argv[index] {
-      case "--model": model = argv[index + 1]
-      case "--kind": kindRaw = argv[index + 1]
-      case "--host-service": service = argv[index + 1]
-      case "--swiftlm-binary": swiftLMBinaryPath = argv[index + 1]
-      case "--swiftlm-log-path": swiftLMLogPath = argv[index + 1]
-      case "--context-length": contextLength = Int(argv[index + 1])
-      case "--video-sampling-fps": videoSamplingFPS = Double(argv[index + 1])
+      case "--model": parsedModel = argv[index + 1]
+      case "--kind": parsedKindRaw = argv[index + 1]
+      case "--host-service": parsedService = argv[index + 1]
+      case "--swiftlm-binary": parsedSwiftLMBinaryPath = argv[index + 1]
+      case "--swiftlm-log-path": parsedSwiftLMLogPath = argv[index + 1]
+      case "--context-length": parsedContextLength = Int(argv[index + 1])
+      case "--video-sampling-fps": parsedVideoSamplingFPS = Double(argv[index + 1])
+      case "--mlx-cache-limit-bytes": parsedMlxCacheLimitBytes = Int(argv[index + 1])
+      case "--embed-slot-budget": parsedEmbedSlotBudget = Int(argv[index + 1])
+      case "--embed-max-rows": parsedEmbedMaxRows = Int(argv[index + 1])
+      case "--embed-priority-max-inputs": parsedEmbedPriorityMaxInputs = Int(argv[index + 1])
+      case "--embed-priority-max-tokens": parsedEmbedPriorityMaxTokens = Int(argv[index + 1])
+      case "--embed-priority-lane": parsedEmbedPriorityLane = argv[index + 1] == "1"
+      case "--embed-max-forwards": parsedEmbedMaxForwards = Int(argv[index + 1])
       default: break
       }
       index += 2
     }
-    guard let model, let kindRaw, let service, let kind = BackendKind(rawValue: kindRaw) else {
+    guard let parsedModel, let parsedKindRaw, let parsedService,
+      let parsedKind = BackendKind(rawValue: parsedKindRaw)
+    else {
       return nil
     }
     return HostArguments(
-      modelPath: model,
-      kind: kind,
-      hostService: service,
-      swiftLMBinaryPath: swiftLMBinaryPath,
-      swiftLMLogPath: swiftLMLogPath,
-      contextLength: contextLength,
-      videoSamplingFPS: videoSamplingFPS
+      modelPath: parsedModel,
+      kind: parsedKind,
+      hostService: parsedService,
+      swiftLMBinaryPath: parsedSwiftLMBinaryPath,
+      swiftLMLogPath: parsedSwiftLMLogPath,
+      contextLength: parsedContextLength,
+      videoSamplingFPS: parsedVideoSamplingFPS,
+      mlxCacheLimitBytes: parsedMlxCacheLimitBytes,
+      embedSlotBudget: parsedEmbedSlotBudget,
+      embedMaxRows: parsedEmbedMaxRows,
+      embedPriorityMaxInputs: parsedEmbedPriorityMaxInputs,
+      embedPriorityMaxTokens: parsedEmbedPriorityMaxTokens,
+      embedPriorityLane: parsedEmbedPriorityLane,
+      embedMaxForwards: parsedEmbedMaxForwards
+    )
+  }
+
+  /// The tuning the embedding backend and queue consume. Fallback values cover
+  /// a host launched without tuning flags (tests, manual runs).
+  func embeddingRuntimeTuning() -> EmbeddingRuntimeTuning {
+    EmbeddingRuntimeTuning(
+      slotBudget: embedSlotBudget ?? EmbeddingRuntimeTuning.fallback.slotBudget,
+      maxRows: embedMaxRows ?? EmbeddingRuntimeTuning.fallback.maxRows,
+      priorityMaxInputs: embedPriorityMaxInputs
+        ?? EmbeddingRuntimeTuning.fallback.priorityMaxInputs,
+      priorityMaxTokens: embedPriorityMaxTokens
+        ?? EmbeddingRuntimeTuning.fallback.priorityMaxTokens,
+      priorityLaneEnabled: embedPriorityLane,
+      maxConcurrentForwards: embedMaxForwards
+        ?? EmbeddingRuntimeTuning.fallback.maxConcurrentForwards
     )
   }
 }
