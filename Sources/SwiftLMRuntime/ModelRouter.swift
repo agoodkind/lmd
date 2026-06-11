@@ -557,7 +557,10 @@ public actor ModelRouter {
     case .chat:
       return chatMaxConcurrency
     case .embedding:
-      return embeddingMaxConcurrency
+      // Forward concurrency is enforced by the embedding host's job queue
+      // (EmbeddingJobQueue); admitting here and queueing there keeps bulk
+      // clients from seeing 429s while a forward is busy.
+      return nil
     case .video:
       return nil
     }
