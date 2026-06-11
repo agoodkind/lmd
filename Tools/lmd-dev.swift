@@ -1555,39 +1555,24 @@ final class DevTool {
     }
     // swift-mk's codesign-run owns the canonical flags and the strict verify;
     // the resolved identity rides in through SWIFT_MK_SIGN_IDENTITY so lmd's
-    // signing.env source keeps working. The direct codesign below survives
-    // only for a checkout with no swift-mk binary, so signing never breaks.
-    if let swiftMk = swiftMkBinaryPath() {
-      let process = Process()
-      process.executableURL = URL(fileURLWithPath: swiftMk)
-      process.arguments = [
-        "codesign-run", "--mode", "binary", "--identifier", identifier, path.path,
-      ]
-      var processEnvironment = ProcessInfo.processInfo.environment
-      processEnvironment["SWIFT_MK_SIGN_IDENTITY"] = identity
-      process.environment = processEnvironment
-      try process.run()
-      process.waitUntilExit()
-      guard process.terminationStatus == 0 else {
-        throw ToolError.failure("sign: swift-mk codesign-run failed for \(path.path)")
-      }
-      return
+    // signing.env source keeps working. There is no direct-codesign fallback:
+    // a checkout without the binary runs make first.
+    guard let swiftMk = swiftMkBinaryPath() else {
+      throw ToolError.failure("sign: swift-mk binary not found; run make swift-mk-bin")
     }
-    try runPassthrough(
-      "codesign",
-      [
-        "--sign",
-        identity,
-        "--identifier",
-        identifier,
-        "--options",
-        "runtime",
-        "--timestamp",
-        "--force",
-        path.path,
-      ]
-    )
-    try runPassthrough("codesign", ["--verify", "--strict", "--verbose=2", path.path])
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: swiftMk)
+    process.arguments = [
+      "codesign-run", "--mode", "binary", "--identifier", identifier, path.path,
+    ]
+    var processEnvironment = ProcessInfo.processInfo.environment
+    processEnvironment["SWIFT_MK_SIGN_IDENTITY"] = identity
+    process.environment = processEnvironment
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+      throw ToolError.failure("sign: swift-mk codesign-run failed for \(path.path)")
+    }
   }
 
   /// Resource bundles in the staged release directory that need a real
