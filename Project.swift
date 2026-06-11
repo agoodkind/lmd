@@ -326,8 +326,7 @@ let project = Project(
     testTarget(
       "LMDBenchToolTests",
       dependencies: [
-        .target(name: "LMDBenchTool"),
-        .external(name: "Nimble"),
+        .target(name: "LMDBenchTool")
       ]
     ),
     testTarget(
