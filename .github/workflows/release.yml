@@ -18,7 +18,7 @@ jobs:
     with:
       runner: macos-26
       brew-packages: ccache
-      make-args: "LMD_ENABLE_CCACHE=1"
+      make-args: "SWIFT_MK_BUILD_CACHE=ccache"
       # lmd ships bare CLI binaries: lmd-dev notarizes its own zip inside the
       # build hook (a zip of bare binaries cannot be stapled), so the shared
       # notarize step is disabled; the pattern still drives attestation.

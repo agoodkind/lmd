@@ -25,11 +25,6 @@ SWIFT_FORMAT_TARGETS := Sources Tests Tools
 SWIFTLINT_TARGETS := Sources Tests Tools
 SWIFTCHECK_EXTRA_TARGETS := Sources Tests Tools
 
-# CI default; release.yml overrides it as a make variable, and the export is
-# what carries the override into the lmd-dev child process.
-LMD_ENABLE_CCACHE ?= 0
-export LMD_ENABLE_CCACHE
-
 # Release artifacts for the shared _release.yml pipeline: build, post-build
 # codesign, then lmd-dev's own notarization (bare CLI zips cannot be stapled,
 # so the shared workflow runs with notarize disabled), then the zip into dist/.

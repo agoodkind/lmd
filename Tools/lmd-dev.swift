@@ -71,11 +71,6 @@ struct HTTPResult {
   let data: Data
 }
 
-struct BuildCacheTool {
-  let name: String
-  let executable: String
-}
-
 struct SmokeConfiguration {
   let binaryDirectory: URL
   let host: String
@@ -1408,13 +1403,10 @@ final class DevTool {
   /// "is not an executable file". `xcodeBuildEnvironment()` is used for that
   /// path instead.
   private func buildEnvironment() throws -> [String: String] {
-    var environmentMap = ProcessInfo.processInfo.environment
-    if let buildCacheTool = try resolveBuildCacheTool() {
-      try writeLine("[build-cache] using \(buildCacheTool.name): \(buildCacheTool.executable)")
-      environmentMap["CC"] = "\(buildCacheTool.executable) /usr/bin/clang"
-      environmentMap["CXX"] = "\(buildCacheTool.executable) /usr/bin/clang++"
-    }
-    return environmentMap
+    // CC/CXX arrive from swift-mk's gated build when SWIFT_MK_BUILD_CACHE is
+    // set, so this layer only passes the environment through. xcodebuild
+    // paths strip the two-word wrappers in xcodeBuildEnvironment().
+    ProcessInfo.processInfo.environment
   }
 
   /// Environment for `xcodebuild` invocations. Deliberately leaves `CC`/`CXX`
@@ -1430,73 +1422,6 @@ final class DevTool {
     return environmentMap
   }
 
-  private func resolveBuildCacheTool() throws -> BuildCacheTool? {
-    if let selectedCache = environment.values["LMD_BUILD_CACHE"], !selectedCache.isEmpty {
-      return try explicitlySelectedBuildCacheTool(selectedCache)
-    }
-
-    let sccacheEnabled = isEnabled(environment.values["LMD_ENABLE_SCCACHE"])
-    let ccacheEnabled = isEnabled(environment.values["LMD_ENABLE_CCACHE"])
-
-    if sccacheEnabled, let executable = findExecutable("sccache") {
-      return BuildCacheTool(name: "sccache", executable: executable)
-    }
-    if sccacheEnabled {
-      try writeLine(
-        "[build-cache] LMD_ENABLE_SCCACHE is set, but sccache was not found; building without sccache"
-      )
-    }
-
-    if ccacheEnabled, let executable = findExecutable("ccache") {
-      return BuildCacheTool(name: "ccache", executable: executable)
-    }
-    if ccacheEnabled {
-      try writeLine(
-        "[build-cache] LMD_ENABLE_CCACHE is set, but ccache was not found; building without ccache")
-    }
-
-    return nil
-  }
-
-  private func explicitlySelectedBuildCacheTool(_ selectedCache: String) throws -> BuildCacheTool? {
-    let normalizedCache = selectedCache.lowercased()
-    if normalizedCache == "none" || normalizedCache == "off" || normalizedCache == "0" {
-      return nil
-    }
-    if normalizedCache == "sccache" || normalizedCache == "ccache" {
-      if let executable = findExecutable(normalizedCache) {
-        return BuildCacheTool(name: normalizedCache, executable: executable)
-      }
-      try writeLine(
-        "[build-cache] LMD_BUILD_CACHE=\(normalizedCache), but \(normalizedCache) was not found; building without cache"
-      )
-      return nil
-    }
-    throw ToolError.usage("LMD_BUILD_CACHE must be sccache, ccache, none, off, or 0")
-  }
-
-  private func isEnabled(_ rawValue: String?) -> Bool {
-    guard let rawValue else {
-      return false
-    }
-    let normalizedValue = rawValue.lowercased()
-    return ["1", "true", "yes", "on"].contains(normalizedValue)
-  }
-
-  private func findExecutable(_ name: String) -> String? {
-    if name.contains("/") {
-      return fileManager.isExecutableFile(atPath: name) ? name : nil
-    }
-
-    let pathValue = environment.value("PATH", default: "/usr/bin:/bin:/usr/sbin:/sbin")
-    for directory in pathValue.split(separator: ":") {
-      let candidate = URL(fileURLWithPath: String(directory)).appendingPathComponent(name)
-      if fileManager.isExecutableFile(atPath: candidate.path) {
-        return candidate.path
-      }
-    }
-    return nil
-  }
 
   private func buildDirectory(configuration: String) -> URL {
     productsDirectory().appendingPathComponent("Build").appendingPathComponent(configuration)
