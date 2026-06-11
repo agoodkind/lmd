@@ -7,6 +7,7 @@
 //
 
 import AppLogger
+import Dispatch
 import Foundation
 import MLX
 import MLXHuggingFace
@@ -14,6 +15,7 @@ import MLXLMCommon
 import MLXNN
 import SwiftLMBackend
 import SwiftLMCore
+import SwiftLMMetrics
 import SwiftLMTrace
 import Tokenizers
 
@@ -78,6 +80,8 @@ public enum NVEmbeddingPaddingSide: String, Codable, Equatable, Sendable {
 }
 
 public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sendable {
+  private static let nanosecondsPerSecond = 1_000_000_000.0
+
   private let descriptor: ModelDescriptor
   private let metadata: NVEmbeddingMetadata
   private var runtime: NVEmbeddingRuntime?
@@ -232,6 +236,7 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
         "padding_ratio": String(format: "%.4f", batch.stats.paddingRatio),
       ]
     )
+    let forwardStarted = DispatchTime.now()
     BackendTrace.debug(
       phase: TracePhase.Embedding.requestPreForward.rawValue,
       context: requestContext(),
@@ -259,6 +264,21 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
       context: requestContext(),
       snapshot: .current()
     )
+    let elapsedSeconds =
+      Double(DispatchTime.now().uptimeNanoseconds - forwardStarted.uptimeNanoseconds)
+      / Self.nanosecondsPerSecond
+    SwiftLMMetrics.observeValue("lmd_embed_padding_ratio", batch.stats.paddingRatio)
+    SwiftLMMetrics.observeValue(
+      "lmd_embed_batch_tokens_real",
+      Double(batch.stats.totalTokens))
+    SwiftLMMetrics.observeValue(
+      "lmd_embed_batch_tokens_padded",
+      Double(batch.stats.batchSize * batch.stats.maxSeqLen))
+    if elapsedSeconds > 0 {
+      SwiftLMMetrics.observeValue(
+        "lmd_embed_tokens_per_second",
+        Double(batch.stats.totalTokens) / elapsedSeconds)
+    }
 
     let batchCount = pooled.shape[0]
     var rows: [[Float]] = []

@@ -165,6 +165,7 @@ let project = Project(
         .target(name: "SwiftLMCore"),
         .target(name: "SwiftLMBackend"),
         .target(name: "SwiftLMTrace"),
+        .target(name: "SwiftLMMetrics"),
         .external(name: "MLXEmbedders"),
         .external(name: "MLXLMCommon"),
         .external(name: "MLXHuggingFace"),
