@@ -94,6 +94,52 @@ func resolveSiblingBinaryPath(_ name: String) -> String {
   return executableURL.deletingLastPathComponent().appendingPathComponent(name).path
 }
 
+/// Resolve the tuning bundle for one embedding-host spawn, log the chosen
+/// values, and publish them as gauges so a bench run records what the spawn
+/// actually used. Explicit config values win; auto values derive from the
+/// free-memory reading taken at spawn time.
+func resolveEmbeddingHostTuning(
+  config: BrokerConfig,
+  freeMemoryBytes: Int64,
+  modelID: String
+) -> EmbeddingHostTuning {
+  let cacheBytes = EmbeddingTuningResolver.resolveCacheLimitBytes(
+    explicitGB: config.mlxCacheLimitGB,
+    freeMemoryBytes: freeMemoryBytes
+  )
+  let perSlot = EmbeddingTuningResolver.transientBytesPerSlot(
+    hiddenSize: EmbeddingTuningResolver.defaultHiddenSize,
+    intermediateSize: EmbeddingTuningResolver.defaultIntermediateSize,
+    dtypeBytes: EmbeddingTuningResolver.defaultDtypeBytes
+  )
+  let slotBudget = EmbeddingTuningResolver.resolveSlotBudget(
+    explicit: config.embedBatchTokenBudget,
+    cacheLimitBytes: cacheBytes,
+    transientBytesPerSlot: perSlot
+  )
+  let tuning = EmbeddingHostTuning(
+    cacheLimitBytes: cacheBytes,
+    slotBudget: slotBudget,
+    maxRows: config.embedBatchMaxRows,
+    priorityMaxInputs: config.embedPriorityMaxInputs,
+    priorityMaxTokens: config.embedPriorityMaxTokens,
+    priorityLaneEnabled: config.embedPriorityLaneEnabled,
+    maxConcurrentForwards: config.embeddingMaxConcurrency
+  )
+  log.notice(
+    "embedding.tuning_resolved model=\(modelID, privacy: .public) cache_bytes=\(tuning.cacheLimitBytes, privacy: .public) slot_budget=\(tuning.slotBudget, privacy: .public) max_rows=\(tuning.maxRows, privacy: .public) forwards=\(tuning.maxConcurrentForwards, privacy: .public) lane=\(tuning.priorityLaneEnabled, privacy: .public)"
+  )
+  SwiftLMMetrics.setGauge(
+    "lmd_embed_resolved_cache_limit_bytes",
+    Double(tuning.cacheLimitBytes)
+  )
+  SwiftLMMetrics.setGauge(
+    "lmd_embed_resolved_slot_budget",
+    Double(tuning.slotBudget)
+  )
+  return tuning
+}
+
 func hostBackendKind(_ kind: SwiftLMTrace.BackendKind) -> SwiftLMHostProtocol.BackendKind {
   switch kind {
   case .chat:
@@ -460,11 +506,6 @@ struct SwiftLMD {
       exit(78)  // EX_CONFIG
     }
 
-    // Hand the resolved value to the lower-level module that owns the MLX
-    // embedding cache cap, so that module no longer reads the environment.
-    setConfiguredEmbeddingCacheLimitBytes(
-      Int((config.mlxCacheLimitGB ?? 2.0) * 1_073_741_824))
-
     // Build catalog
     let catalog = ModelCatalog(roots: ModelCatalog.defaultRoots)
     let models = catalog.allModels()
@@ -490,6 +531,13 @@ struct SwiftLMD {
         underPressure: pressureMonitor.currentLevel() != .normal
       )
     }
+    // Hand the resolved value to the lower-level module that owns the MLX
+    // embedding cache cap, so that module no longer reads the environment.
+    setConfiguredEmbeddingCacheLimitBytes(
+      EmbeddingTuningResolver.resolveCacheLimitBytes(
+        explicitGB: config.mlxCacheLimitGB,
+        freeMemoryBytes: memoryProbe().availableBytes
+      ))
 
     let binary = config.swiftlmBinary
     guard FileManager.default.isExecutableFile(atPath: binary) else {
@@ -523,6 +571,14 @@ struct SwiftLMD {
       reserveBytes: reserveBytes,
       memoryProbe: memoryProbe,
       spawner: { model, kind, loadConfig in
+        let embeddingTuning: EmbeddingHostTuning? =
+          kind == .embedding
+          ? resolveEmbeddingHostTuning(
+            config: config,
+            freeMemoryBytes: memoryProbe().availableBytes,
+            modelID: model.id
+          )
+          : nil
         let server = XPCModelServer(
           descriptor: model,
           kind: hostBackendKind(kind),
@@ -532,7 +588,8 @@ struct SwiftLMD {
           swiftLMBinaryPath: kind == .chat ? binary : nil,
           swiftLMLogPath: kind == .chat ? defaultLogPath : nil,
           contextLength: kind == .chat ? loadConfig.contextLength : nil,
-          videoSamplingFPS: kind == .video ? model.capabilities.videoSamplingFPS : nil
+          videoSamplingFPS: kind == .video ? model.capabilities.videoSamplingFPS : nil,
+          embeddingTuning: embeddingTuning
         )
         hostServers.register(modelID: model.id, server: server)
         do {

@@ -11,6 +11,7 @@
 import AppLogger
 import Darwin
 import Foundation
+import SwiftLMEmbed
 import SwiftLMHostProtocol
 import SwiftLMMetrics
 import XPC
@@ -106,7 +107,13 @@ let childReaper = ChildReaper()
 // which routes their requests to their own host below.
 let embeddingHost: EmbeddingHost?
 if args.kind == .embedding {
-  embeddingHost = EmbeddingHost(modelPath: args.modelPath)
+  if let cacheBytes = args.mlxCacheLimitBytes {
+    setConfiguredEmbeddingCacheLimitBytes(cacheBytes)
+  }
+  embeddingHost = EmbeddingHost(
+    modelPath: args.modelPath,
+    tuning: args.embeddingRuntimeTuning()
+  )
 } else {
   embeddingHost = nil
 }

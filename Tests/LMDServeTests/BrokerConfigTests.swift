@@ -102,14 +102,15 @@ final class BrokerConfigTests: XCTestCase {
   }
 
   func testEmbedKnobsParseExplicitValues() throws {
-    let config = try BrokerConfig(source: fixtureSource(overrides: [
-      .embedBatchTokenBudget: "8192",
-      .embedBatchMaxRows: "128",
-      .embedPriorityMaxInputs: "4",
-      .embedPriorityMaxTokens: "1024",
-      .embedPriorityLane: "false",
-      .mlxCacheLimitGB: "4",
-    ]))
+    let config = try BrokerConfig(
+      source: fixtureSource(overrides: [
+        .embedBatchTokenBudget: "8192",
+        .embedBatchMaxRows: "128",
+        .embedPriorityMaxInputs: "4",
+        .embedPriorityMaxTokens: "1024",
+        .embedPriorityLane: "false",
+        .mlxCacheLimitGB: "4",
+      ]))
     expect(config.embedBatchTokenBudget) == 8_192
     expect(config.embedBatchMaxRows) == 128
     expect(config.embedPriorityMaxInputs) == 4
@@ -119,10 +120,11 @@ final class BrokerConfigTests: XCTestCase {
   }
 
   func testEmbedBudgetAndCacheBlankMeansAuto() throws {
-    let config = try BrokerConfig(source: fixtureSource(overrides: [
-      .embedBatchTokenBudget: "",
-      .mlxCacheLimitGB: "",
-    ]))
+    let config = try BrokerConfig(
+      source: fixtureSource(overrides: [
+        .embedBatchTokenBudget: "",
+        .mlxCacheLimitGB: "",
+      ]))
     expect(config.embedBatchTokenBudget).to(beNil())
     expect(config.mlxCacheLimitGB).to(beNil())
   }
@@ -130,9 +132,10 @@ final class BrokerConfigTests: XCTestCase {
   func testEmbedKnobsMissingKeyFailsNamingTheKey() {
     expect {
       try BrokerConfig(source: self.fixtureSource(removing: [.embedBatchMaxRows]))
-    }.to(throwError { (error: BrokerConfigError) in
-      expect(error.problems.map(\.key)).to(contain(.embedBatchMaxRows))
-    })
+    }.to(
+      throwError { (error: BrokerConfigError) in
+        expect(error.problems.map(\.key)).to(contain(.embedBatchMaxRows))
+      })
   }
 
   func testEveryKeyIsRequired() {

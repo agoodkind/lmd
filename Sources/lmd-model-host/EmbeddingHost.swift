@@ -9,6 +9,7 @@
 //  `done`, or a single `failed` frame on any error.
 //
 
+import AppLogger
 import Dispatch
 import Foundation
 import SwiftLMBackend
@@ -18,14 +19,18 @@ import SwiftLMHostProtocol
 import SwiftLMMetrics
 import SwiftLMTrace
 
+private let log = AppLogger.logger(category: "EmbeddingHost")
+
 /// In-process embedding serving for `lmd-model-host`. Holds the loaded backend
 /// and turns a `BackendRequest` into the broker-facing frame sequence.
 actor EmbeddingHost {
   private let modelPath: String
+  let tuning: EmbeddingRuntimeTuning
   private var backend: EmbeddingBackendProtocol?
 
-  init(modelPath: String) {
+  init(modelPath: String, tuning: EmbeddingRuntimeTuning = .fallback) {
     self.modelPath = modelPath
+    self.tuning = tuning
   }
 
   /// Build the descriptor and load the embedding backend. The catalog keys a
@@ -41,6 +46,9 @@ actor EmbeddingHost {
     let backend = try EmbeddingBackendFactory.makeBackend(descriptor: descriptor)
     try await backend.launch()
     self.backend = backend
+    log.notice(
+      "embedding.host_tuning slot_budget=\(self.tuning.slotBudget, privacy: .public) max_rows=\(self.tuning.maxRows, privacy: .public) forwards=\(self.tuning.maxConcurrentForwards, privacy: .public) lane=\(self.tuning.priorityLaneEnabled, privacy: .public)"
+    )
   }
 
   /// Apply a battery throttle level to the loaded backend so it shrinks the MLX

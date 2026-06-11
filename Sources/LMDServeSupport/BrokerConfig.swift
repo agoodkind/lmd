@@ -244,10 +244,10 @@ public struct BrokerConfig: Sendable {
     let swiftlmBinary = requireString(.swiftlmBinary)
     let chatConcurrency = requireInt(.chatMaxConcurrency, min: 1)
     let embeddingConcurrency = requireInt(.embeddingMaxConcurrency, min: 1)
-    let embedBatchMaxRows = requireInt(.embedBatchMaxRows, min: 1)
-    let embedPriorityMaxInputs = requireInt(.embedPriorityMaxInputs, min: 0)
-    let embedPriorityMaxTokens = requireInt(.embedPriorityMaxTokens, min: 0)
-    let embedPriorityLaneEnabled = requireBool(.embedPriorityLane)
+    let embedMaxRowsValue = requireInt(.embedBatchMaxRows, min: 1)
+    let embedPriorityInputsValue = requireInt(.embedPriorityMaxInputs, min: 0)
+    let embedPriorityTokensValue = requireInt(.embedPriorityMaxTokens, min: 0)
+    let embedPriorityLaneValue = requireBool(.embedPriorityLane)
     let throttlePct = requireInt(.batteryThrottlePct, min: 0, max: 100)
     let mildPct = requireInt(.batteryMildPct, min: 0, max: 100)
     let resumePct = requireInt(.batteryResumePct, min: 0, max: 100)
@@ -270,46 +270,55 @@ public struct BrokerConfig: Sendable {
     let sampleInterval = requireDouble(.sampleInterval, min: 0.1)
     let promptCacheEnabled = requireBool(.promptCacheEnabled)
 
-    // Auto-capable keys must be defined (present), but a blank value is the
-    // explicit way to request "auto".
-    var embedBatchTokenBudgetValue: Int?
-    if let raw = source.raw(.embedBatchTokenBudget) {
-      if raw.isEmpty {
-        embedBatchTokenBudgetValue = nil
-      } else if let parsed = Int(raw), parsed > 0 {
-        embedBatchTokenBudgetValue = parsed
-      } else {
-        record(.embedBatchTokenBudget, raw, "must be a positive integer or blank for auto")
+    // An auto-capable key must be defined (present), but a blank value is the
+    // explicit way to request "auto" (nil). An unparseable value records a
+    // problem; the recorded problem fails the init, so the nil it returns is
+    // never read as auto.
+    func autoOrParsed<Value>(
+      _ key: BrokerConfigKey,
+      reason: String,
+      parse: (String) -> Value?
+    ) -> Value? {
+      guard let raw = source.raw(key) else {
+        record(key, nil, "must be defined (blank means auto)")
+        return nil
       }
-    } else {
-      record(.embedBatchTokenBudget, nil, "must be defined (blank means auto)")
+      if raw.isEmpty {
+        return nil
+      }
+      guard let parsed = parse(raw) else {
+        record(key, raw, reason)
+        return nil
+      }
+      return parsed
     }
 
-    var promptCacheMaxTokensValue: Int?
-    if let raw = source.raw(.promptCacheMaxTokens) {
-      if raw.isEmpty {
-        promptCacheMaxTokensValue = nil
-      } else if let parsed = Int(raw), parsed > 0 {
-        promptCacheMaxTokensValue = parsed
-      } else {
-        record(.promptCacheMaxTokens, raw, "must be a positive integer or blank for auto")
+    func positiveInt(_ text: String) -> Int? {
+      guard let value = Int(text), value > 0 else {
+        return nil
       }
-    } else {
-      record(.promptCacheMaxTokens, nil, "must be defined (blank means auto)")
+      return value
     }
 
-    var mlxCacheLimitGBValue: Double?
-    if let raw = source.raw(.mlxCacheLimitGB) {
-      if raw.isEmpty {
-        mlxCacheLimitGBValue = nil
-      } else if let parsed = Double(raw), parsed > 0 {
-        mlxCacheLimitGBValue = parsed
-      } else {
-        record(.mlxCacheLimitGB, raw, "must be a positive number or blank for auto")
+    func positiveDouble(_ text: String) -> Double? {
+      guard let value = Double(text), value > 0 else {
+        return nil
       }
-    } else {
-      record(.mlxCacheLimitGB, nil, "must be defined (blank means auto)")
+      return value
     }
+
+    let embedBatchTokenBudgetValue = autoOrParsed(
+      .embedBatchTokenBudget,
+      reason: "must be a positive integer or blank for auto",
+      parse: positiveInt)
+    let promptCacheMaxTokensValue = autoOrParsed(
+      .promptCacheMaxTokens,
+      reason: "must be a positive integer or blank for auto",
+      parse: positiveInt)
+    let mlxCacheLimitGBValue = autoOrParsed(
+      .mlxCacheLimitGB,
+      reason: "must be a positive number or blank for auto",
+      parse: positiveDouble)
 
     guard problems.isEmpty,
       let portValue,
@@ -317,10 +326,10 @@ public struct BrokerConfig: Sendable {
       let swiftlmBinary,
       let chatConcurrency,
       let embeddingConcurrency,
-      let embedBatchMaxRows,
-      let embedPriorityMaxInputs,
-      let embedPriorityMaxTokens,
-      let embedPriorityLaneEnabled,
+      let embedMaxRowsValue,
+      let embedPriorityInputsValue,
+      let embedPriorityTokensValue,
+      let embedPriorityLaneValue,
       let throttlePct,
       let mildPct,
       let resumePct,
@@ -342,10 +351,10 @@ public struct BrokerConfig: Sendable {
     self.chatMaxConcurrency = chatConcurrency
     self.embeddingMaxConcurrency = embeddingConcurrency
     self.embedBatchTokenBudget = embedBatchTokenBudgetValue
-    self.embedBatchMaxRows = embedBatchMaxRows
-    self.embedPriorityMaxInputs = embedPriorityMaxInputs
-    self.embedPriorityMaxTokens = embedPriorityMaxTokens
-    self.embedPriorityLaneEnabled = embedPriorityLaneEnabled
+    self.embedBatchMaxRows = embedMaxRowsValue
+    self.embedPriorityMaxInputs = embedPriorityInputsValue
+    self.embedPriorityMaxTokens = embedPriorityTokensValue
+    self.embedPriorityLaneEnabled = embedPriorityLaneValue
     self.mlxCacheLimitGB = mlxCacheLimitGBValue
     self.batteryThrottlePct = throttlePct
     self.batteryMildPct = mildPct
