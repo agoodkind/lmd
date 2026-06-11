@@ -171,6 +171,42 @@ final class NVEmbeddingBackendTests: XCTestCase {
     }
   }
 
+  func testPackedEmbedMatchesSingleBatchVectors() throws {
+    try withMLXMetallib {
+      let configuration = NVMistralBiDirectionalConfiguration(
+        hiddenSize: 8,
+        hiddenLayers: 1,
+        intermediateSize: 16,
+        attentionHeads: 2,
+        keyValueHeads: 1,
+        vocabularySize: 32
+      )
+      let model = NVMistralBiDirectionalModel(configuration)
+      let encoded: [[Int]] = [[1, 3, 4, 5, 6], [1, 5], [1, 7, 8]]
+      let meta = metadata(dimension: 8)
+
+      let single = NVEmbeddingBackend.forwardEncoded(
+        encoded: encoded,
+        model: model,
+        metadata: meta,
+        slotBudget: 1_000,
+        maxRows: 256
+      )
+      let packed = NVEmbeddingBackend.forwardEncoded(
+        encoded: encoded,
+        model: model,
+        metadata: meta,
+        slotBudget: 6,
+        maxRows: 2
+      )
+
+      expect(packed.count) == 3
+      for (singleRow, packedRow) in zip(single, packed) {
+        assertVector(packedRow, approximately: singleRow)
+      }
+    }
+  }
+
   private func descriptor(path: String) -> ModelDescriptor {
     ModelDescriptor(
       id: path,

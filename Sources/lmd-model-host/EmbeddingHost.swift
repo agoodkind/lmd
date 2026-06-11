@@ -43,7 +43,10 @@ actor EmbeddingHost {
       path: modelPath,
       kind: .embedding
     )
-    let backend = try EmbeddingBackendFactory.makeBackend(descriptor: descriptor)
+    let backend = try EmbeddingBackendFactory.makeBackend(
+      descriptor: descriptor,
+      tuning: self.tuning
+    )
     try await backend.launch()
     self.backend = backend
     log.notice(
