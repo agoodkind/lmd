@@ -462,12 +462,15 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
     attentionMask: MLXArray,
     metadata: NVEmbeddingMetadata
   ) -> MLXArray {
-    let mask = attentionMask.asType(hiddenStates.dtype)
+    // Mean-pool and L2-normalize in fp32: the division and normalization are the
+    // most precision-sensitive steps, and the cast costs one elementwise pass.
+    let hiddenStates32 = hiddenStates.asType(.float32)
+    let mask = attentionMask.asType(.float32)
     let expandedMask = mask.expandedDimensions(axes: [-1])
-    let summed = sum(hiddenStates * expandedMask, axis: 1)
+    let summed = sum(hiddenStates32 * expandedMask, axis: 1)
     let counts = MLX.maximum(
       sum(mask, axis: -1, keepDims: true),
-      MLXArray(Float(1.0)).asType(hiddenStates.dtype)
+      MLXArray(Float(1.0)).asType(.float32)
     )
     var pooled = summed / counts
     if metadata.embeddingDimension < pooled.dim(-1) {

@@ -136,6 +136,24 @@ final class NVEmbeddingBackendTests: XCTestCase {
     }
   }
 
+  func testPoolingPromotesBF16HiddenStatesToFloat32() throws {
+    try withMLXMetallib {
+      let hiddenStates = MLXArray([
+        3.0 as Float, 4.0, 9.0, 12.0, 100.0, 100.0,
+      ]).reshaped(1, 3, 2).asType(.bfloat16)
+      let attentionMask = MLXArray([1 as Int32, 1, 0]).reshaped(1, 3)
+      let pooled = NVEmbeddingBackend.poolHiddenStates(
+        hiddenStates: hiddenStates,
+        attentionMask: attentionMask,
+        metadata: metadata(dimension: 2)
+      )
+      pooled.eval()
+
+      expect(pooled.dtype) == .float32
+      assertVector(pooled[0].asArray(Float.self), approximately: [0.6, 0.8])
+    }
+  }
+
   func testTinyMistralAdapterReturnsNormalizedBatchVectors() throws {
     try withMLXMetallib {
       let configuration = NVMistralBiDirectionalConfiguration(
