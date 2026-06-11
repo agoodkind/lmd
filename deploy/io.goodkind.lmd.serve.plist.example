@@ -59,6 +59,16 @@
         <string>4</string>
         <key>LMD_EMBEDDING_MAX_CONCURRENCY</key>
         <string>4</string>
+        <key>LMD_EMBED_BATCH_TOKEN_BUDGET</key>
+        <string></string>
+        <key>LMD_EMBED_BATCH_MAX_ROWS</key>
+        <string>256</string>
+        <key>LMD_EMBED_PRIORITY_MAX_INPUTS</key>
+        <string>2</string>
+        <key>LMD_EMBED_PRIORITY_MAX_TOKENS</key>
+        <string>2048</string>
+        <key>LMD_EMBED_PRIORITY_LANE</key>
+        <string>true</string>
         <key>LMD_BATTERY_THROTTLE_PCT</key>
         <string>20</string>
         <key>LMD_BATTERY_MILD_PCT</key>

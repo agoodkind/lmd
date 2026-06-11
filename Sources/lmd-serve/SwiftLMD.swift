@@ -462,7 +462,8 @@ struct SwiftLMD {
 
     // Hand the resolved value to the lower-level module that owns the MLX
     // embedding cache cap, so that module no longer reads the environment.
-    setConfiguredEmbeddingCacheLimitBytes(config.mlxCacheLimitBytes)
+    setConfiguredEmbeddingCacheLimitBytes(
+      Int((config.mlxCacheLimitGB ?? 2.0) * 1_073_741_824))
 
     // Build catalog
     let catalog = ModelCatalog(roots: ModelCatalog.defaultRoots)

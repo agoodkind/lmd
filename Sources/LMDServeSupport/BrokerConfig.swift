@@ -38,6 +38,11 @@ public enum BrokerConfigKey: String, CaseIterable, Sendable {
   case swiftlmBinary = "LMD_SWIFTLM_BINARY"
   case chatMaxConcurrency = "LMD_CHAT_MAX_CONCURRENCY"
   case embeddingMaxConcurrency = "LMD_EMBEDDING_MAX_CONCURRENCY"
+  case embedBatchTokenBudget = "LMD_EMBED_BATCH_TOKEN_BUDGET"
+  case embedBatchMaxRows = "LMD_EMBED_BATCH_MAX_ROWS"
+  case embedPriorityMaxInputs = "LMD_EMBED_PRIORITY_MAX_INPUTS"
+  case embedPriorityMaxTokens = "LMD_EMBED_PRIORITY_MAX_TOKENS"
+  case embedPriorityLane = "LMD_EMBED_PRIORITY_LANE"
   case batteryThrottlePct = "LMD_BATTERY_THROTTLE_PCT"
   case batteryMildPct = "LMD_BATTERY_MILD_PCT"
   case batteryResumePct = "LMD_BATTERY_RESUME_PCT"
@@ -60,8 +65,8 @@ public enum BrokerConfigKey: String, CaseIterable, Sendable {
 ///
 /// `raw` returns `nil` only when the key is genuinely absent. A present but
 /// empty value is returned as the empty string so the loader can distinguish
-/// "undefined" (an error) from "defined as blank" (meaningful for the one
-/// optional key, `promptCacheMaxTokens`).
+/// "undefined" (an error) from "defined as blank" (meaningful for
+/// auto-capable keys such as `promptCacheMaxTokens`).
 public protocol BrokerConfigSource: Sendable {
   func raw(_ key: BrokerConfigKey) -> String?
 }
@@ -114,6 +119,16 @@ public struct BrokerConfig: Sendable {
   public let swiftlmBinary: String
   public let chatMaxConcurrency: Int
   public let embeddingMaxConcurrency: Int
+  /// nil means auto: the broker sizes the budget from the resolved cache cap at
+  /// embedding-host spawn time. Blank LMD_EMBED_BATCH_TOKEN_BUDGET requests auto.
+  public let embedBatchTokenBudget: Int?
+  public let embedBatchMaxRows: Int
+  public let embedPriorityMaxInputs: Int
+  public let embedPriorityMaxTokens: Int
+  public let embedPriorityLaneEnabled: Bool
+  /// nil means auto: the broker sizes the cache from free memory at startup and
+  /// at embedding-host spawn time. Blank LMD_MLX_CACHE_LIMIT_GB requests auto.
+  public let mlxCacheLimitGB: Double?
   public let batteryThrottlePct: Int
   public let batteryMildPct: Int
   public let batteryResumePct: Int
@@ -126,7 +141,6 @@ public struct BrokerConfig: Sendable {
   /// `nil` means "auto" (the broker chooses), defined explicitly by leaving
   /// `LMD_PROMPT_CACHE_MAX_TOKENS` blank in the plist.
   public let promptCacheMaxTokens: Int?
-  public let mlxCacheLimitBytes: Int
 
   private static let gigabyte: Int64 = 1_073_741_824
   /// Conservative prompt-token ceiling used when the prompt cache is disabled
@@ -230,6 +244,10 @@ public struct BrokerConfig: Sendable {
     let swiftlmBinary = requireString(.swiftlmBinary)
     let chatConcurrency = requireInt(.chatMaxConcurrency, min: 1)
     let embeddingConcurrency = requireInt(.embeddingMaxConcurrency, min: 1)
+    let embedBatchMaxRows = requireInt(.embedBatchMaxRows, min: 1)
+    let embedPriorityMaxInputs = requireInt(.embedPriorityMaxInputs, min: 0)
+    let embedPriorityMaxTokens = requireInt(.embedPriorityMaxTokens, min: 0)
+    let embedPriorityLaneEnabled = requireBool(.embedPriorityLane)
     let throttlePct = requireInt(.batteryThrottlePct, min: 0, max: 100)
     let mildPct = requireInt(.batteryMildPct, min: 0, max: 100)
     let resumePct = requireInt(.batteryResumePct, min: 0, max: 100)
@@ -251,10 +269,22 @@ public struct BrokerConfig: Sendable {
     let dataDir = requireString(.dataDir)
     let sampleInterval = requireDouble(.sampleInterval, min: 0.1)
     let promptCacheEnabled = requireBool(.promptCacheEnabled)
-    let mlxCacheGB = requireDouble(.mlxCacheLimitGB, min: 0.001)
 
-    // The single optional key: the variable must be defined (present), but a
-    // blank value is the explicit way to request "auto".
+    // Auto-capable keys must be defined (present), but a blank value is the
+    // explicit way to request "auto".
+    var embedBatchTokenBudgetValue: Int?
+    if let raw = source.raw(.embedBatchTokenBudget) {
+      if raw.isEmpty {
+        embedBatchTokenBudgetValue = nil
+      } else if let parsed = Int(raw), parsed > 0 {
+        embedBatchTokenBudgetValue = parsed
+      } else {
+        record(.embedBatchTokenBudget, raw, "must be a positive integer or blank for auto")
+      }
+    } else {
+      record(.embedBatchTokenBudget, nil, "must be defined (blank means auto)")
+    }
+
     var promptCacheMaxTokensValue: Int?
     if let raw = source.raw(.promptCacheMaxTokens) {
       if raw.isEmpty {
@@ -268,12 +298,29 @@ public struct BrokerConfig: Sendable {
       record(.promptCacheMaxTokens, nil, "must be defined (blank means auto)")
     }
 
+    var mlxCacheLimitGBValue: Double?
+    if let raw = source.raw(.mlxCacheLimitGB) {
+      if raw.isEmpty {
+        mlxCacheLimitGBValue = nil
+      } else if let parsed = Double(raw), parsed > 0 {
+        mlxCacheLimitGBValue = parsed
+      } else {
+        record(.mlxCacheLimitGB, raw, "must be a positive number or blank for auto")
+      }
+    } else {
+      record(.mlxCacheLimitGB, nil, "must be defined (blank means auto)")
+    }
+
     guard problems.isEmpty,
       let portValue,
       let reserveGB,
       let swiftlmBinary,
       let chatConcurrency,
       let embeddingConcurrency,
+      let embedBatchMaxRows,
+      let embedPriorityMaxInputs,
+      let embedPriorityMaxTokens,
+      let embedPriorityLaneEnabled,
       let throttlePct,
       let mildPct,
       let resumePct,
@@ -282,8 +329,7 @@ public struct BrokerConfig: Sendable {
       let embeddingIdleMinutes,
       let dataDir,
       let sampleInterval,
-      let promptCacheEnabled,
-      let mlxCacheGB
+      let promptCacheEnabled
     else {
       throw BrokerConfigError(problems: problems)
     }
@@ -295,6 +341,12 @@ public struct BrokerConfig: Sendable {
     self.swiftlmBinary = swiftlmBinary
     self.chatMaxConcurrency = chatConcurrency
     self.embeddingMaxConcurrency = embeddingConcurrency
+    self.embedBatchTokenBudget = embedBatchTokenBudgetValue
+    self.embedBatchMaxRows = embedBatchMaxRows
+    self.embedPriorityMaxInputs = embedPriorityMaxInputs
+    self.embedPriorityMaxTokens = embedPriorityMaxTokens
+    self.embedPriorityLaneEnabled = embedPriorityLaneEnabled
+    self.mlxCacheLimitGB = mlxCacheLimitGBValue
     self.batteryThrottlePct = throttlePct
     self.batteryMildPct = mildPct
     self.batteryResumePct = resumePct
@@ -305,6 +357,5 @@ public struct BrokerConfig: Sendable {
     self.sampleInterval = sampleInterval
     self.promptCacheEnabled = promptCacheEnabled
     self.promptCacheMaxTokens = promptCacheMaxTokensValue
-    self.mlxCacheLimitBytes = Int(mlxCacheGB * Double(Self.gigabyte))
   }
 }

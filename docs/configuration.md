@@ -25,6 +25,11 @@ registry the plist and this doc are checked against.
 | `LMD_SWIFTLM_BINARY` | path | non-empty, executable | `/Users/you/Sites/SwiftLM/.build/arm64-apple-macosx/release/SwiftLM` | The SwiftLM model-runner binary the broker spawns. |
 | `LMD_CHAT_MAX_CONCURRENCY` | int | >= 1 | `4` | Max concurrent chat requests per loaded model; excess requests queue for a slot rather than getting a 429. |
 | `LMD_EMBEDDING_MAX_CONCURRENCY` | int | >= 1 | `4` | Max concurrent embedding requests per loaded model; excess requests queue for a slot rather than getting a 429. |
+| `LMD_EMBED_BATCH_TOKEN_BUDGET` | int or blank | positive, or blank for auto | (blank) | Token budget for embedding batches; blank lets the broker choose from the resolved cache cap. |
+| `LMD_EMBED_BATCH_MAX_ROWS` | int | >= 1 | `256` | Max input rows admitted into one embedding batch. |
+| `LMD_EMBED_PRIORITY_MAX_INPUTS` | int | >= 0 | `2` | Max input count for requests that can use the embedding priority lane. |
+| `LMD_EMBED_PRIORITY_MAX_TOKENS` | int | >= 0 | `2048` | Max token count for requests that can use the embedding priority lane. |
+| `LMD_EMBED_PRIORITY_LANE` | bool | as above | `true` | Whether the embedding priority lane is enabled. |
 | `LMD_BATTERY_THROTTLE_PCT` | int | 0..100 | `20` | Battery charge at or below which the hard stop engages: new chat and embedding requests are refused with HTTP 503 while in-flight requests drain. Held until `LMD_BATTERY_RESUME_PCT`. `0` disables the monitor. |
 | `LMD_BATTERY_MILD_PCT` | int | 0..100, and `> LMD_BATTERY_THROTTLE_PCT` and `< LMD_BATTERY_RESUME_PCT` | `35` | Battery charge at or below which the mild embedding slow-down engages. A plain band with no hold: it applies between this value and `LMD_BATTERY_THROTTLE_PCT`, and turns off above it. |
 | `LMD_BATTERY_RESUME_PCT` | int | 0..100 | `80` | Battery charge at or above which the hard stop releases (a wide band so the stop does not flap). |
@@ -35,7 +40,7 @@ registry the plist and this doc are checked against.
 | `LMD_SAMPLE_INTERVAL` | double | >= 0.1 | `15` | Seconds between sensor samples. |
 | `LMD_PROMPT_CACHE_MAX_TOKENS` | int or blank | positive, or blank for auto | (blank) | Prompt-token ceiling for chat requests; blank lets the broker choose. |
 | `LMD_PROMPT_CACHE_ENABLED` | bool | as above | `true` | Whether the prompt cache is enabled. |
-| `LMD_MLX_CACHE_LIMIT_GB` | double | > 0 | `2` | MLX allocator cache cap for embedding backends (the throttle shrinks this under battery pressure). |
+| `LMD_MLX_CACHE_LIMIT_GB` | double or blank | positive, or blank for auto | `2` | MLX allocator cache cap for embedding backends; blank lets the broker choose from free memory. |
 
 ## Diagnostic switches
 
