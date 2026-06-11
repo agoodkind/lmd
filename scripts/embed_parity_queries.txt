@@ -1,0 +1,50 @@
+where is the daemon reload re-exec implemented
+how does the adapter map upstream errors to OpenAI envelopes
+find the retry loop for failed embedding requests
+where are conversation ids derived from provider session ids
+how does the MITM proxy claim routes per provider
+where is the merkle snapshot checkpoint written after each file
+function that packs chunks into embedding batches
+where does the broker spawn the model host process
+how is the MLX allocator cache limit configured
+code that parses the broker configuration environment variables
+where are Milvus collections created with their dimension
+how does hybrid search combine dense and sparse results
+where is the priority lane decision made for embedding requests
+function that pools hidden states into one embedding vector
+where does the tokenizer truncate inputs to the max sequence length
+how does the watcher debounce filesystem events before a sync
+where is the staging collection promoted onto the live name
+code that computes the padding ratio of a batch
+where does the CLI register the conversation export command
+how are orphaned indexing jobs resumed on daemon boot
+where is the battery throttle level applied to the GPU cache
+function that renders job progress for the status view
+how does the host report metrics snapshots to the broker
+where is the queue wait time measured for embedding forwards
+code that validates the extension filter for search
+where does the broker refuse requests when memory headroom is low
+how is the spawn token passed from broker to model host
+where are legacy collection names migrated
+function that estimates token counts from byte length
+where is the OpenAI embeddings request body decoded
+how does the indexer skip files that are not valid UTF-8
+where is the config digest hashed for merkle resume
+code that handles SIGTERM in the bench tool
+where does the search path apply the relative path prefix filter
+how are chat completions streamed over SSE
+where is the reuse map consulted before calling the embedder
+function that resolves the slot budget from the cache cap
+where does the daemon write the jobs journal
+how is the trace ring buffer capped at 1024 entries
+where are per-conversation documents converted to stored chunks
+code that deduplicates search result chunks
+where is the XPC control listener registered
+how does the idle unload loop pick models to evict
+where is the Prometheus exposition rendered
+function that classifies config changes for hot apply
+where does the CLI print the model catalog
+how is the sparse BM25 request built for hybrid search
+where are embedding vectors L2 normalized
+code that maps provider identities at the adapter boundary
+where is the request id propagated through the host protocol
