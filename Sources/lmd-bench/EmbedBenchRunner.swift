@@ -52,6 +52,8 @@ public enum EmbedBenchRunner {
   private static let bytesPerEstimatedToken = 4
   private static let metricNamePrefix = "lmd_embed_"
   private static let tableNameColumnWidth = 42
+  /// Worst-case fp32 baseline batches run for minutes; the bench must outlive them.
+  private static let requestTimeoutSeconds = 600.0
 
   public static func run(_ configuration: EmbedBenchRunConfiguration) async throws {
     guard configuration.rowsPerRequest > 0 else {
@@ -164,6 +166,7 @@ public enum EmbedBenchRunner {
     log.info("embed_bench.http_post_started rows=\(inputs.count, privacy: .public)")
 
     var request = URLRequest(url: url)
+    request.timeoutInterval = Self.requestTimeoutSeconds
     request.httpMethod = "POST"
     request.setValue(jsonContentType, forHTTPHeaderField: contentTypeHeader)
     request.httpBody = try JSONEncoder().encode(
