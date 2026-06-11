@@ -14,6 +14,9 @@ LMD_DEV = SWIFT_MK_BIN="$(SWIFT_MK_BIN)" swift Tools/lmd-dev.swift
 # swift-mk owns build/test/clean/lint/fmt/check; the dev tool runs the compile.
 SWIFT_MK_MODULES := swift-build.mk swift-release.mk
 SWIFT_MK_OWN_RUN := 1
+# The MLX metallib build needs the on-demand Metal toolchain; the engine
+# preflight downloads it when missing.
+SWIFT_MK_PREFLIGHT_METAL := 1
 SWIFT_BUILD_CMD = $(LMD_DEV) build $(CONFIG)
 SWIFT_TEST_CMD = $(LMD_DEV) test
 SWIFT_CLEAN_CMD = $(LMD_DEV) clean

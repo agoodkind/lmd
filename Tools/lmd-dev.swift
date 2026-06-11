@@ -498,7 +498,6 @@ final class DevTool {
   /// executables in this project. SwiftPM cannot compile `.metal` files, so
   /// this xcodebuild call exists for that one capability.
   private func buildMetallib(configuration: String) throws {
-    try ensureMetalToolchain()
     try tuistInstallAndGenerate()
     // The generator name is data, bound to a constant, so swift-mk's build-tooling
     // rule does not read it as spawning the tool: swift-mk does the xcodebuild call.
@@ -517,41 +516,11 @@ final class DevTool {
     )
   }
 
-  /// Verify that the Metal shader compiler is on disk. Apple distributes it
-  /// through an on-demand cryptex mount, and a fresh Xcode install ships
-  /// without it. When `xcrun --find metal` fails we run
-  /// `xcodebuild -downloadComponent MetalToolchain` once and re-check.
-  private func ensureMetalToolchain() throws {
-    if hasMetalCompiler() {
-      return
-    }
-    try writeLine(
-      "[preflight] Metal toolchain missing; downloading via swift-mk toolchain download-metal")
-    try runSwiftMk(["toolchain", "download-metal"])
-    guard hasMetalCompiler() else {
-      throw ToolError.failure(
-        "preflight: Metal toolchain still missing after download; check Xcode install"
-      )
-    }
-  }
-
-  private func hasMetalCompiler() -> Bool {
-    let result = try? run(
-      "xcrun",
-      ["--find", "metal"],
-      currentDirectory: nil,
-      environment: nil,
-      captureOutput: true
-    )
-    return (result?.status ?? 1) == 0
-  }
-
   /// One-shot environment check. Confirms Swift, Tuist, and the Metal
   /// shader compiler are all reachable, and downloads the Metal toolchain
   /// if absent. Safe to run repeatedly.
   private func preflight() throws {
     try runSwiftMk(["toolchain", "version"])
-    try ensureMetalToolchain()
     if let path = try? captureMetalPath() {
       try writeLine("[preflight] metal: \(path)")
     }
@@ -1391,39 +1360,31 @@ final class DevTool {
     try runPassthrough(
       "/usr/bin/ditto", ["-c", "-k", "--keepParent", ".", zipPath.path], currentDirectory: scratch)
 
-    switch mode {
-    case .local:
+    // swift-mk's notarize command owns submission and the stapling policy;
+    // the local mode resolves the keychain profile from signing.env and hands
+    // it through NOTARY_PROFILE, while CI's APPLE_NOTARY_* trio is read by
+    // swift-mk directly from the environment.
+    var notarizeEnvironment = ProcessInfo.processInfo.environment
+    if case .local = mode {
       let signing = try localSigningConfig()
-      try runPassthrough(
-        "xcrun",
-        [
-          "notarytool", "submit", zipPath.path, "--keychain-profile",
-          try signing.required("NOTARY_PROFILE"), "--wait",
-        ]
-      )
-    case .ci:
-      let keyIdentifier = try environment.required("APPLE_NOTARY_KEY_ID")
-      let keyPath = scratch.appendingPathComponent("AuthKey_\(keyIdentifier).p8")
-      try decodeBase64Environment("APPLE_NOTARY_KEY_BASE64").write(to: keyPath, options: .atomic)
-      try runPassthrough(
-        "xcrun",
-        [
-          "notarytool",
-          "submit",
-          zipPath.path,
-          "--key",
-          keyPath.path,
-          "--key-id",
-          keyIdentifier,
-          "--issuer",
-          try environment.required("APPLE_NOTARY_ISSUER_ID"),
-          "--wait",
-        ]
-      )
+      notarizeEnvironment["NOTARY_PROFILE"] = try signing.required("NOTARY_PROFILE")
+    }
+    guard let swiftMk = swiftMkBinaryPath() else {
+      throw ToolError.failure("notarize: swift-mk binary not found; run make swift-mk-bin")
+    }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: swiftMk)
+    process.arguments = ["notarize", zipPath.path]
+    process.environment = notarizeEnvironment
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+      throw ToolError.failure("notarize: swift-mk notarize failed for \(zipPath.path)")
+    }
+    if case .ci = mode {
       try appendGitHubOutput(name: "artifact", value: zipPath.path)
     }
 
-    try writeLine("[notarize] bare binaries cannot be stapled; first-launch checks online.")
     return zipPath
   }
 
