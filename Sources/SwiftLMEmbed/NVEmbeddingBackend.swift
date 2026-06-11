@@ -220,6 +220,15 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
     )
   }
 
+  public func countTokens(inputs: [String]) -> Int {
+    guard let runtime else {
+      return EmbeddingBackendTokenEstimator.countTokens(inputs: inputs)
+    }
+    return EmbeddingBackendTokenEstimator.countTokens(
+      encodedInputs: encodeInputs(inputs, tokenizer: runtime.tokenizer)
+    )
+  }
+
   public func embed(inputs: [String]) throws -> [[Float]] {
     guard let runtime else {
       throw NVEmbeddingRuntimeError.modelNotLoaded
