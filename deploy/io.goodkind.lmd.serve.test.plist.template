@@ -51,7 +51,7 @@
         <key>LMD_CHAT_MAX_CONCURRENCY</key>
         <string>4</string>
         <key>LMD_EMBEDDING_MAX_CONCURRENCY</key>
-        <string>4</string>
+        <string>1</string>
         <key>LMD_EMBED_BATCH_TOKEN_BUDGET</key>
         <string></string>
         <key>LMD_EMBED_BATCH_MAX_ROWS</key>
@@ -89,7 +89,7 @@
         <key>LMD_PROMPT_CACHE_ENABLED</key>
         <string>true</string>
         <key>LMD_MLX_CACHE_LIMIT_GB</key>
-        <string>2</string>
+        <string></string>
 
         <!-- Isolation overrides: register and expect the test identities. -->
         <key>LMD_HOST_SERVICE</key>
