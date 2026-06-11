@@ -105,7 +105,24 @@ This phase also activates the auto-sizing pair: the cache cap resolves from free
 
 Done when: `lmd_embed_padding_ratio` p50 is below 0.10 on the conversation-shaped bench corpus, bench throughput is at least 5x the Phase 0 baseline, and a single-input embed finishes in under 2 seconds while a bulk run is active.
 
-## Phase 2: bf16 (already executed on 2026-06-10, recorded here)
+## Measured outcomes (deployed 2026-06-11, fp32 weights)
+
+Production runs the new code on the fp32 weights. Numbers from the first 82 real ingest requests after deploy, plus the isolation-harness bench:
+
+- Padding ratio: mean 0.093 on real corpus traffic (target under 0.10; the original measurement was 0.92). The packer's length-spread cap is what holds this down; pure budget-greedy packing measured 0.60 on a mixed corpus before the cap landed.
+- Server throughput: mean 1,298 real tokens per second, max 2,069, on fp32. The pre-change corpus rate was roughly 93 real tokens per second (about 1 chunk per second), a roughly 14x corpus-rate improvement without bf16. Synthetic bench, old binary versus new at matched corpus: 262 to 418 estimated tokens per second.
+- Queue: wait mean 64 ms, max 0.87 s, depth 0 at steady state. The old binary measured 45,838 s of summed queue wait over 10,049 requests.
+- Auto-sizing resolved cache 8 GiB and slot budget 23,552 at spawn, logged via `embedding.tuning_resolved` and exposed as gauges.
+- GPU utilization during mixed ingest: 38 to 71 percent sampled. Below the 70 percent sustained target; fp32 compute remains the ceiling.
+- Interactive embeds during bulk: 8 to 26 seconds depending on the slot budget, not the 2-second target. The lane works (a probe waits one forward, not a queue of requests), but a single fp32 forward at budget 23,552 runs tens of seconds and is not preempted. Reaching the 2-second target needs bf16 or a smaller `LMD_EMBED_BATCH_TOKEN_BUDGET` (measured: 16-row groups give 8 to 9 second probes at 319 tokens per second).
+
+## bf16 status: rolled back, gate failed
+
+The bf16 weight set produces non-finite embeddings for multi-row groups containing long sequences (roughly 900 or more tokens per row) on this MLX stack. The failure surfaced in production on 2026-06-11 at 00:42 as bodyless HTTP 500s (the NaN broke response JSON encoding past the handler's error boundary) and broke 382 ingest requests before diagnosis. Single-row long inputs and many-short-row batches are unaffected. The fp32 pooling cast fixed some shapes but not the forward itself.
+
+Current state: the fp32 originals serve under the primary id `nvidia/NV-EmbedCode-7b-v1`; the bf16 set is parked at `nvidia/NV-EmbedCode-7b-v1-bf16`. The parity gate (`scripts/embed_parity.py`) now opens with shape canaries that reproduce the failure and must pass, on both ids, before any future re-swap. The suspect is the bf16 GEMM/attention path in the vendored mlx fork for those shapes; that investigation is its own follow-up.
+
+## Phase 2: bf16 (executed 2026-06-10, recorded here)
 
 What was done:
 
