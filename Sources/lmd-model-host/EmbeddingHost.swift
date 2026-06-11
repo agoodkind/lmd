@@ -26,11 +26,16 @@ private let log = AppLogger.logger(category: "EmbeddingHost")
 actor EmbeddingHost {
   private let modelPath: String
   let tuning: EmbeddingRuntimeTuning
+  private let queue: EmbeddingJobQueue
   private var backend: EmbeddingBackendProtocol?
 
   init(modelPath: String, tuning: EmbeddingRuntimeTuning = .fallback) {
     self.modelPath = modelPath
     self.tuning = tuning
+    self.queue = EmbeddingJobQueue(
+      maxConcurrent: tuning.maxConcurrentForwards,
+      laneEnabled: tuning.priorityLaneEnabled
+    )
   }
 
   /// Build the descriptor and load the embedding backend. The catalog keys a
@@ -111,6 +116,17 @@ actor EmbeddingHost {
         attributes: ["error": "bad embeddings input: \(error)"]
       )
       return [.failed(requestID: request.requestID, message: "bad embeddings input: \(error)")]
+    }
+    let realTokens = backend.countTokens(inputs: inputs)
+    let priority =
+      inputs.count <= tuning.priorityMaxInputs || realTokens < tuning.priorityMaxTokens
+    await queue.acquire(priority: priority)
+    let queue = self.queue
+    defer {
+      // `defer` cannot await, so this task releases the actor-owned slot after every exit.
+      Task {
+        await queue.release()
+      }
     }
     let vectors: [[Float]]
     do {
