@@ -18,7 +18,7 @@ struct LMDBenchCommand: ParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "bench",
     abstract: "Run the benchmark orchestrator.",
-    subcommands: [LMDBenchRunCommand.self],
+    subcommands: [LMDBenchRunCommand.self, LMDBenchEmbedCommand.self],
     aliases: ["benchmark", "lmd-bench"]
   )
 

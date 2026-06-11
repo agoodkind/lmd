@@ -87,6 +87,7 @@ let testTargetNames = [
   "SwiftLMBackendTests",
   "SwiftLMEmbedTests",
   "SwiftLMMonitorTests",
+  "LMDBenchToolTests",
   "SwiftLMMetricsTests",
   "SwiftLMRuntimeTests",
   "SwiftLMControlTests",
@@ -321,6 +322,13 @@ let project = Project(
     testTarget(
       "SwiftLMMonitorTests",
       dependencies: [.target(name: "SwiftLMMonitor")]
+    ),
+    testTarget(
+      "LMDBenchToolTests",
+      dependencies: [
+        .target(name: "LMDBenchTool"),
+        .external(name: "Nimble"),
+      ]
     ),
     testTarget(
       "SwiftLMMetricsTests",

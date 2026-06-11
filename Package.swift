@@ -289,6 +289,15 @@ let package = Package(
       swiftSettings: strictConcurrency
     ),
     .testTarget(
+      name: "LMDBenchToolTests",
+      dependencies: [
+        "LMDBenchTool",
+        .product(name: "Nimble", package: "Nimble"),
+      ],
+      path: "Tests/LMDBenchToolTests",
+      swiftSettings: strictConcurrency
+    ),
+    .testTarget(
       name: "SwiftLMMetricsTests",
       dependencies: [
         "SwiftLMMetrics",
