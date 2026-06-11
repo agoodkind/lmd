@@ -85,4 +85,11 @@ public enum SwiftLMMetrics {
     let nanoseconds = max(0, seconds) * 1_000_000_000
     Timer(label: name, dimensions: labels).recordNanoseconds(Int64(nanoseconds))
   }
+
+  /// Record a unitless value (a ratio, a rate) into a histogram.
+  public static func observeValue(
+    _ name: String, _ value: Double, labels: [(String, String)] = []
+  ) {
+    Recorder(label: name, dimensions: labels, aggregate: true).record(value)
+  }
 }
