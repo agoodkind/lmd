@@ -1,5 +1,5 @@
 {
-  "originHash" : "6ff92e42337988cf14798ed1090817593935d504a698aed4c0ea219b721af4f7",
+  "originHash" : "adedb226fa5408e8fc729fca733abd41443ddaf8e17765f29d49cd4f36e6397f",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -88,7 +88,7 @@
       "location" : "https://github.com/agoodkind/mlx-swift.git",
       "state" : {
         "branch" : "main",
-        "revision" : "133864c733c8d4178547f8fe92897da6a788368f"
+        "revision" : "7ccae8329a17bf15ecfdcdcc6662f0ba8fb09f0c"
       }
     },
     {
