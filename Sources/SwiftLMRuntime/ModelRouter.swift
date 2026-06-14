@@ -56,11 +56,15 @@ private struct LoadedEntry: Sendable {
 private final class LoadingEntry: Sendable {
   let id: UUID
   let kind: RouteKind
+  /// Bytes this in-flight load will occupy, reserved against concurrent
+  /// admissions so two loads cannot both pass against the same free memory.
+  let needingBytes: Int64
   let task: Task<ModelServer, Error>
 
-  init(kind: RouteKind, task: Task<ModelServer, Error>) {
+  init(kind: RouteKind, needingBytes: Int64, task: Task<ModelServer, Error>) {
     self.id = UUID()
     self.kind = kind
+    self.needingBytes = needingBytes
     self.task = task
   }
 }
@@ -238,8 +242,7 @@ public actor ModelRouter {
   /// models would restore the reserve. Has no side effects.
   public func canLoad(needing newBytes: Int64, requestorPriority: Int = .max) -> Bool {
     let reading = memoryProbe()
-    let deficit = HeadroomPolicy.bytesToFree(
-      availableBytes: reading.availableBytes, needing: newBytes, reserveBytes: reserveBytes)
+    let deficit = headroomDeficit(reading: reading, needing: newBytes)
     if deficit == 0 {
       return true
     }
@@ -250,7 +253,7 @@ public actor ModelRouter {
       return false
     }
     let freed = projectedFreedBytes(plan: plan.all, in: snap)
-    return reading.availableBytes + freed - newBytes >= reserveBytes
+    return reading.availableBytes - reservedLoadingBytes() + freed - newBytes >= reserveBytes
   }
 
   /// Current live memory reading. Used by the broker for status reporting.
@@ -259,6 +262,28 @@ public actor ModelRouter {
   }
 
   // MARK: - Headroom enforcement
+
+  /// Bytes reserved by models still loading. Concurrent admissions subtract this
+  /// from live free memory so two loads woken together cannot both pass against
+  /// the same bytes and over-commit.
+  private func reservedLoadingBytes() -> Int64 {
+    var total: Int64 = 0
+    for state in routes.values {
+      if case .loading(let loading) = state {
+        total += loading.needingBytes
+      }
+    }
+    return total
+  }
+
+  /// Headroom deficit for `needing` bytes after subtracting memory already
+  /// reserved by in-flight loads.
+  private func headroomDeficit(reading: MemoryReading, needing: Int64) -> Int64 {
+    HeadroomPolicy.bytesToFree(
+      availableBytes: reading.availableBytes - reservedLoadingBytes(),
+      needing: needing,
+      reserveBytes: reserveBytes)
+  }
 
   /// Reclaim room for a load requested at `requestorPriority`: unload idle
   /// victims, drain-and-preempt busy lower-priority victims, then re-measure to
@@ -273,8 +298,7 @@ public actor ModelRouter {
     try enforceReloadCooldown(modelID: modelID, needing: needing)
     let requestorPriority = loadConfig.effectivePriority(for: loadConfigKind(kind))
     var reading = memoryProbe()
-    var deficit = HeadroomPolicy.bytesToFree(
-      availableBytes: reading.availableBytes, needing: needing, reserveBytes: reserveBytes)
+    var deficit = headroomDeficit(reading: reading, needing: needing)
     if deficit == 0, !reading.underPressure {
       return
     }
@@ -308,8 +332,7 @@ public actor ModelRouter {
     }
 
     reading = await settleAndRead(needing: needing)
-    deficit = HeadroomPolicy.bytesToFree(
-      availableBytes: reading.availableBytes, needing: needing, reserveBytes: reserveBytes)
+    deficit = headroomDeficit(reading: reading, needing: needing)
     if deficit > 0 {
       // The drain window elapsed without freeing enough; force-stop any victim
       // still serving requests, then re-measure.
@@ -343,8 +366,7 @@ public actor ModelRouter {
       return
     }
     let reading = memoryProbe()
-    let deficit = HeadroomPolicy.bytesToFree(
-      availableBytes: reading.availableBytes, needing: needing, reserveBytes: reserveBytes)
+    let deficit = headroomDeficit(reading: reading, needing: needing)
     if deficit > 0 {
       let elapsedMillis = elapsedNanos / Self.nanosecondsPerMillisecond
       log.notice(
@@ -361,8 +383,7 @@ public actor ModelRouter {
     var reading = memoryProbe()
     var attempt = 0
     while attempt < settleAttempts {
-      let deficit = HeadroomPolicy.bytesToFree(
-        availableBytes: reading.availableBytes, needing: needing, reserveBytes: reserveBytes)
+      let deficit = headroomDeficit(reading: reading, needing: needing)
       if deficit == 0 {
         return reading
       }
@@ -378,8 +399,7 @@ public actor ModelRouter {
   /// event handler. Never throws; it frees what it can.
   public func enforceHeadroom() {
     let reading = memoryProbe()
-    let deficit = HeadroomPolicy.bytesToFree(
-      availableBytes: reading.availableBytes, needing: 0, reserveBytes: reserveBytes)
+    let deficit = headroomDeficit(reading: reading, needing: 0)
     if deficit == 0, !reading.underPressure {
       return
     }
@@ -684,6 +704,11 @@ public actor ModelRouter {
     let server = try await finishLoad(
       model: model, kind: kind, loading: loading, loadConfig: loadConfig, deadline: deadline)
     let info = loadInfo(modelID: model.id, kind: kind)
+    if info == nil {
+      log.fault(
+        "router.load_info_missing model=\(model.id, privacy: .public) kind=\(kind.rawValue, privacy: .public)"
+      )
+    }
     return RoutedServer(server: server, loadID: info?.loadID, backendObj: info?.backendObjectID)
   }
 
@@ -699,11 +724,16 @@ public actor ModelRouter {
     let loadTask = Task {
       try await spawner(model, kind, loadConfig)
     }
-    let loading = LoadingEntry(kind: kind, task: loadTask)
+    let loading = LoadingEntry(kind: kind, needingBytes: model.sizeBytes, task: loadTask)
     routes[model.id] = .loading(loading)
     let server = try await finishLoad(
       model: model, kind: kind, loading: loading, loadConfig: loadConfig, deadline: deadline)
     let info = loadInfo(modelID: model.id, kind: kind)
+    if info == nil {
+      log.fault(
+        "router.load_info_missing model=\(model.id, privacy: .public) kind=\(kind.rawValue, privacy: .public)"
+      )
+    }
     return RoutedServer(server: server, loadID: info?.loadID, backendObj: info?.backendObjectID)
   }
 
