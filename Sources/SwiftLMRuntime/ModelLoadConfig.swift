@@ -66,28 +66,6 @@ public struct ModelLoadConfig: Codable, Sendable, Equatable {
     self.ignoredFields = ignoredFields.sorted()
   }
 
-  /// Decode tolerantly so payloads written before `priority` and `pinned`
-  /// existed still load, with `pinned` defaulting to false.
-  public init(from decoder: Decoder) throws {
-    let container = try decoder.container(keyedBy: CodingKeys.self)
-    self.identifier = Self.normalizedString(
-      try container.decodeIfPresent(String.self, forKey: .identifier))
-    self.contextLength = Self.positiveInt(
-      try container.decodeIfPresent(Int.self, forKey: .contextLength))
-    self.evalBatchSize = Self.positiveInt(
-      try container.decodeIfPresent(Int.self, forKey: .evalBatchSize))
-    self.flashAttention = try container.decodeIfPresent(Bool.self, forKey: .flashAttention)
-    self.offloadKVCacheToGPU = try container.decodeIfPresent(
-      Bool.self, forKey: .offloadKVCacheToGPU)
-    self.gpu = Self.normalizedString(try container.decodeIfPresent(String.self, forKey: .gpu))
-    self.ttlSeconds = Self.positiveInt(
-      try container.decodeIfPresent(Int.self, forKey: .ttlSeconds))
-    self.priority = try container.decodeIfPresent(Int.self, forKey: .priority)
-    self.pinned = try container.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
-    let decodedIgnored = try container.decodeIfPresent([String].self, forKey: .ignoredFields) ?? []
-    self.ignoredFields = decodedIgnored.sorted()
-  }
-
   public static let `default` = ModelLoadConfig()
 
   /// Resolved eviction priority for a model of `kind`, applying the explicit
