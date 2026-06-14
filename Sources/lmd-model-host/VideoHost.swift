@@ -24,6 +24,10 @@ import SwiftLMMetrics
 actor VideoHost {
   private let descriptor: ModelDescriptor
   private let backend = InProcessVLMVideoChatBackend()
+  // mlx 0.32 keeps Metal command encoders in thread-local storage, so the model
+  // load and every forward must run on one fixed OS thread or a later request
+  // faults with "no Stream(gpu, 0) in current thread". Pin all GPU work here.
+  private let gpuThread = GPUThread()
 
   init(modelPath: String, videoSamplingFPS: Double?) {
     // The catalog keys a model's identity on its real path, so `id` and `path`
@@ -65,7 +69,9 @@ actor VideoHost {
       requestID: request.requestID
     )
     do {
-      let result = try await backend.complete(routeRequest)
+      let result = try await withTaskExecutorPreference(gpuThread) {
+        try await backend.complete(routeRequest)
+      }
       let frames = try await VideoFrameCodec.encode(result: result, requestID: request.requestID)
       recordRequestSpan(
         request: request,
