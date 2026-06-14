@@ -22,7 +22,7 @@ make install
 
 This:
 1. Builds release binaries via SwiftPM (`swift build -c release`) and the MLX Metal shader library (`default.metallib`) via Tuist + xcodebuild. Both halves are required; see `Tools/lmd-dev.swift` for the rationale.
-2. Copies the binaries and `mlx-swift_Cmlx.bundle` to `~/.local/bin/` (override with `PREFIX=/opt/...`).
+2. Copies the binaries and `mlx-swift_Cmlx.bundle` to `~/Library/Application Support/io.goodkind.lmd/bin/` (override with `PREFIX=/opt/...`).
 3. Writes `~/Library/LaunchAgents/io.goodkind.lmd.serve.plist` from the template with your install path substituted in.
 4. `launchctl bootstrap`s the agent into the current GUI session.
 
