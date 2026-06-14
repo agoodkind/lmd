@@ -29,6 +29,15 @@ struct LMDLoadCommand: ParsableCommand {
   @Option(name: .long, help: "Optional TTL in seconds for idle unload.")
   var ttl: Int?
 
+  @Option(
+    name: .long,
+    help: "Optional eviction priority. Higher wins; chat/video default to 100, embedding to 10."
+  )
+  var priority: Int?
+
+  @Flag(name: .long, help: "Pin the model so it is never auto-unloaded, evicted, or preempted.")
+  var pinned = false
+
   @Flag(name: .long, help: "Return only an estimate without loading the model.")
   var estimateOnly = false
 
@@ -42,6 +51,8 @@ struct LMDLoadCommand: ParsableCommand {
         identifier: identifier,
         contextLength: contextLength,
         ttlSeconds: ttl,
+        priority: priority,
+        pinned: pinned,
         estimateOnly: estimateOnly,
         echoLoadConfig: echoLoadConfig
       )
