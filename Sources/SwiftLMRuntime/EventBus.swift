@@ -27,6 +27,7 @@ public struct BrokerEvent: Sendable, Hashable, Codable {
     case modelLoaded = "model.loaded"
     case modelUnloaded = "model.unloaded"
     case modelEvicted = "model.evicted"
+    case modelPreempted = "model.preempted"
     case requestStarted = "request.started"
     case requestCompleted = "request.completed"
     case requestFailed = "request.failed"
@@ -64,6 +65,13 @@ public struct BrokerEvent: Sendable, Hashable, Codable {
         kind: .modelEvicted,
         model: modelID,
         message: "evicted \(kind.rawValue) model=\(modelID)",
+        ts: ts
+      )
+    case let .modelPreempted(modelID, kind):
+      self.init(
+        kind: .modelPreempted,
+        model: modelID,
+        message: "preempted \(kind.rawValue) model=\(modelID)",
         ts: ts
       )
     case .modelLoadCancelled(let modelID, let kind, let loadID):

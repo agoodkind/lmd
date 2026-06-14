@@ -82,6 +82,8 @@ public struct ModelLoadRequest: Codable, Sendable, Equatable {
   public let offloadKVCacheToGPU: Bool?
   public let gpu: String?
   public let ttlSeconds: Int?
+  public let priority: Int?
+  public let pinned: Bool
   public let estimateOnly: Bool
   public let echoLoadConfig: Bool
 
@@ -94,6 +96,8 @@ public struct ModelLoadRequest: Codable, Sendable, Equatable {
     offloadKVCacheToGPU: Bool? = nil,
     gpu: String? = nil,
     ttlSeconds: Int? = nil,
+    priority: Int? = nil,
+    pinned: Bool = false,
     estimateOnly: Bool = false,
     echoLoadConfig: Bool = false
   ) {
@@ -105,6 +109,8 @@ public struct ModelLoadRequest: Codable, Sendable, Equatable {
     self.offloadKVCacheToGPU = offloadKVCacheToGPU
     self.gpu = gpu
     self.ttlSeconds = ttlSeconds
+    self.priority = priority
+    self.pinned = pinned
     self.estimateOnly = estimateOnly
     self.echoLoadConfig = echoLoadConfig
   }
@@ -118,6 +124,8 @@ public struct ModelLoadRequest: Codable, Sendable, Equatable {
     case offloadKVCacheToGPU = "offload_kv_cache_to_gpu"
     case gpu
     case ttlSeconds = "ttl"
+    case priority
+    case pinned
     case estimateOnly = "estimate_only"
     case echoLoadConfig = "echo_load_config"
   }

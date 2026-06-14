@@ -9,6 +9,25 @@
 import Foundation
 import SwiftLMCore
 
+// MARK: - LoadPriority
+
+/// Eviction priority tiers. A load can only preempt a busy model whose priority
+/// is strictly lower, and idle eviction prefers the lowest priority first, so
+/// chat and video models keep their memory while embedding models yield it.
+public enum LoadPriority {
+  /// Default for chat and video models: kept resident under contention.
+  public static let high = 100
+  /// Default for embedding models: the first to be evicted or preempted.
+  public static let low = 10
+
+  /// The default priority for a model of `kind` when none is set explicitly.
+  public static func kindDefault(for kind: ModelKind) -> Int {
+    kind == .embedding ? low : high
+  }
+}
+
+// MARK: - ModelLoadConfig
+
 public struct ModelLoadConfig: Codable, Sendable, Equatable {
   public let identifier: String?
   public let contextLength: Int?
@@ -17,6 +36,10 @@ public struct ModelLoadConfig: Codable, Sendable, Equatable {
   public let offloadKVCacheToGPU: Bool?
   public let gpu: String?
   public let ttlSeconds: Int?
+  /// Explicit eviction priority override. When nil, the kind default applies.
+  public let priority: Int?
+  /// When true, the model is never auto-unloaded, evicted, or preempted.
+  public let pinned: Bool
   public let ignoredFields: [String]
 
   public init(
@@ -27,6 +50,8 @@ public struct ModelLoadConfig: Codable, Sendable, Equatable {
     offloadKVCacheToGPU: Bool? = nil,
     gpu: String? = nil,
     ttlSeconds: Int? = nil,
+    priority: Int? = nil,
+    pinned: Bool = false,
     ignoredFields: [String] = []
   ) {
     self.identifier = Self.normalizedString(identifier)
@@ -36,10 +61,23 @@ public struct ModelLoadConfig: Codable, Sendable, Equatable {
     self.offloadKVCacheToGPU = offloadKVCacheToGPU
     self.gpu = Self.normalizedString(gpu)
     self.ttlSeconds = Self.positiveInt(ttlSeconds)
+    self.priority = priority
+    self.pinned = pinned
     self.ignoredFields = ignoredFields.sorted()
   }
 
   public static let `default` = ModelLoadConfig()
+
+  /// Resolved eviction priority for a model of `kind`, applying the explicit
+  /// override when present and the kind default otherwise.
+  public func effectivePriority(for kind: ModelKind) -> Int {
+    priority ?? LoadPriority.kindDefault(for: kind)
+  }
+
+  /// Whether the model is pinned and therefore exempt from every eviction path.
+  public var isPinned: Bool {
+    pinned
+  }
 
   public func normalized(for kind: ModelKind) -> ModelLoadConfig {
     var ignored = ignoredFields
@@ -64,6 +102,8 @@ public struct ModelLoadConfig: Codable, Sendable, Equatable {
       offloadKVCacheToGPU: kind == .chat ? offloadKVCacheToGPU : nil,
       gpu: kind == .chat ? gpu : nil,
       ttlSeconds: ttlSeconds,
+      priority: priority,
+      pinned: pinned,
       ignoredFields: Array(Set(ignored))
     )
   }
@@ -80,6 +120,8 @@ public struct ModelLoadConfig: Codable, Sendable, Equatable {
       offloadKVCacheToGPU: override.offloadKVCacheToGPU ?? offloadKVCacheToGPU,
       gpu: override.gpu ?? gpu,
       ttlSeconds: override.ttlSeconds ?? ttlSeconds,
+      priority: override.priority ?? priority,
+      pinned: pinned || override.pinned,
       ignoredFields: Array(Set(ignoredFields).union(override.ignoredFields))
     )
   }
@@ -107,6 +149,8 @@ public struct ModelLoadConfig: Codable, Sendable, Equatable {
     case offloadKVCacheToGPU = "offload_kv_cache_to_gpu"
     case gpu
     case ttlSeconds = "ttl"
+    case priority
+    case pinned
     case ignoredFields = "ignored_fields"
   }
 }

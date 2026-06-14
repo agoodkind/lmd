@@ -152,6 +152,7 @@ final class ModelRouterTests: XCTestCase {
       spawner: spawner,
       settleAttempts: 3,
       settleIntervalMillis: 1,
+      requestWaitTimeoutMillis: 200,
       eventSink: eventSink
     )
     return (router, created.getAll)
@@ -403,6 +404,126 @@ final class ModelRouterTests: XCTestCase {
     expect(embeddingEvent.message) == "evicted embedding model=embed"
   }
 
+  // MARK: - Preemption and priority
+
+  private func makePreemptRouter(
+    totalGB: Int64,
+    preemptCooldownMillis: UInt64,
+    events: RouterEventsBox? = nil
+  ) -> (ModelRouter, FakesBox) {
+    let memory = MemoryModel(totalGB: totalGB)
+    let created = FakesBox()
+    let spawner = makeRecordingSpawner(created: created, memory: memory)
+    let sink: @Sendable (RouterLifecycleEvent) -> Void = { event in events?.append(event) }
+    let router = ModelRouter(
+      reserveBytes: 0,
+      memoryProbe: memory.probe(),
+      spawner: spawner,
+      settleAttempts: 5,
+      settleIntervalMillis: 1,
+      preemptCooldownMillis: preemptCooldownMillis,
+      requestWaitTimeoutMillis: 200,
+      eventSink: sink
+    )
+    return (router, created)
+  }
+
+  func testHigherPriorityLoadForceEvictsBusyEmbeddingAfterDrainWindow() async throws {
+    let events = RouterEventsBox()
+    let (router, created) = makePreemptRouter(
+      totalGB: 80, preemptCooldownMillis: 60_000, events: events)
+
+    // The embedding stays busy: no embeddingRequestDone call releases it, so the
+    // drain window elapses and the chat load force-evicts it.
+    _ = try await router.routeEmbeddingAndBegin(embeddingDesc("embed", 40))
+    _ = try await router.routeAndBegin(desc("chat", 50))
+
+    let snap = await router.snapshot()
+    expect(snap.loaded.map(\.modelID)) == ["chat"]
+    expect(created.getAll()[0].didStop) == true
+    expect(events.getAll()) == [
+      .modelSpawned(modelID: "embed", kind: .embedding),
+      .modelPreempted(modelID: "embed", kind: .embedding),
+      .modelSpawned(modelID: "chat", kind: .chat),
+    ]
+  }
+
+  func testPreemptionReclaimsBusyModelWhenRequestCompletesDuringDrain() async throws {
+    let events = RouterEventsBox()
+    let (router, _) = makePreemptRouter(
+      totalGB: 80, preemptCooldownMillis: 60_000, events: events)
+
+    let chatModel = desc("chat", 50)
+    _ = try await router.routeEmbeddingAndBegin(embeddingDesc("embed", 40))
+    async let chat = router.routeAndBegin(chatModel)
+    // Let the chat load mark the embedding as draining, then complete the
+    // embedding's in-flight request so it is reclaimed cleanly during the window.
+    for _ in 0..<50 {
+      await Task.yield()
+    }
+    await router.embeddingRequestDone(modelID: "embed")
+    _ = try await chat
+
+    let snap = await router.snapshot()
+    expect(snap.loaded.map(\.modelID)) == ["chat"]
+    expect(events.getAll()) == [
+      .modelSpawned(modelID: "embed", kind: .embedding),
+      .modelPreempted(modelID: "embed", kind: .embedding),
+      .modelSpawned(modelID: "chat", kind: .chat),
+    ]
+  }
+
+  func testReloadCooldownRefusesPreemptedModelWhileContended() async throws {
+    let (router, _) = makePreemptRouter(totalGB: 80, preemptCooldownMillis: 60_000)
+
+    _ = try await router.routeEmbeddingAndBegin(embeddingDesc("embed", 40))
+    _ = try await router.routeAndBegin(desc("chat", 50))  // preempts the busy embedding
+
+    // Chat (50 GB) is resident on 80 GB, so reloading embed (40 GB) still needs
+    // room the higher-priority chat holds; the cooldown refuses it.
+    var refusedWithYielding = false
+    do {
+      _ = try await router.routeEmbeddingAndBegin(embeddingDesc("embed", 40))
+      fail("expected modelYielding during the reload cooldown")
+    } catch let err as ModelRouter.RouteError {
+      if case .modelYielding = err {
+        refusedWithYielding = true
+      } else {
+        throw err
+      }
+    }
+    expect(refusedWithYielding) == true
+  }
+
+  func testPinnedModelSurvivesHigherPriorityContention() async throws {
+    let (router, created) = makePreemptRouter(totalGB: 80, preemptCooldownMillis: 60_000)
+
+    _ = try await router.routeAndBegin(
+      desc("pinned", 40), loadConfig: ModelLoadConfig(pinned: true))
+    await router.requestDone(modelID: "pinned")  // idle, but pinned
+
+    var refusedWithHeadroom = false
+    do {
+      _ = try await router.routeAndBegin(desc("B", 50))
+      fail("expected insufficientHeadroom because the pinned model cannot be evicted")
+    } catch let err as ModelRouter.RouteError {
+      if case .insufficientHeadroom = err {
+        refusedWithHeadroom = true
+      } else {
+        throw err
+      }
+    }
+    expect(refusedWithHeadroom) == true
+    expect(created.getAll()[0].didStop) == false
+  }
+
+  func testBrokerEventMapsRouterPreemptionToModelPreemptedKind() {
+    let event = BrokerEvent(routerEvent: .modelPreempted(modelID: "embed", kind: .embedding))
+    expect(event.kind) == .modelPreempted
+    expect(event.model) == "embed"
+    expect(event.message) == "preempted embedding model=embed"
+  }
+
   func testConcurrentEmbeddingRoutesShareLoadingTask() async throws {
     let model = embeddingDesc("embed", 10)
     let embeddingServer = FakeModelServer(
@@ -455,6 +576,88 @@ final class ModelRouterTests: XCTestCase {
     expect(routedServer === embeddingServer) == true
     let retrySpawnCount = await retrySpawner.spawnCount()
     expect(retrySpawnCount) == 2
+  }
+
+  // MARK: - Admission queue
+
+  private func makeQueueRouter(
+    totalGB: Int64,
+    requestWaitTimeoutMillis: UInt64
+  ) -> ModelRouter {
+    let memory = MemoryModel(totalGB: totalGB)
+    let spawner = makeRecordingSpawner(memory: memory)
+    return ModelRouter(
+      reserveBytes: 0,
+      memoryProbe: memory.probe(),
+      spawner: spawner,
+      settleAttempts: 5,
+      settleIntervalMillis: 1,
+      requestWaitTimeoutMillis: requestWaitTimeoutMillis
+    )
+  }
+
+  func testContendedLoadParksUntilMemoryFrees() async throws {
+    let router = makeQueueRouter(totalGB: 80, requestWaitTimeoutMillis: 5_000)
+    // A busy chat model holds 50 GB and nothing lower-priority can be evicted.
+    _ = try await router.routeAndBegin(desc("A", 50))
+    let bModel = desc("B", 50)
+    async let second: ModelServer = router.routeAndBegin(bModel)
+    try await Task.sleep(nanoseconds: 30_000_000)
+    var snap = await router.snapshot()
+    expect(snap.loaded.map(\.modelID)) == ["A"]  // B is parked, not loaded
+
+    await router.unload(modelID: "A")  // frees 50 GB and wakes the waiter
+    _ = try await second
+    snap = await router.snapshot()
+    expect(snap.loaded.map(\.modelID)) == ["B"]
+  }
+
+  func testHigherPriorityWaiterAdmittedFirstWhenRoomFrees() async throws {
+    let router = makeQueueRouter(totalGB: 80, requestWaitTimeoutMillis: 300)
+    // A busy 40 GB chat model blocks both waiters until it is unloaded.
+    _ = try await router.routeAndBegin(desc("hog", 40))
+    let embedModel = embeddingDesc("embed", 50)
+    let vipModel = desc("vip", 50)
+    async let embedTask: ModelServer = router.routeEmbeddingAndBegin(embedModel)
+    try await Task.sleep(nanoseconds: 30_000_000)
+    async let vipTask: ModelServer = router.routeAndBegin(vipModel)
+    try await Task.sleep(nanoseconds: 30_000_000)
+
+    // Freed room fits only one 50 GB load; the high-priority chat wins it.
+    await router.unload(modelID: "hog")
+    _ = try await vipTask
+    let snap = await router.snapshot()
+    expect(snap.loaded.contains { $0.modelID == "vip" }) == true
+    expect(snap.loaded.contains { $0.modelID == "embed" }) == false
+
+    var embedTimedOut = false
+    do {
+      _ = try await embedTask
+      fail("expected the lower-priority embed to time out")
+    } catch let err as ModelRouter.RouteError {
+      if case .insufficientHeadroom = err {
+        embedTimedOut = true
+      } else {
+        throw err
+      }
+    }
+    expect(embedTimedOut) == true
+  }
+
+  func testParkedLoadTimesOutWhenRoomNeverFrees() async throws {
+    let router = makeQueueRouter(totalGB: 20, requestWaitTimeoutMillis: 100)
+    var timedOut = false
+    do {
+      _ = try await router.routeAndBegin(desc("huge", 50))
+      fail("expected insufficientHeadroom after the wait budget expired")
+    } catch let err as ModelRouter.RouteError {
+      if case .insufficientHeadroom = err {
+        timedOut = true
+      } else {
+        throw err
+      }
+    }
+    expect(timedOut) == true
   }
 
   // MARK: - Concurrency queue
