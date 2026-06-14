@@ -796,7 +796,7 @@ public actor ModelRouter {
       return (modelID, entry)
     }
     for (modelID, entry) in stoppedEntries {
-      routes.removeValue(forKey: modelID)
+      removeRoute(modelID: modelID)
       log.notice(
         "router.model_pruned model=\(modelID, privacy: .public) kind=\(entry.kind.rawValue, privacy: .public) reason=server_exited"
       )
@@ -1079,11 +1079,25 @@ public actor ModelRouter {
     unload(modelID: modelID, disposition: .evicted)
   }
 
-  private func unload(modelID: String, disposition: UnloadDisposition) {
-    // Release any queued waiters first so none hangs on a model going away.
+  /// The single teardown path: remove `modelID` and release everything parked
+  /// behind it. Drains queued concurrency waiters so none hangs, clears any
+  /// draining flag, and wakes admission waiters highest-priority-first because
+  /// memory just freed (a loaded model's RSS or a loading model's reservation).
+  /// Returns the removed state, or nil if it was already gone; the caller emits
+  /// the lifecycle event for why it left.
+  @discardableResult
+  private func removeRoute(modelID: String) -> RouteState? {
     drainConcurrencyWaiters(modelID: modelID)
     draining.remove(modelID)
     guard let state = routes.removeValue(forKey: modelID) else {
+      return nil
+    }
+    wakeAdmissionWaiters()
+    return state
+  }
+
+  private func unload(modelID: String, disposition: UnloadDisposition) {
+    guard let state = removeRoute(modelID: modelID) else {
       return
     }
     switch state {
@@ -1102,8 +1116,6 @@ public actor ModelRouter {
           loadID: loading.id.uuidString
         ))
     }
-    // Memory just freed: let parked loads retry, highest priority first.
-    wakeAdmissionWaiters()
   }
 
   /// Log, trace, and publish the lifecycle event for a loaded model leaving the
@@ -1256,7 +1268,7 @@ public actor ModelRouter {
     else {
       return false
     }
-    routes.removeValue(forKey: modelID)
+    removeRoute(modelID: modelID)
     return true
   }
 }
