@@ -7,9 +7,12 @@
 //  XPC adapter types.
 //
 
+import AppLogger
 import Foundation
 import SwiftLMHostProtocol
 import SwiftLMRuntime
+
+private let log = AppLogger.logger(category: "ModelServerRequests")
 
 public enum ModelServerChatError: Error, Equatable {
   case hostFailed(message: String)
@@ -147,56 +150,7 @@ private func streamingVideoResult(
   let headerBox = ModelServerChatHeaderBox()
   let events = AsyncThrowingStream<BackendStreamEvent, Error> { continuation in
     let task = Task {
-      var sawHeader = false
-      do {
-        for try await frame in frames {
-          switch frame {
-          case .chunk(_, let data):
-            if sawHeader {
-              continuation.yield(.rawBytes(data))
-            } else {
-              guard let header = VideoFrameCodec.decodeHeader(data) else {
-                let error = VideoFrameCodecError.malformedHeader
-                await headerBox.fail(error)
-                continuation.finish(throwing: error)
-                return
-              }
-              sawHeader = true
-              await headerBox.succeed(
-                ModelServerChatResponseHeader(
-                  statusCode: header.statusCode, contentType: header.contentType))
-            }
-          case .failed(_, let message):
-            let error = VideoFrameCodec.decodeFailure(message: message)
-            if !sawHeader {
-              await headerBox.fail(error)
-            }
-            continuation.finish(throwing: error)
-            return
-          case .done:
-            if !sawHeader {
-              await headerBox.fail(VideoFrameCodecError.missingHeader)
-              continuation.finish(throwing: VideoFrameCodecError.missingHeader)
-              return
-            }
-            continuation.finish()
-            return
-          default:
-            continue
-          }
-        }
-        if !sawHeader {
-          await headerBox.fail(VideoFrameCodecError.missingHeader)
-          continuation.finish(throwing: VideoFrameCodecError.missingHeader)
-          return
-        }
-        continuation.finish()
-      } catch {
-        if !sawHeader {
-          await headerBox.fail(error)
-        }
-        continuation.finish(throwing: error)
-      }
+      await pumpVideoFrames(frames, into: continuation, headerBox: headerBox)
     }
     continuation.onTermination = { @Sendable _ in
       task.cancel()
@@ -210,6 +164,70 @@ private func streamingVideoResult(
     appendDoneFrame: false,
     lifetimeToken: nil
   )
+}
+
+/// Read the host's video frame stream and drive the broker's event stream: the
+/// first `chunk` resolves the response envelope on `headerBox`, every later
+/// `chunk` is forwarded as verbatim SSE bytes, and a `failed` or absent header
+/// finishes the stream with the typed error.
+private func pumpVideoFrames(
+  _ frames: AsyncThrowingStream<BackendFrame, Error>,
+  into continuation: AsyncThrowingStream<BackendStreamEvent, Error>.Continuation,
+  headerBox: ModelServerChatHeaderBox
+) async {
+  var sawHeader = false
+  do {
+    for try await frame in frames {
+      switch frame {
+      case .chunk(_, let data):
+        if sawHeader {
+          continuation.yield(.rawBytes(data))
+          continue
+        }
+        guard let header = VideoFrameCodec.decodeHeader(data) else {
+          let error = VideoFrameCodecError.malformedHeader
+          await headerBox.fail(error)
+          continuation.finish(throwing: error)
+          return
+        }
+        sawHeader = true
+        await headerBox.succeed(
+          ModelServerChatResponseHeader(
+            statusCode: header.statusCode, contentType: header.contentType))
+      case .failed(_, let message):
+        let error = VideoFrameCodec.decodeFailure(message: message)
+        if !sawHeader {
+          await headerBox.fail(error)
+        }
+        continuation.finish(throwing: error)
+        return
+      case .done:
+        let error = VideoFrameCodecError.missingHeader
+        if !sawHeader {
+          await headerBox.fail(error)
+          continuation.finish(throwing: error)
+          return
+        }
+        continuation.finish()
+        return
+      default:
+        continue
+      }
+    }
+    if !sawHeader {
+      let error = VideoFrameCodecError.missingHeader
+      await headerBox.fail(error)
+      continuation.finish(throwing: error)
+      return
+    }
+    continuation.finish()
+  } catch {
+    if !sawHeader {
+      await headerBox.fail(error)
+    }
+    log.error("video.stream_pump_failed err=\(error, privacy: .public)")
+    continuation.finish(throwing: error)
+  }
 }
 
 private func bufferedChatResult(
@@ -283,6 +301,7 @@ private func streamingChatResult(
         }
         continuation.finish()
       } catch {
+        log.error("chat.stream_pump_failed err=\(error, privacy: .public)")
         if !sawHeader {
           await headerBox.fail(error)
         }

@@ -45,14 +45,15 @@ import Foundation
 public final class GPUThread: TaskExecutor, @unchecked Sendable {
   private let condition = NSCondition()
   private var jobs: [UnownedJob] = []
-  private var worker: Thread!
 
   public init(name: String = "io.goodkind.lmd.gpu") {
-    self.worker = Thread { [weak self] in
+    // The worker is owned by its own running execution and the infinite run
+    // loop, so it does not need to be stored on the instance.
+    let worker = Thread { [weak self] in
       self?.runLoop()
     }
-    self.worker.name = name
-    self.worker.start()
+    worker.name = name
+    worker.start()
   }
 
   public func enqueue(_ job: consuming ExecutorJob) {

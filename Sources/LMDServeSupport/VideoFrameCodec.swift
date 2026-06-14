@@ -13,8 +13,11 @@
 //  status the in-process backend produced.
 //
 
+import AppLogger
 import Foundation
 import SwiftLMHostProtocol
+
+private let log = AppLogger.logger(category: "VideoFrameCodec")
 
 /// How a video result was shaped before serialization. The broker rebuilds the
 /// matching `BackendChatResult` case from this header.
@@ -60,6 +63,8 @@ public enum VideoFrameCodecError: Error, Equatable {
   case malformedHeader
 }
 
+// MARK: - FrameCollector
+
 /// Collects frames from `VideoFrameCodec.stream` into an ordered array. The
 /// codec calls `append` sequentially from one task, and the lock keeps the type
 /// `Sendable` so it can be captured by the `@Sendable` send closure.
@@ -96,6 +101,7 @@ public enum VideoFrameCodec {
   /// result forwards one chunk per generated event while generation runs, so the
   /// host emits tokens to the broker incrementally; a buffered result carries the
   /// whole body in one chunk. The frame shape is the contract `decode` reads back.
+  @preconcurrency
   public static func stream(
     result: BackendChatResult,
     requestID: UUID,
@@ -111,11 +117,20 @@ public enum VideoFrameCodec {
     case .streaming(let statusCode, let contentType, let events, let appendDoneFrame, _):
       let header = VideoResultHeader(
         shape: .streaming, statusCode: statusCode, contentType: contentType)
+      log.debug(
+        "video.frame_send kind=header ts_mono=\(DispatchTime.now().uptimeNanoseconds, privacy: .public)"
+      )
       send(.chunk(requestID: requestID, data: try encoder.encode(header)))
       // Render each event to its exact SSE bytes, the same bytes the in-process
       // path streams to the client, so the broker can replay them verbatim.
+      var sentChunks = 0
       for try await event in events {
-        send(.chunk(requestID: requestID, data: try encodeBackendStreamEvent(event)))
+        let frameData = try encodeBackendStreamEvent(event)
+        sentChunks += 1
+        log.debug(
+          "video.frame_send kind=chunk seq=\(sentChunks, privacy: .public) ts_mono=\(DispatchTime.now().uptimeNanoseconds, privacy: .public)"
+        )
+        send(.chunk(requestID: requestID, data: frameData))
       }
       if appendDoneFrame {
         send(.chunk(requestID: requestID, data: backendDoneFrame()))
@@ -140,7 +155,13 @@ public enum VideoFrameCodec {
   /// streaming path reads it to learn the response envelope before it forwards
   /// the body chunks.
   static func decodeHeader(_ data: Data) -> VideoResultHeader? {
-    try? decoder.decode(VideoResultHeader.self, from: data)
+    do {
+      return try decoder.decode(VideoResultHeader.self, from: data)
+    } catch {
+      // A header that does not decode is reported by the caller as a malformed
+      // header; recover here by returning nil.
+      return nil
+    }
   }
 
   /// Map a thrown serving error into one `failed` frame whose message is the

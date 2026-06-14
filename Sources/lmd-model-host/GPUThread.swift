@@ -1,5 +1,6 @@
 //
 //  GPUThread.swift
+//  lmd-model-host
 //
 //  Created by Alexander Goodkind <alex@goodkind.io> on 2026-06-14.
 //  Copyright © 2026, all rights reserved.
@@ -34,14 +35,15 @@ import Foundation
 final class GPUThread: TaskExecutor, @unchecked Sendable {
   private let condition = NSCondition()
   private var jobs: [UnownedJob] = []
-  private var worker: Thread!
 
   init(name: String = "io.goodkind.lmd.gpu") {
-    self.worker = Thread { [weak self] in
+    // The worker is owned by its own running execution and the infinite run
+    // loop, so it does not need to be stored on the instance.
+    let worker = Thread { [weak self] in
       self?.runLoop()
     }
-    self.worker.name = name
-    self.worker.start()
+    worker.name = name
+    worker.start()
   }
 
   func enqueue(_ job: consuming ExecutorJob) {

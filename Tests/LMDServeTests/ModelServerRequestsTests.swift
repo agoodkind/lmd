@@ -235,7 +235,7 @@ final class ModelServerRequestsTests: XCTestCase {
       requestID: UUID()
     )
 
-    guard case .streaming(let statusCode, let contentType, let rebuilt, let appendDone, _) = result
+    guard case let .streaming(statusCode, contentType, rebuilt, appendDone, _) = result
     else {
       fail("expected streaming result")
       return
