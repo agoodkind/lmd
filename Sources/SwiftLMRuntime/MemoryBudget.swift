@@ -57,8 +57,14 @@ public struct EvictionCandidate: Sendable, Equatable {
   public let lastUsed: Date
   /// True while a request is being actively served by this model.
   public let inFlightRequests: Int
-  /// When true, eviction planning deprioritizes this model (chat evicts first).
+  /// Whether the model is routed to embeddings. Embedding models default to the
+  /// low priority tier, so they are evicted and preempted before chat or video.
   public let isEmbedding: Bool
+  /// Resolved eviction priority. Lower values are reclaimed first, and a load
+  /// can only preempt a busy model whose priority is strictly lower than its own.
+  public let priority: Int
+  /// When true, the model is exempt from every eviction path.
+  public let pinned: Bool
   public let loadConfig: ModelLoadConfig
 
   public init(
@@ -67,6 +73,8 @@ public struct EvictionCandidate: Sendable, Equatable {
     lastUsed: Date,
     inFlightRequests: Int,
     isEmbedding: Bool = false,
+    priority: Int? = nil,
+    pinned: Bool = false,
     loadConfig: ModelLoadConfig = .default
   ) {
     self.modelID = modelID
@@ -74,53 +82,101 @@ public struct EvictionCandidate: Sendable, Equatable {
     self.lastUsed = lastUsed
     self.inFlightRequests = inFlightRequests
     self.isEmbedding = isEmbedding
+    self.priority = priority ?? (isEmbedding ? LoadPriority.low : LoadPriority.high)
+    self.pinned = pinned
     self.loadConfig = loadConfig
   }
 
   public var isIdle: Bool { inFlightRequests == 0 }
 }
 
+// MARK: - EvictionPlan
+
+/// The models a load may reclaim, split by how they are reclaimed. Idle victims
+/// are unloaded immediately; busy victims are drained and then preempted.
+public struct EvictionPlan: Sendable, Equatable {
+  /// Idle victims to unload immediately, in unload order.
+  public let idle: [String]
+  /// Busy lower-priority victims to drain then preempt, in unload order.
+  public let busy: [String]
+
+  public init(idle: [String], busy: [String]) {
+    self.idle = idle
+    self.busy = busy
+  }
+
+  public var isEmpty: Bool {
+    idle.isEmpty && busy.isEmpty
+  }
+
+  /// Every victim, idle first then busy, in unload order.
+  public var all: [String] {
+    idle + busy
+  }
+}
+
 /// Pure functions for eviction decisions. No state, no IO, fully tested.
 public enum EvictionPolicy {
-  /// Pick idle models to unload until their combined size reaches
-  /// `bytesToFree`, returning their ids in unload order.
+  /// Plan which loaded models to reclaim so a load requested at
+  /// `requestorPriority` can free `bytesToFree`.
   ///
-  /// Busy models (in-flight requests > 0) are never chosen. Chat models are
-  /// chosen before embedding models, and within each group the least recently
-  /// used is chosen first.
+  /// Pinned models are never chosen. Idle models at or below the requestor's
+  /// priority are reclaimed first, lowest priority then least-recently-used.
+  /// When idle models cannot reach the target, busy models whose priority is
+  /// strictly lower than the requestor's are added as drain-and-preempt victims,
+  /// in the same order. Equal-priority busy peers are never preempted.
   ///
-  /// When the idle models cannot reach `bytesToFree`, every idle model is
-  /// returned so the caller can unload them all and then re-measure live
-  /// memory to decide whether the load is admitted.
+  /// When even every eligible model cannot reach `bytesToFree`, all of them are
+  /// returned so the caller can reclaim them and re-measure live memory.
   ///
   /// - Parameters:
   ///   - candidates: Every currently loaded model.
   ///   - bytesToFree: Target number of bytes to reclaim.
-  /// - Returns: Model ids to unload in order. Empty when nothing needs freeing.
+  ///   - requestorPriority: Priority of the load asking for room. Defaults to
+  ///     the maximum so background pressure relief can reclaim any idle model.
+  /// - Returns: Idle and busy victims to reclaim. Empty when nothing needs freeing.
   public static func planEvictionToFree(
     candidates: [EvictionCandidate],
-    bytesToFree: Int64
-  ) -> [String] {
+    bytesToFree: Int64,
+    requestorPriority: Int = .max
+  ) -> EvictionPlan {
     if bytesToFree <= 0 {
-      return []
+      return EvictionPlan(idle: [], busy: [])
     }
-    let idle = candidates.filter(\.isIdle).sorted { a, b in
-      let pa = a.isEmbedding ? 1 : 0
-      let pb = b.isEmbedding ? 1 : 0
-      if pa != pb {
-        return pa < pb
-      }
-      return a.lastUsed < b.lastUsed
-    }
+    let idleEligible =
+      candidates
+      .filter { !$0.pinned && $0.isIdle && $0.priority <= requestorPriority }
+      .sorted(by: evictionOrder)
+    let busyEligible =
+      candidates
+      .filter { !$0.pinned && !$0.isIdle && $0.priority < requestorPriority }
+      .sorted(by: evictionOrder)
+
     var freed: Int64 = 0
-    var toEvict: [String] = []
-    for c in idle {
-      freed += c.sizeBytes
-      toEvict.append(c.modelID)
+    var idle: [String] = []
+    for candidate in idleEligible {
+      freed += candidate.sizeBytes
+      idle.append(candidate.modelID)
       if freed >= bytesToFree {
-        return toEvict
+        return EvictionPlan(idle: idle, busy: [])
       }
     }
-    return toEvict
+    var busy: [String] = []
+    for candidate in busyEligible {
+      freed += candidate.sizeBytes
+      busy.append(candidate.modelID)
+      if freed >= bytesToFree {
+        return EvictionPlan(idle: idle, busy: busy)
+      }
+    }
+    return EvictionPlan(idle: idle, busy: busy)
+  }
+
+  /// Reclaim order: lowest priority first, then least-recently-used.
+  private static func evictionOrder(_ lhs: EvictionCandidate, _ rhs: EvictionCandidate) -> Bool {
+    if lhs.priority != rhs.priority {
+      return lhs.priority < rhs.priority
+    }
+    return lhs.lastUsed < rhs.lastUsed
   }
 }

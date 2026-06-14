@@ -84,14 +84,17 @@ private final class ConcurrencyWaiter {
 }
 
 private enum UnloadDisposition {
-  case unloaded
   case evicted
+  /// Reclaimed to make room for a strictly higher-priority load.
+  case preempted
+  case unloaded
 }
 
 public enum RouterLifecycleEvent: Sendable, Equatable {
   case modelSpawned(modelID: String, kind: SwiftLMTrace.BackendKind)
   case modelUnloaded(modelID: String, kind: SwiftLMTrace.BackendKind)
   case modelEvicted(modelID: String, kind: SwiftLMTrace.BackendKind)
+  case modelPreempted(modelID: String, kind: SwiftLMTrace.BackendKind)
   case modelLoadCancelled(modelID: String, kind: SwiftLMTrace.BackendKind, loadID: String)
   case backendLaunchFailed(
     modelID: String,
@@ -116,7 +119,15 @@ public actor ModelRouter {
   /// page-reclaim lag; tests set both small so they do not actually sleep.
   public let settleAttempts: Int
   public let settleIntervalNanos: UInt64
+  /// How long a just-preempted model is refused a contended reload, so the
+  /// client that kept it hot backs off instead of immediately re-contending.
+  public let preemptCooldownNanos: UInt64
   public let spawner: ModelServerSpawner
+
+  /// Nanoseconds per millisecond, for converting the injected millisecond knobs.
+  private static let nanosecondsPerMillisecond: UInt64 = 1_000_000
+  /// Nanoseconds per second, for converting an elapsed-seconds interval.
+  private static let nanosecondsPerSecond: Double = 1_000_000_000
   public let chatMaxConcurrency: Int?
   /// The live embedding concurrency cap. Lowered by the battery throttle and
   /// restored to `configuredEmbeddingMaxConcurrency` when it releases.
@@ -145,6 +156,15 @@ public actor ModelRouter {
   /// that id, so contention queues rather than rejecting with a 429.
   private var concurrencyWaiters: [String: [ConcurrencyWaiter]] = [:]
 
+  /// Models currently being preempted. While a model id is in this set its new
+  /// requests are refused so its in-flight count can drain to zero, and the
+  /// request-done path reclaims each one the moment it reaches zero in-flight.
+  private var draining: Set<String> = []
+
+  /// When each model was last preempted, used to gate contended reloads during
+  /// the cooldown window.
+  private var preemptedAt: [String: Date] = [:]
+
   /// How long a queued request waits for a slot before the router gives up and
   /// surfaces `concurrencyLimitExceeded`. Settable for tests.
   private var queueTimeoutNanos: UInt64 = 120 * 1_000_000_000
@@ -158,12 +178,14 @@ public actor ModelRouter {
     embeddingMaxConcurrency: Int? = nil,
     settleAttempts: Int = 6,
     settleIntervalMillis: UInt64 = 250,
+    preemptCooldownMillis: UInt64 = 5_000,
     eventSink: @escaping @Sendable (RouterLifecycleEvent) -> Void = { _ in }
   ) {
     self.reserveBytes = max(0, reserveBytes)
     self.memoryProbe = memoryProbe
     self.settleAttempts = max(1, settleAttempts)
-    self.settleIntervalNanos = settleIntervalMillis * 1_000_000
+    self.settleIntervalNanos = settleIntervalMillis * Self.nanosecondsPerMillisecond
+    self.preemptCooldownNanos = preemptCooldownMillis * Self.nanosecondsPerMillisecond
     self.spawner = spawner
     self.chatMaxConcurrency = positiveLimit(chatMaxConcurrency)
     let normalizedEmbeddingLimit = positiveLimit(embeddingMaxConcurrency)
@@ -182,7 +204,7 @@ public actor ModelRouter {
   /// Dry check used by the estimate path. Reports whether a load could be
   /// admitted, either because memory is already safe or because unloading idle
   /// models would restore the reserve. Has no side effects.
-  public func canLoad(needing newBytes: Int64) -> Bool {
+  public func canLoad(needing newBytes: Int64, requestorPriority: Int = .max) -> Bool {
     let reading = memoryProbe()
     let deficit = HeadroomPolicy.bytesToFree(
       availableBytes: reading.availableBytes, needing: newBytes, reserveBytes: reserveBytes)
@@ -190,11 +212,12 @@ public actor ModelRouter {
       return true
     }
     let snap = snapshot()
-    let plan = EvictionPolicy.planEvictionToFree(candidates: snap.loaded, bytesToFree: deficit)
+    let plan = EvictionPolicy.planEvictionToFree(
+      candidates: snap.loaded, bytesToFree: deficit, requestorPriority: requestorPriority)
     if plan.isEmpty {
       return false
     }
-    let freed = projectedFreedBytes(plan: plan, in: snap)
+    let freed = projectedFreedBytes(plan: plan.all, in: snap)
     return reading.availableBytes + freed - newBytes >= reserveBytes
   }
 
@@ -205,9 +228,18 @@ public actor ModelRouter {
 
   // MARK: - Headroom enforcement
 
-  /// Free idle models until the reserve is restored, then re-measure to confirm.
-  /// Throws ``RouteError/insufficientHeadroom`` when the reserve cannot be met.
-  private func ensureHeadroom(modelID: String, needing: Int64) async throws {
+  /// Reclaim room for a load requested at `requestorPriority`: unload idle
+  /// victims, drain-and-preempt busy lower-priority victims, then re-measure to
+  /// confirm. Throws ``RouteError/insufficientHeadroom`` when the reserve cannot
+  /// be met.
+  private func ensureHeadroom(
+    modelID: String,
+    needing: Int64,
+    loadConfig: ModelLoadConfig,
+    kind: RouteKind
+  ) async throws {
+    try enforceReloadCooldown(modelID: modelID, needing: needing)
+    let requestorPriority = loadConfig.effectivePriority(for: loadConfigKind(kind))
     var reading = memoryProbe()
     var deficit = HeadroomPolicy.bytesToFree(
       availableBytes: reading.availableBytes, needing: needing, reserveBytes: reserveBytes)
@@ -219,10 +251,11 @@ public actor ModelRouter {
     // Under pressure with the byte reserve already met, free at least one idle
     // model to relieve the pressure.
     let target = deficit > 0 ? deficit : 1
-    let plan = EvictionPolicy.planEvictionToFree(candidates: snap.loaded, bytesToFree: target)
+    let plan = EvictionPolicy.planEvictionToFree(
+      candidates: snap.loaded, bytesToFree: target, requestorPriority: requestorPriority)
     if plan.isEmpty {
-      // Nothing idle to free. When the byte reserve already holds and only the
-      // pressure signal is set, there is nothing more to do, so allow the load.
+      // Nothing eligible to free. When the byte reserve already holds and only
+      // the pressure signal is set, there is nothing more to do, so allow the load.
       if deficit == 0 {
         return
       }
@@ -230,18 +263,64 @@ public actor ModelRouter {
         modelID: modelID, needing: needing, availableBytes: reading.availableBytes)
     }
 
-    for id in plan {
-      log.notice("router.headroom_evict model=\(id, privacy: .public)")
+    for id in plan.idle {
+      log.notice("router.headroom_evict model=\(id, privacy: .public) reason=idle")
       evict(modelID: id)
+    }
+    // Block new requests to busy lower-priority victims so their in-flight count
+    // can drain; the request-done path preempts each one the moment it reaches
+    // zero. The settle window below is the drain budget.
+    for id in plan.busy {
+      draining.insert(id)
+      log.notice("router.preempt_drain_begin model=\(id, privacy: .public)")
     }
 
     reading = await settleAndRead(needing: needing)
     deficit = HeadroomPolicy.bytesToFree(
       availableBytes: reading.availableBytes, needing: needing, reserveBytes: reserveBytes)
     if deficit > 0 {
+      // The drain window elapsed without freeing enough; force-stop any victim
+      // still serving requests, then re-measure.
+      for id in plan.busy where draining.contains(id) {
+        log.notice("router.preempt_drain_timeout model=\(id, privacy: .public)")
+        unload(modelID: id, disposition: .preempted)
+      }
+      reading = await settleAndRead(needing: needing)
+      deficit = HeadroomPolicy.bytesToFree(
+        availableBytes: reading.availableBytes, needing: needing, reserveBytes: reserveBytes)
+    }
+    for id in plan.busy {
+      draining.remove(id)
+    }
+    if deficit > 0 {
       throw RouteError.insufficientHeadroom(
         modelID: modelID, needing: needing, availableBytes: reading.availableBytes)
     }
+  }
+
+  /// Refuse a contended reload of a model still inside its preemption cooldown.
+  /// A reload is allowed when memory is already free, so the model returns as
+  /// soon as the higher-priority load that displaced it releases its memory.
+  private func enforceReloadCooldown(modelID: String, needing: Int64) throws {
+    guard let stamp = preemptedAt[modelID] else {
+      return
+    }
+    let elapsedNanos = UInt64(max(0, Date().timeIntervalSince(stamp)) * Self.nanosecondsPerSecond)
+    if elapsedNanos >= preemptCooldownNanos {
+      preemptedAt[modelID] = nil
+      return
+    }
+    let reading = memoryProbe()
+    let deficit = HeadroomPolicy.bytesToFree(
+      availableBytes: reading.availableBytes, needing: needing, reserveBytes: reserveBytes)
+    if deficit > 0 {
+      let elapsedMillis = elapsedNanos / Self.nanosecondsPerMillisecond
+      log.notice(
+        "router.reload_cooldown model=\(modelID, privacy: .public) elapsed_ms=\(elapsedMillis, privacy: .public)"
+      )
+      throw RouteError.modelYielding(modelID: modelID)
+    }
+    preemptedAt[modelID] = nil
   }
 
   /// Re-read memory after eviction, waiting out the brief OS page-reclaim lag.
@@ -274,8 +353,10 @@ public actor ModelRouter {
     }
     let snap = snapshot()
     let target = deficit > 0 ? deficit : 1
+    // Background pressure relief has no requestor to preempt for, so it only
+    // unloads idle models and never drains a busy one.
     let plan = EvictionPolicy.planEvictionToFree(candidates: snap.loaded, bytesToFree: target)
-    for id in plan {
+    for id in plan.idle {
       log.notice("router.headroom_evict model=\(id, privacy: .public) reason=pressure")
       evict(modelID: id)
     }
@@ -306,6 +387,8 @@ public actor ModelRouter {
           lastUsed: entry.lastUsed,
           inFlightRequests: entry.inFlight,
           isEmbedding: entry.kind == .embedding,
+          priority: entry.loadConfig.effectivePriority(for: loadConfigKind(entry.kind)),
+          pinned: entry.loadConfig.isPinned,
           loadConfig: entry.loadConfig
         ))
     }
@@ -405,6 +488,9 @@ public actor ModelRouter {
     case wrongKindForChat(modelID: String)
     case wrongKindForEmbedding(modelID: String)
     case powerPaused(reason: String)
+    /// The model is being preempted, or was just preempted and is in its reload
+    /// cooldown, for a higher-priority load. Retriable once that load releases.
+    case modelYielding(modelID: String)
   }
 
   public func routeAndBegin(
@@ -443,6 +529,9 @@ public actor ModelRouter {
     routeAcquire: while let state = routes[model.id] {
       switch state {
       case .loaded(var entry):
+        if draining.contains(model.id) {
+          throw RouteError.modelYielding(modelID: model.id)
+        }
         if entry.kind != kind {
           if entry.inFlight > 0 {
             throw RouteError.loadConfigConflict(modelID: model.id)
@@ -495,7 +584,8 @@ public actor ModelRouter {
       }
     }
 
-    try await ensureHeadroom(modelID: model.id, needing: model.sizeBytes)
+    try await ensureHeadroom(
+      modelID: model.id, needing: model.sizeBytes, loadConfig: effectiveLoadConfig, kind: kind)
 
     let loadTask = Task {
       try await spawner(model, kind, effectiveLoadConfig)
@@ -611,7 +701,13 @@ public actor ModelRouter {
     if entry.inFlight > 0 { entry.inFlight -= 1 }
     entry.lastUsed = Date()
     routes[modelID] = .loaded(entry)
-    wakeNextConcurrencyWaiter(modelID: modelID)
+    if entry.inFlight == 0, draining.contains(modelID) {
+      // A victim being preempted has finished its last in-flight request, so
+      // reclaim it now rather than waiting for the force-evict at the timeout.
+      unload(modelID: modelID, disposition: .preempted)
+    } else {
+      wakeNextConcurrencyWaiter(modelID: modelID)
+    }
     logRequestDone(entry: entry, requestID: requestID)
   }
 
@@ -809,42 +905,14 @@ public actor ModelRouter {
   private func unload(modelID: String, disposition: UnloadDisposition) {
     // Release any queued waiters first so none hangs on a model going away.
     drainConcurrencyWaiters(modelID: modelID)
+    draining.remove(modelID)
     guard let state = routes.removeValue(forKey: modelID) else {
       return
     }
     switch state {
     case .loaded(let entry):
       entry.server.shutdown()
-      let traceContext = TraceContext(
-        modelID: modelID,
-        modelKind: entry.kind,
-        loadID: entry.loadID,
-        backendObjectID: entry.backendObjectID
-      )
-      switch disposition {
-      case .unloaded:
-        log.notice(
-          "router.model_unloaded model=\(modelID, privacy: .public) kind=\(entry.kind.rawValue, privacy: .public)"
-        )
-        BackendTrace.notice(
-          phase: TracePhase.Router.modelUnloaded.rawValue,
-          context: traceContext,
-          snapshot: .current(),
-          extras: ["reason": "unloaded"]
-        )
-        eventSink(.modelUnloaded(modelID: modelID, kind: entry.kind))
-      case .evicted:
-        log.notice(
-          "router.model_evicted model=\(modelID, privacy: .public) kind=\(entry.kind.rawValue, privacy: .public)"
-        )
-        BackendTrace.notice(
-          phase: TracePhase.Router.modelEvicted.rawValue,
-          context: traceContext,
-          snapshot: .current(),
-          extras: ["reason": "evicted"]
-        )
-        eventSink(.modelEvicted(modelID: modelID, kind: entry.kind))
-      }
+      reportUnload(modelID: modelID, entry: entry, disposition: disposition)
     case .loading(let loading):
       loading.task.cancel()
       log.notice(
@@ -857,6 +925,49 @@ public actor ModelRouter {
           loadID: loading.id.uuidString
         ))
     }
+  }
+
+  /// Log, trace, and publish the lifecycle event for a loaded model leaving the
+  /// router under `disposition`. Preemption also stamps the reload cooldown.
+  private func reportUnload(
+    modelID: String,
+    entry: LoadedEntry,
+    disposition: UnloadDisposition
+  ) {
+    let traceContext = TraceContext(
+      modelID: modelID,
+      modelKind: entry.kind,
+      loadID: entry.loadID,
+      backendObjectID: entry.backendObjectID
+    )
+    let reason: String
+    let event: RouterLifecycleEvent
+    let tracePhase: String
+    switch disposition {
+    case .unloaded:
+      reason = "unloaded"
+      event = .modelUnloaded(modelID: modelID, kind: entry.kind)
+      tracePhase = TracePhase.Router.modelUnloaded.rawValue
+    case .evicted:
+      reason = "evicted"
+      event = .modelEvicted(modelID: modelID, kind: entry.kind)
+      tracePhase = TracePhase.Router.modelEvicted.rawValue
+    case .preempted:
+      preemptedAt[modelID] = Date()
+      reason = "preempted"
+      event = .modelPreempted(modelID: modelID, kind: entry.kind)
+      tracePhase = TracePhase.Router.modelEvicted.rawValue
+    }
+    log.notice(
+      "router.model_\(reason, privacy: .public) model=\(modelID, privacy: .public) kind=\(entry.kind.rawValue, privacy: .public)"
+    )
+    BackendTrace.notice(
+      phase: tracePhase,
+      context: traceContext,
+      snapshot: .current(),
+      extras: ["reason": reason]
+    )
+    eventSink(event)
   }
 
   public func shutdownAll() {

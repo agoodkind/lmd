@@ -331,6 +331,9 @@ func openAIModelId(_ m: ModelDescriptor) -> String {
 
 private let bytesPerGigabyte = 1_073_741_824.0
 
+/// HTTP 503 status used for retriable capacity and yielding responses.
+private let httpStatusServiceUnavailable = 503
+
 func idleCutoff(
   for candidate: EvictionCandidate,
   defaultChat: TimeInterval,
@@ -380,7 +383,9 @@ func modelLoadConfig(for request: ModelLoadRequest, descriptor: ModelDescriptor)
     flashAttention: request.flashAttention,
     offloadKVCacheToGPU: request.offloadKVCacheToGPU,
     gpu: request.gpu,
-    ttlSeconds: request.ttlSeconds
+    ttlSeconds: request.ttlSeconds,
+    priority: request.priority,
+    pinned: request.pinned
   ).normalized(for: descriptor.kind)
 }
 
@@ -396,7 +401,10 @@ func canLoadModel(
   if snap.loaded.contains(where: { $0.modelID == descriptor.id }) {
     return true
   }
-  return await state.router.canLoad(needing: descriptor.sizeBytes)
+  return await state.router.canLoad(
+    needing: descriptor.sizeBytes,
+    requestorPriority: LoadPriority.kindDefault(for: descriptor.kind)
+  )
 }
 
 func performModelLoad(
@@ -607,6 +615,7 @@ struct SwiftLMD {
         switch event {
         case .modelUnloaded(let modelID, _),
           .modelEvicted(let modelID, _),
+          .modelPreempted(let modelID, _),
           .modelLoadCancelled(let modelID, _, _):
           aliasStore.clear(modelID: modelID)
           hostServers.remove(modelID: modelID)
@@ -718,7 +727,7 @@ struct SwiftLMD {
         let snap = await router.snapshot()
         let now = Date()
         for c in snap.loaded
-        where c.isIdle && !c.isEmbedding
+        where c.isIdle && !c.isEmbedding && !c.loadConfig.isPinned
           && now.timeIntervalSince(c.lastUsed)
             >= idleCutoff(
               for: c,
@@ -732,7 +741,7 @@ struct SwiftLMD {
           await router.unload(modelID: c.modelID)
         }
         for c in snap.loaded
-        where c.isIdle && c.isEmbedding
+        where c.isIdle && c.isEmbedding && !c.loadConfig.isPinned
           && now.timeIntervalSince(c.lastUsed)
             >= idleCutoff(
               for: c,
@@ -1198,6 +1207,12 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
         status: .serviceUnavailable,
         message: "service paused to preserve battery (\(reason))",
         type: "service_paused"
+      )
+    case .modelYielding:
+      return errorResponse(
+        status: .serviceUnavailable,
+        message: "embedding model yielded memory to a higher-priority load; retry shortly",
+        type: "model_yielding"
       )
     }
   }
@@ -2007,6 +2022,15 @@ private func xpcChatResult(
         statusCode: 503,
         message: errorMessage,
         type: "service_paused"
+      )
+    case .modelYielding:
+      statusCode = httpStatusServiceUnavailable
+      errorType = "model_yielding"
+      errorMessage = "model yielded memory to a higher-priority load; retry shortly"
+      result = backendErrorResult(
+        statusCode: statusCode,
+        message: errorMessage,
+        type: "model_yielding"
       )
     }
     logChatRequestFailed(
