@@ -70,15 +70,40 @@ private enum RouteState: Sendable {
   case loaded(LoadedEntry)
 }
 
-/// A request waiting for a concurrency slot on a specific model. Lives only in
-/// `ModelRouter`'s actor-isolated state. Resumed with `true` when a slot frees
-/// and `false` when the wait times out or the model is torn down.
+// MARK: - RoutedServer
+
+/// A routed model server plus its trace identity, returned by the admission helpers.
+private struct RoutedServer {
+  let server: ModelServer
+  let loadID: UUID?
+  let backendObj: String?
+}
+
+// MARK: - LoadedDecision
+
+/// The outcome of trying to admit a request to an already-loaded model.
+private enum LoadedDecision {
+  /// The current entry was torn down; load a fresh one.
+  case reload
+  /// A concurrency slot wait completed; re-evaluate from the top.
+  case retry
+  case served(RoutedServer)
+}
+
+/// A request parked until it can proceed, either waiting for a concurrency slot
+/// on a specific model or for memory to admit a load. Lives only in
+/// `ModelRouter`'s actor-isolated state. Resumed with `true` when woken to retry
+/// and `false` when the wait times out or the model is torn down. `priority` is
+/// the requestor's load priority, used to wake admission waiters highest first;
+/// concurrency-slot waiters share a single default and wake FIFO.
 private final class ConcurrencyWaiter {
   let id: UUID
+  let priority: Int
   let continuation: CheckedContinuation<Bool, Never>
 
-  init(id: UUID, continuation: CheckedContinuation<Bool, Never>) {
+  init(id: UUID, priority: Int, continuation: CheckedContinuation<Bool, Never>) {
     self.id = id
+    self.priority = priority
     self.continuation = continuation
   }
 }
@@ -128,6 +153,10 @@ public actor ModelRouter {
   private static let nanosecondsPerMillisecond: UInt64 = 1_000_000
   /// Nanoseconds per second, for converting an elapsed-seconds interval.
   private static let nanosecondsPerSecond: Double = 1_000_000_000
+  /// Reserved waiter key for memory-admission waiters, distinct from any model id.
+  private static let admissionWaiterKey = "\u{0}admission"
+  /// Most admission waiters parked at once before new ones are refused immediately.
+  private static let maxAdmissionWaiters = 256
   public let chatMaxConcurrency: Int?
   /// The live embedding concurrency cap. Lowered by the battery throttle and
   /// restored to `configuredEmbeddingMaxConcurrency` when it releases.
@@ -165,9 +194,10 @@ public actor ModelRouter {
   /// the cooldown window.
   private var preemptedAt: [String: Date] = [:]
 
-  /// How long a queued request waits for a slot before the router gives up and
-  /// surfaces `concurrencyLimitExceeded`. Settable for tests.
-  private var queueTimeoutNanos: UInt64 = 120 * 1_000_000_000
+  /// The whole-request wait budget: how long a request may park for memory or a
+  /// concurrency slot before the router gives up. Set from `init` and settable
+  /// for tests.
+  private var queueTimeoutNanos: UInt64
 
   @preconcurrency
   public init(
@@ -179,6 +209,7 @@ public actor ModelRouter {
     settleAttempts: Int = 6,
     settleIntervalMillis: UInt64 = 250,
     preemptCooldownMillis: UInt64 = 5_000,
+    requestWaitTimeoutMillis: UInt64 = 120_000,
     eventSink: @escaping @Sendable (RouterLifecycleEvent) -> Void = { _ in }
   ) {
     self.reserveBytes = max(0, reserveBytes)
@@ -186,6 +217,7 @@ public actor ModelRouter {
     self.settleAttempts = max(1, settleAttempts)
     self.settleIntervalNanos = settleIntervalMillis * Self.nanosecondsPerMillisecond
     self.preemptCooldownNanos = preemptCooldownMillis * Self.nanosecondsPerMillisecond
+    self.queueTimeoutNanos = requestWaitTimeoutMillis * Self.nanosecondsPerMillisecond
     self.spawner = spawner
     self.chatMaxConcurrency = positiveLimit(chatMaxConcurrency)
     let normalizedEmbeddingLimit = positiveLimit(embeddingMaxConcurrency)
@@ -499,110 +531,180 @@ public actor ModelRouter {
     loadConfig: ModelLoadConfig? = nil,
     requestID: UUID? = nil
   ) async throws -> ModelServer {
-    if powerHalted {
-      throw RouteError.powerPaused(reason: "battery")
-    }
-    pruneStoppedServers()
-    try validateRouteKind(model: model, kind: kind)
+    let effectiveLoadConfig = (loadConfig ?? .default).normalized(for: loadConfigKind(kind))
+    let requestorPriority = effectiveLoadConfig.effectivePriority(for: loadConfigKind(kind))
+    let deadline = Date().addingTimeInterval(
+      Double(queueTimeoutNanos) / Self.nanosecondsPerSecond)
     BackendTrace.notice(
       phase: TracePhase.Router.routeBegin.rawValue,
       context: TraceContext(modelID: model.id, modelKind: kind, requestID: requestID),
       snapshot: .current()
     )
-    var resultLoadID: UUID?
-    var resultBackendObj: String?
+    var routed: RoutedServer?
     defer {
       BackendTrace.notice(
         phase: TracePhase.Router.routeEnd.rawValue,
         context: TraceContext(
           modelID: model.id,
           modelKind: kind,
-          loadID: resultLoadID,
-          backendObjectID: resultBackendObj,
+          loadID: routed?.loadID,
+          backendObjectID: routed?.backendObj,
           requestID: requestID
         ),
         snapshot: .current()
       )
     }
-    let effectiveLoadConfig = (loadConfig ?? .default).normalized(for: loadConfigKind(kind))
-
-    routeAcquire: while let state = routes[model.id] {
-      switch state {
-      case .loaded(var entry):
-        if draining.contains(model.id) {
-          throw RouteError.modelYielding(modelID: model.id)
+    while true {
+      do {
+        let result = try await attemptRoute(
+          model, kind: kind, loadConfig: loadConfig, deadline: deadline)
+        routed = result
+        return result.server
+      } catch let error as RouteError where Self.isAdmissionFailure(error) {
+        // Cannot be served right now but may be once memory frees: park in the
+        // admission queue until woken or the request's deadline passes.
+        if Date() >= deadline {
+          throw error
         }
-        if entry.kind != kind {
-          if entry.inFlight > 0 {
-            throw RouteError.loadConfigConflict(modelID: model.id)
-          }
-          unload(modelID: model.id, disposition: .unloaded)
-          break routeAcquire
+        if await waitForAdmission(priority: requestorPriority, until: deadline) == false {
+          throw error
         }
-        if loadConfig != nil, entry.loadConfig != effectiveLoadConfig {
-          if entry.inFlight > 0 {
-            throw RouteError.loadConfigConflict(modelID: model.id)
-          }
-          unload(modelID: model.id, disposition: .unloaded)
-          break routeAcquire
-        }
-        if let concurrencyLimit = concurrencyLimit(for: kind),
-          entry.inFlight >= concurrencyLimit
-        {
-          if await waitForConcurrencySlot(modelID: model.id) == false {
-            throw RouteError.concurrencyLimitExceeded(
-              modelID: model.id,
-              limit: concurrencyLimit
-            )
-          }
-          continue routeAcquire
-        }
-        entry.lastUsed = Date()
-        entry.inFlight += 1
-        routes[model.id] = .loaded(entry)
-        resultLoadID = entry.loadID
-        resultBackendObj = entry.backendObjectID
-        return entry.server
-      case .loading(let loading):
-        if loading.kind != kind {
-          throw RouteError.loadConfigConflict(modelID: model.id)
-        }
-        log.debug(
-          "router.load_wait model=\(model.id, privacy: .public) kind=\(kind.rawValue, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)"
-        )
-        let server = try await finishLoad(
-          model: model,
-          kind: kind,
-          loading: loading,
-          loadConfig: effectiveLoadConfig
-        )
-        if let info = loadInfo(modelID: model.id, kind: kind) {
-          resultLoadID = info.loadID
-          resultBackendObj = info.backendObjectID
-        }
-        return server
       }
     }
+  }
 
+  /// Whether `error` means "cannot be served right now but may be retried once
+  /// memory frees": the load cannot get headroom, or a model is mid-preemption or
+  /// in its reload cooldown. Everything else surfaces immediately.
+  private static func isAdmissionFailure(_ error: RouteError) -> Bool {
+    switch error {
+    case .insufficientHeadroom, .modelYielding:
+      return true
+    case .backendLaunchFailed, .concurrencyLimitExceeded, .loadConfigConflict,
+      .wrongKindForChat, .wrongKindForEmbedding, .powerPaused:
+      return false
+    }
+  }
+
+  private func attemptRoute(
+    _ model: ModelDescriptor,
+    kind: SwiftLMTrace.BackendKind,
+    loadConfig: ModelLoadConfig?,
+    deadline: Date
+  ) async throws -> RoutedServer {
+    if powerHalted {
+      throw RouteError.powerPaused(reason: "battery")
+    }
+    pruneStoppedServers()
+    try validateRouteKind(model: model, kind: kind)
+    let effectiveLoadConfig = (loadConfig ?? .default).normalized(for: loadConfigKind(kind))
+    routeAcquire: while let state = routes[model.id] {
+      switch state {
+      case .loaded(let entry):
+        let decision = try await admitLoaded(
+          entry: entry,
+          model: model,
+          kind: kind,
+          loadConfig: loadConfig,
+          deadline: deadline)
+        switch decision {
+        case .served(let routed):
+          return routed
+        case .reload:
+          break routeAcquire
+        case .retry:
+          continue routeAcquire
+        }
+      case .loading(let loading):
+        return try await awaitLoading(
+          loading: loading,
+          model: model,
+          kind: kind,
+          loadConfig: effectiveLoadConfig,
+          deadline: deadline)
+      }
+    }
+    return try await spawnAndBegin(
+      model: model, kind: kind, loadConfig: effectiveLoadConfig, deadline: deadline)
+  }
+
+  /// Decide how to serve a request that found `model` already loaded: admit it,
+  /// tear the entry down to reload, or wait for a concurrency slot and retry.
+  private func admitLoaded(
+    entry: LoadedEntry,
+    model: ModelDescriptor,
+    kind: RouteKind,
+    loadConfig: ModelLoadConfig?,
+    deadline: Date
+  ) async throws -> LoadedDecision {
+    if draining.contains(model.id) {
+      throw RouteError.modelYielding(modelID: model.id)
+    }
+    let effectiveLoadConfig = (loadConfig ?? .default).normalized(for: loadConfigKind(kind))
+    if entry.kind != kind || (loadConfig != nil && entry.loadConfig != effectiveLoadConfig) {
+      if entry.inFlight > 0 {
+        throw RouteError.loadConfigConflict(modelID: model.id)
+      }
+      unload(modelID: model.id, disposition: .unloaded)
+      return .reload
+    }
+    if let concurrencyLimit = concurrencyLimit(for: kind), entry.inFlight >= concurrencyLimit {
+      let slot = await waitForConcurrencySlot(
+        modelID: model.id, timeoutNanos: remainingNanos(until: deadline))
+      if slot == false {
+        throw RouteError.concurrencyLimitExceeded(modelID: model.id, limit: concurrencyLimit)
+      }
+      return .retry
+    }
+    var admitted = entry
+    admitted.lastUsed = Date()
+    admitted.inFlight += 1
+    routes[model.id] = .loaded(admitted)
+    return .served(
+      RoutedServer(
+        server: admitted.server,
+        loadID: admitted.loadID,
+        backendObj: admitted.backendObjectID))
+  }
+
+  /// Join an in-progress load for `model` and admit this request to it.
+  private func awaitLoading(
+    loading: LoadingEntry,
+    model: ModelDescriptor,
+    kind: RouteKind,
+    loadConfig: ModelLoadConfig,
+    deadline: Date
+  ) async throws -> RoutedServer {
+    if loading.kind != kind {
+      throw RouteError.loadConfigConflict(modelID: model.id)
+    }
+    log.debug(
+      "router.load_wait model=\(model.id, privacy: .public) kind=\(kind.rawValue, privacy: .public) load_id=\(loading.id.uuidString, privacy: .public)"
+    )
+    let server = try await finishLoad(
+      model: model, kind: kind, loading: loading, loadConfig: loadConfig, deadline: deadline)
+    let info = loadInfo(modelID: model.id, kind: kind)
+    return RoutedServer(server: server, loadID: info?.loadID, backendObj: info?.backendObjectID)
+  }
+
+  /// Make room, spawn `model`, and admit this request to it.
+  private func spawnAndBegin(
+    model: ModelDescriptor,
+    kind: RouteKind,
+    loadConfig: ModelLoadConfig,
+    deadline: Date
+  ) async throws -> RoutedServer {
     try await ensureHeadroom(
-      modelID: model.id, needing: model.sizeBytes, loadConfig: effectiveLoadConfig, kind: kind)
-
+      modelID: model.id, needing: model.sizeBytes, loadConfig: loadConfig, kind: kind)
     let loadTask = Task {
-      try await spawner(model, kind, effectiveLoadConfig)
+      try await spawner(model, kind, loadConfig)
     }
     let loading = LoadingEntry(kind: kind, task: loadTask)
     routes[model.id] = .loading(loading)
     let server = try await finishLoad(
-      model: model,
-      kind: kind,
-      loading: loading,
-      loadConfig: effectiveLoadConfig
-    )
-    if let info = loadInfo(modelID: model.id, kind: kind) {
-      resultLoadID = info.loadID
-      resultBackendObj = info.backendObjectID
-    }
-    return server
+      model: model, kind: kind, loading: loading, loadConfig: loadConfig, deadline: deadline)
+    let info = loadInfo(modelID: model.id, kind: kind)
+    return RoutedServer(server: server, loadID: info?.loadID, backendObj: info?.backendObjectID)
   }
 
   public func routeEmbeddingAndBegin(
@@ -773,12 +875,15 @@ public actor ModelRouter {
   /// retry the capacity check, `false` when the wait timed out or the model was
   /// torn down. The caller re-checks state after a `true` result, since a fresh
   /// request may have taken the freed slot first.
-  private func waitForConcurrencySlot(modelID: String) async -> Bool {
+  private func waitForConcurrencySlot(
+    modelID: String,
+    timeoutNanos: UInt64,
+    priority: Int = 0
+  ) async -> Bool {
     let waiterID = UUID()
-    let timeoutNanos = queueTimeoutNanos
     return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
       concurrencyWaiters[modelID, default: []].append(
-        ConcurrencyWaiter(id: waiterID, continuation: continuation))
+        ConcurrencyWaiter(id: waiterID, priority: priority, continuation: continuation))
       Task.detached { [weak self] in
         try? await Task.sleep(nanoseconds: timeoutNanos)
         await self?.expireConcurrencyWaiter(modelID: modelID, waiterID: waiterID)
@@ -817,6 +922,48 @@ public actor ModelRouter {
     }
     for waiter in waiters {
       waiter.continuation.resume(returning: false)
+    }
+  }
+
+  // MARK: - Admission queue
+
+  /// Remaining nanoseconds until `deadline`, clamped at zero.
+  private func remainingNanos(until deadline: Date) -> UInt64 {
+    UInt64(max(0, deadline.timeIntervalSinceNow) * Self.nanosecondsPerSecond)
+  }
+
+  /// Park a load that cannot be admitted yet until memory frees or the request's
+  /// deadline passes. Returns `true` when woken to retry, `false` when the queue
+  /// is full. Reuses the concurrency waiter's timer under a reserved key so no
+  /// second timer is introduced.
+  private func waitForAdmission(priority: Int, until deadline: Date) async -> Bool {
+    let parked = concurrencyWaiters[Self.admissionWaiterKey]?.count ?? 0
+    if parked >= Self.maxAdmissionWaiters {
+      return false
+    }
+    return await waitForConcurrencySlot(
+      modelID: Self.admissionWaiterKey,
+      timeoutNanos: remainingNanos(until: deadline),
+      priority: priority)
+  }
+
+  /// Wake every parked admission waiter, highest priority first and FIFO within a
+  /// priority, after memory frees. Each retries its route and re-parks if it still
+  /// cannot be admitted.
+  private func wakeAdmissionWaiters() {
+    guard let waiters = concurrencyWaiters.removeValue(forKey: Self.admissionWaiterKey),
+      !waiters.isEmpty
+    else {
+      return
+    }
+    let ordered = waiters.enumerated().sorted { lhs, rhs in
+      if lhs.element.priority != rhs.element.priority {
+        return lhs.element.priority > rhs.element.priority
+      }
+      return lhs.offset < rhs.offset
+    }
+    for entry in ordered {
+      entry.element.continuation.resume(returning: true)
     }
   }
 
@@ -925,6 +1072,8 @@ public actor ModelRouter {
           loadID: loading.id.uuidString
         ))
     }
+    // Memory just freed: let parked loads retry, highest priority first.
+    wakeAdmissionWaiters()
   }
 
   /// Log, trace, and publish the lifecycle event for a loaded model leaving the
@@ -976,13 +1125,15 @@ public actor ModelRouter {
     for modelID in modelIDs {
       unload(modelID: modelID)
     }
+    drainConcurrencyWaiters(modelID: Self.admissionWaiterKey)
   }
 
   private func finishLoad(
     model: ModelDescriptor,
     kind: RouteKind,
     loading: LoadingEntry,
-    loadConfig: ModelLoadConfig
+    loadConfig: ModelLoadConfig,
+    deadline: Date
   ) async throws -> ModelServer {
     let server: ModelServer
     do {
@@ -1016,7 +1167,9 @@ public actor ModelRouter {
       while let concurrencyLimit = concurrencyLimit(for: kind),
         entry.inFlight >= concurrencyLimit
       {
-        if await waitForConcurrencySlot(modelID: model.id) == false {
+        let slot = await waitForConcurrencySlot(
+          modelID: model.id, timeoutNanos: remainingNanos(until: deadline))
+        if slot == false {
           throw RouteError.concurrencyLimitExceeded(
             modelID: model.id,
             limit: concurrencyLimit
