@@ -8,6 +8,7 @@
 
 import AppLogger
 import Foundation
+import MLX
 import MLXHuggingFace
 import MLXLMCommon
 import MLXVLM
@@ -26,20 +27,32 @@ private let videoLog = AppLogger.logger(category: "MLXVLMVideoBackend")
 public actor MLXVLMVideoBackend {
   public let model: MLXVLMVideoModelDescriptor
   private var container: ModelContainer?
+  // mlx 0.32 keeps Metal command encoders in thread-local storage, so the model
+  // load, the vision/prefill forward, and every generation step must run on one
+  // fixed OS thread or a later eval faults with "no Stream(gpu, 0) in current
+  // thread". The upstream `AsyncStream`-based `ModelContainer.generate` runs its
+  // token loop in an inner `Task` that does not inherit a task-executor
+  // preference, so this backend drives a synchronous generation loop pinned to
+  // this thread instead. See ``GPUThread``.
+  private let gpuThread = GPUThread(name: "io.goodkind.lmd.gpu.video")
 
   public init(model: MLXVLMVideoModelDescriptor) {
     self.model = model
   }
 
-  /// Load the MLX VLM model into this process.
+  /// Load the MLX VLM model into this process. The container load runs on the
+  /// GPU thread so the model's first encoder is created there, matching every
+  /// later forward and generation step.
   public func load() async throws {
     if container != nil {
       return
     }
-    container = try await VLMModelFactory.shared.loadContainer(
-      from: model.directoryURL,
-      using: #huggingFaceTokenizerLoader()
-    )
+    container = try await withTaskExecutorPreference(gpuThread) {
+      try await VLMModelFactory.shared.loadContainer(
+        from: self.model.directoryURL,
+        using: #huggingFaceTokenizerLoader()
+      )
+    }
     videoLog.notice(
       "vlm_video.model_loaded model=\(self.model.id, privacy: .public) path=\(self.model.path, privacy: .public)"
     )
@@ -55,72 +68,181 @@ public actor MLXVLMVideoBackend {
   public func complete(
     _ request: MLXVLMVideoCompletionRequest
   ) async throws -> MLXVLMVideoChatCompletionResponse {
-    let generationEvents = try await stream(request)
+    let result = try await generate(request)
     let metadata = MLXVLMVideoMetadata(request: request)
-
-    var generatedText = ""
-    var completionInfo: MLXVLMVideoCompletionInfo?
-    for try await event in generationEvents {
-      switch event {
-      case .chunk(let chunk):
-        generatedText.append(chunk)
-      case .info(let info):
-        completionInfo = info
-      }
-    }
-
     videoLog.notice(
       "vlm_video.completion_finished model=\(self.model.id, privacy: .public) videos=\(metadata.videoCount, privacy: .public) max_tokens=\(request.maxTokens, privacy: .public)"
     )
     return MLXVLMVideoChatCompletionResponse(
       model: model.id,
-      content: generatedText,
+      content: result.text,
       metadata: metadata,
-      completionInfo: completionInfo
+      completionInfo: result.completionInfo
     )
   }
 
-  /// Generate semantic text and completion-info events after all validation,
-  /// model loading, and prompt preparation have completed.
+  /// Generate the full response on the GPU thread, then replay the already
+  /// produced text chunks as a stream. The chunks are plain `String`s, so the
+  /// caller may iterate this stream from any task without touching MLX. All MLX
+  /// work (prepare, prefill, every token step, eval, readback) has already run
+  /// on the one GPU thread by the time the stream yields.
   public func stream(
     _ request: MLXVLMVideoCompletionRequest
   ) async throws -> AsyncThrowingStream<MLXVLMVideoGenerationEvent, Error> {
+    let result = try await generate(request)
+    return AsyncThrowingStream<MLXVLMVideoGenerationEvent, Error> { continuation in
+      for chunk in result.chunks {
+        continuation.yield(.chunk(chunk))
+      }
+      if let info = result.completionInfo {
+        continuation.yield(.info(info))
+      }
+      continuation.finish()
+    }
+  }
+
+  /// Run validation, model loading, prompt preparation, and the whole token
+  /// generation loop synchronously on the single GPU thread, returning the
+  /// collected text and completion info.
+  ///
+  /// Every MLX call happens inside the `withTaskExecutorPreference(gpuThread)`
+  /// scope: `container.prepare` (the vision/prefill forward), `container.perform`
+  /// (which builds the `TokenIterator`, runs prefill, and steps every token),
+  /// and the final readback. The token loop is a plain `for` over a synchronous
+  /// `TokenIterator`, so no inner `Task`, `actor` hop, or `AsyncStream`
+  /// continuation moves an `eval` off this thread.
+  private func generate(
+    _ request: MLXVLMVideoCompletionRequest
+  ) async throws -> MLXVLMVideoGenerationResult {
     try request.validate()
     try await load()
     guard let container else {
       throw MLXVLMVideoBackendError.modelNotLoaded(modelID: model.id)
     }
 
-    let userInput = request.makeUserInput()
     let parameters = GenerateParameters(
       maxTokens: request.maxTokens,
       temperature: request.temperature
     )
-    let preparedInput = try await container.prepare(input: userInput)
-    let generationStream = try await container.generate(
-      input: preparedInput,
-      parameters: parameters
-    )
 
-    let modelID = model.id
-    return AsyncThrowingStream<MLXVLMVideoGenerationEvent, Error> { continuation in
-      let task = Task {
-        for await generation in generationStream {
-          switch generation {
-          case .chunk(let chunk):
-            continuation.yield(.chunk(chunk.0))
-          case .info(let info):
-            continuation.yield(.info(MLXVLMVideoCompletionInfo(info: info)))
-          case .toolCall:
-            videoLog.debug("vlm_video.tool_call_ignored model=\(modelID, privacy: .public)")
-          }
-        }
-        continuation.finish()
-      }
-      continuation.onTermination = { @Sendable _ in
-        task.cancel()
+    return try await withTaskExecutorPreference(gpuThread) {
+      // Build the non-Sendable `UserInput` inside this isolation region so it is
+      // created and consumed on the GPU thread without crossing back to the
+      // actor; `request` is value-type and `@unchecked Sendable`.
+      let userInput = request.makeUserInput()
+      let preparedInput = try await container.prepare(input: userInput)
+      // `LMInput` is non-Sendable, so it must cross into the `perform` body via
+      // the non-Sendable overload. The `perform` closure runs inside the
+      // container's serial lock on this task's executor (the GPU thread), so the
+      // whole generation loop stays on the one thread.
+      return try await container.perform(nonSendable: preparedInput) { context, input in
+        try Self.runGenerationLoop(
+          input: input,
+          parameters: parameters,
+          context: context
+        )
       }
     }
+  }
+
+  /// Drive the synchronous token loop and detokenizer entirely on the calling
+  /// thread (the GPU thread). This mirrors the upstream synchronous generation
+  /// loop, but without the inner `Task` the upstream `AsyncStream` variant
+  /// spawns, so every `eval` stays on this thread.
+  private static func runGenerationLoop(
+    input: LMInput,
+    parameters: GenerateParameters,
+    context: ModelContext
+  ) throws -> MLXVLMVideoGenerationResult {
+    var iterator = try TokenIterator(
+      input: input, model: context.model, parameters: parameters)
+    let promptTokenCount = input.text.tokens.size
+
+    let stopTokenIds = buildStopTokenIds(
+      modelConfiguration: context.configuration,
+      tokenizer: context.tokenizer
+    )
+
+    var detokenizer = NaiveStreamingDetokenizer(tokenizer: context.tokenizer)
+    var chunks: [String] = []
+    var generationTokenCount = 0
+    var stopReason: GenerateStopReason = .cancelled
+
+    // `TokenIterator.promptPrefillTime` is internal to MLXLMCommon, so prompt
+    // time is measured as the wall time of the first `next()` (which returns the
+    // prompt-primed first token), matching the upstream synchronous loop's split
+    // between prompt time and generation time.
+    var start = Date.timeIntervalSinceReferenceDate
+    var promptTime: TimeInterval = 0
+    loop: while true {
+      if let maxTokens = parameters.maxTokens, generationTokenCount >= maxTokens {
+        stopReason = .length
+        break loop
+      }
+      guard let token = iterator.next() else {
+        if let maxTokens = parameters.maxTokens, generationTokenCount >= maxTokens {
+          stopReason = .length
+        }
+        break loop
+      }
+      if promptTime == 0 {
+        let now = Date.timeIntervalSinceReferenceDate
+        promptTime = now - start
+        start = now
+      }
+      if token == context.tokenizer.unknownTokenId || stopTokenIds.contains(token) {
+        stopReason = .stop
+        break loop
+      }
+      generationTokenCount += 1
+      detokenizer.append(token: token)
+      if let chunk = detokenizer.next() {
+        chunks.append(chunk)
+      }
+    }
+    let generationTime = Date.timeIntervalSinceReferenceDate - start
+
+    // TokenIterator uses asyncEval() to keep the pipeline full; drain it on this
+    // thread before returning so no eval lands on another thread later.
+    Stream().synchronize()
+
+    let completionInfo = MLXVLMVideoCompletionInfo(
+      promptTokenCount: promptTokenCount,
+      generationTokenCount: generationTokenCount,
+      promptTime: promptTime,
+      generateTime: generationTime,
+      finishReason: MLXVLMVideoCompletionInfo.finishReason(stopReason: stopReason)
+    )
+    return MLXVLMVideoGenerationResult(chunks: chunks, completionInfo: completionInfo)
+  }
+}
+
+/// EOS token set assembled from the model configuration and tokenizer, matching
+/// the upstream synchronous generation loop's stop logic.
+private func buildStopTokenIds(
+  modelConfiguration: ModelConfiguration,
+  tokenizer: MLXLMCommon.Tokenizer
+) -> Set<Int> {
+  var stopTokenIds = modelConfiguration.eosTokenIds
+  if let tokenizerEOS = tokenizer.eosTokenId {
+    stopTokenIds.insert(tokenizerEOS)
+  }
+  for token in modelConfiguration.extraEOSTokens {
+    if let id = tokenizer.convertTokenToId(token) {
+      stopTokenIds.insert(id)
+    }
+  }
+  return stopTokenIds
+}
+
+/// Fully materialized output of one synchronous generation run. The chunks are
+/// plain text, safe to replay from any task.
+private struct MLXVLMVideoGenerationResult {
+  let chunks: [String]
+  var completionInfo: MLXVLMVideoCompletionInfo?
+
+  var text: String {
+    chunks.joined()
   }
 }
 
@@ -467,7 +589,21 @@ public struct MLXVLMVideoCompletionInfo: Sendable, Equatable {
     self.finishReason = Self.finishReason(stopReason: info.stopReason)
   }
 
-  private static func finishReason(stopReason: GenerateStopReason) -> String {
+  init(
+    promptTokenCount: Int,
+    generationTokenCount: Int,
+    promptTime: TimeInterval,
+    generateTime: TimeInterval,
+    finishReason: String
+  ) {
+    self.promptTokenCount = promptTokenCount
+    self.generationTokenCount = generationTokenCount
+    self.promptTime = promptTime
+    self.generateTime = generateTime
+    self.finishReason = finishReason
+  }
+
+  static func finishReason(stopReason: GenerateStopReason) -> String {
     switch stopReason {
     case .stop:
       return "stop"
