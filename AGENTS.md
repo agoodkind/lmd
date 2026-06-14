@@ -154,7 +154,7 @@ The .p12 must contain exactly one identity (full keychain exports run over the G
 
 ## 9. Service lifecycle
 
-- `make install` copies binaries into `~/.local/bin`, renders the LaunchAgent plist into `~/Library/LaunchAgents`, and bootstraps it under the GUI session.
+- `make install` copies binaries into `~/Library/Application Support/io.goodkind.lmd/bin`, renders the LaunchAgent plist into `~/Library/LaunchAgents`, and bootstraps it under the GUI session.
 - `make restart-serve` is the right command after a rebuild during development. It does `launchctl kickstart -k`, which picks up the new binary without a full bootout/bootstrap cycle.
 - `make uninstall` reverses install in the correct order (bootout, then remove plist, then remove binaries).
 

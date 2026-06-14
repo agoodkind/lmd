@@ -1584,8 +1584,12 @@ final class DevTool {
   }
 
   private func prefixDirectory() -> URL {
-    URL(fileURLWithPath: environment.value("PREFIX", default: "\(homeDirectory().path)/.local"))
-      .standardizedFileURL
+    URL(
+      fileURLWithPath: environment.value(
+        "PREFIX",
+        default: "\(homeDirectory().path)/Library/Application Support/io.goodkind.lmd")
+    )
+    .standardizedFileURL
   }
 
   private func homeDirectory() -> URL {
