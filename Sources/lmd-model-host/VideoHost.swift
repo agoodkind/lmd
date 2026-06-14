@@ -43,21 +43,30 @@ actor VideoHost {
     )
   }
 
-  /// Run one video request and return the frames to send back, in order.
-  /// Decoding, frame sampling, generation, and serialization all happen here;
-  /// any thrown error is mapped to a single typed `failed` frame.
-  func frames(for request: BackendRequest) async -> [BackendFrame] {
+  /// Serve one video request, handing each frame to `send` as it is produced.
+  /// A streaming request forwards one frame per generated token while generation
+  /// runs, so the broker receives a token's text the moment it decodes; a
+  /// non-streaming request sends the buffered body. Decoding, frame sampling,
+  /// generation, and serialization all happen here; any thrown error becomes one
+  /// typed `failed` frame.
+  func serve(
+    _ request: BackendRequest,
+    send: @escaping @Sendable (BackendFrame) -> Void
+  ) async {
     await SwiftLMMetrics.withRequestSpan(
       "video.request",
       modelID: descriptor.id,
       modelKind: "video",
       requestID: request.requestID
     ) {
-      await framesInSpan(for: request)
+      await serveInSpan(for: request, send: send)
     }
   }
 
-  private func framesInSpan(for request: BackendRequest) async -> [BackendFrame] {
+  private func serveInSpan(
+    for request: BackendRequest,
+    send: @escaping @Sendable (BackendFrame) -> Void
+  ) async {
     let requestStartedAt = Date()
     let requestStartedNanoseconds = DispatchTime.now().uptimeNanoseconds
     let routeRequest = VideoChatRouteRequest(
@@ -69,10 +78,14 @@ actor VideoHost {
       requestID: request.requestID
     )
     do {
+      // The backend pins the model load and generation to its own GPU thread, so
+      // the result's event stream can be drained outside this preference. The
+      // preference covers frame sampling and the load for the buffered path.
       let result = try await withTaskExecutorPreference(gpuThread) {
         try await backend.complete(routeRequest)
       }
-      let frames = try await VideoFrameCodec.encode(result: result, requestID: request.requestID)
+      try await VideoFrameCodec.stream(
+        result: result, requestID: request.requestID, send: send)
       recordRequestSpan(
         request: request,
         startedAt: requestStartedAt,
@@ -80,8 +93,8 @@ actor VideoHost {
         outcome: "completed",
         attributes: ["stream": "\(request.stream)"]
       )
-      return frames
     } catch {
+      send(VideoFrameCodec.encodeFailure(error, requestID: request.requestID))
       recordRequestSpan(
         request: request,
         startedAt: requestStartedAt,
@@ -89,7 +102,6 @@ actor VideoHost {
         outcome: "failed",
         attributes: ["error": "\(error)", "stream": "\(request.stream)"]
       )
-      return [VideoFrameCodec.encodeFailure(error, requestID: request.requestID)]
     }
   }
 

@@ -129,7 +129,87 @@ public func completeVideoChatWithModelServer(
     openAIBody: request.bodyData,
     stream: request.wantsStream
   )
+  if request.wantsStream {
+    return try await streamingVideoResult(frames: server.send(backendRequest))
+  }
   return try await VideoFrameCodec.decode(frames: server.send(backendRequest))
+}
+
+/// Rebuild a streaming video result that forwards body chunks to the client as
+/// the host produces them. The host's first `chunk` carries the response
+/// envelope; every later `chunk` is verbatim SSE bytes yielded as they arrive,
+/// so a token reaches the client the moment the host emits it. The host has
+/// already serialized the terminal `[DONE]` line into the body, so the rebuilt
+/// result does not re-append one.
+private func streamingVideoResult(
+  frames: AsyncThrowingStream<BackendFrame, Error>
+) async throws -> BackendChatResult {
+  let headerBox = ModelServerChatHeaderBox()
+  let events = AsyncThrowingStream<BackendStreamEvent, Error> { continuation in
+    let task = Task {
+      var sawHeader = false
+      do {
+        for try await frame in frames {
+          switch frame {
+          case .chunk(_, let data):
+            if sawHeader {
+              continuation.yield(.rawBytes(data))
+            } else {
+              guard let header = VideoFrameCodec.decodeHeader(data) else {
+                let error = VideoFrameCodecError.malformedHeader
+                await headerBox.fail(error)
+                continuation.finish(throwing: error)
+                return
+              }
+              sawHeader = true
+              await headerBox.succeed(
+                ModelServerChatResponseHeader(
+                  statusCode: header.statusCode, contentType: header.contentType))
+            }
+          case .failed(_, let message):
+            let error = VideoFrameCodec.decodeFailure(message: message)
+            if !sawHeader {
+              await headerBox.fail(error)
+            }
+            continuation.finish(throwing: error)
+            return
+          case .done:
+            if !sawHeader {
+              await headerBox.fail(VideoFrameCodecError.missingHeader)
+              continuation.finish(throwing: VideoFrameCodecError.missingHeader)
+              return
+            }
+            continuation.finish()
+            return
+          default:
+            continue
+          }
+        }
+        if !sawHeader {
+          await headerBox.fail(VideoFrameCodecError.missingHeader)
+          continuation.finish(throwing: VideoFrameCodecError.missingHeader)
+          return
+        }
+        continuation.finish()
+      } catch {
+        if !sawHeader {
+          await headerBox.fail(error)
+        }
+        continuation.finish(throwing: error)
+      }
+    }
+    continuation.onTermination = { @Sendable _ in
+      task.cancel()
+    }
+  }
+  let header = try await headerBox.wait()
+  return .streaming(
+    statusCode: header.statusCode,
+    contentType: header.contentType,
+    events: events,
+    appendDoneFrame: false,
+    lifetimeToken: nil
+  )
 }
 
 private func bufferedChatResult(

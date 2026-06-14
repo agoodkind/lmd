@@ -60,6 +60,26 @@ public enum VideoFrameCodecError: Error, Equatable {
   case malformedHeader
 }
 
+/// Collects frames from `VideoFrameCodec.stream` into an ordered array. The
+/// codec calls `append` sequentially from one task, and the lock keeps the type
+/// `Sendable` so it can be captured by the `@Sendable` send closure.
+private final class FrameCollector: @unchecked Sendable {
+  private let lock = NSLock()
+  private var storage: [BackendFrame] = []
+
+  func append(_ frame: BackendFrame) {
+    lock.lock()
+    defer { lock.unlock() }
+    storage.append(frame)
+  }
+
+  var frames: [BackendFrame] {
+    lock.lock()
+    defer { lock.unlock() }
+    return storage
+  }
+}
+
 public enum VideoFrameCodec {
   /// One JSON encoder reused for the header and failure envelopes. Sorted keys
   /// keep the header bytes deterministic, which matters only for tests.
@@ -71,39 +91,56 @@ public enum VideoFrameCodec {
 
   private static let decoder = JSONDecoder()
 
-  /// Serialize a successful video result into the frame sequence the broker
-  /// reads back: one header `chunk`, the body `chunk`s, then `done`.
-  public static func encode(
+  /// Serialize a successful video result by handing each frame to `send` as it
+  /// is produced: one header `chunk`, the body `chunk`s, then `done`. A streaming
+  /// result forwards one chunk per generated event while generation runs, so the
+  /// host emits tokens to the broker incrementally; a buffered result carries the
+  /// whole body in one chunk. The frame shape is the contract `decode` reads back.
+  public static func stream(
     result: BackendChatResult,
-    requestID: UUID
-  ) async throws -> [BackendFrame] {
+    requestID: UUID,
+    send: @Sendable (BackendFrame) -> Void
+  ) async throws {
     switch result {
     case .buffered(let statusCode, let contentType, let body):
       let header = VideoResultHeader(
         shape: .buffered, statusCode: statusCode, contentType: contentType)
-      var frames: [BackendFrame] = [
-        .chunk(requestID: requestID, data: try encoder.encode(header))
-      ]
-      frames.append(.chunk(requestID: requestID, data: body))
-      frames.append(.done(requestID: requestID))
-      return frames
+      send(.chunk(requestID: requestID, data: try encoder.encode(header)))
+      send(.chunk(requestID: requestID, data: body))
+      send(.done(requestID: requestID))
     case .streaming(let statusCode, let contentType, let events, let appendDoneFrame, _):
       let header = VideoResultHeader(
         shape: .streaming, statusCode: statusCode, contentType: contentType)
-      var frames: [BackendFrame] = [
-        .chunk(requestID: requestID, data: try encoder.encode(header))
-      ]
+      send(.chunk(requestID: requestID, data: try encoder.encode(header)))
       // Render each event to its exact SSE bytes, the same bytes the in-process
       // path streams to the client, so the broker can replay them verbatim.
       for try await event in events {
-        frames.append(.chunk(requestID: requestID, data: try encodeBackendStreamEvent(event)))
+        send(.chunk(requestID: requestID, data: try encodeBackendStreamEvent(event)))
       }
       if appendDoneFrame {
-        frames.append(.chunk(requestID: requestID, data: backendDoneFrame()))
+        send(.chunk(requestID: requestID, data: backendDoneFrame()))
       }
-      frames.append(.done(requestID: requestID))
-      return frames
+      send(.done(requestID: requestID))
     }
+  }
+
+  /// Serialize a successful video result into the frame sequence the broker reads
+  /// back, collected into an array. The frames are exactly those `stream`
+  /// produces, in order.
+  public static func encode(
+    result: BackendChatResult,
+    requestID: UUID
+  ) async throws -> [BackendFrame] {
+    let collector = FrameCollector()
+    try await stream(result: result, requestID: requestID) { collector.append($0) }
+    return collector.frames
+  }
+
+  /// Decode the leading header `chunk` the host sends first. The broker's
+  /// streaming path reads it to learn the response envelope before it forwards
+  /// the body chunks.
+  static func decodeHeader(_ data: Data) -> VideoResultHeader? {
+    try? decoder.decode(VideoResultHeader.self, from: data)
   }
 
   /// Map a thrown serving error into one `failed` frame whose message is the
