@@ -1,9 +1,10 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    branches: [main]
+  push:
+    branches-ignore: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -18,6 +19,10 @@ jobs:
       setup-target: preflight
       targets: '["build","test"]'
       make-args: "CONFIG=Release"
+      # build signs the CLI binaries + MLX bundle via SWIFT_MK_SIGN_* (Makefile).
+      import-signing-cert: true
+      signing-identity-name: "Developer ID Application: Alex Goodkind (H3BMXM4W7H)"
+      apple-team-id: H3BMXM4W7H
       extra-cache-paths: |
         .build
         Tuist/.build
