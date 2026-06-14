@@ -27,6 +27,16 @@ SWIFT_FORMAT_TARGETS := Sources Tests Tools
 SWIFTLINT_TARGETS := Sources Tests Tools
 SWIFTCHECK_EXTRA_TARGETS := Sources Tests Tools
 
+# swift-mk owns post-build signing of the bare CLI binaries the xcconfig override
+# cannot reach. lmd declares the built products, the resource-bundle directory, and
+# the bundle-id prefix; after `build`, the engine signs each artifact with
+# <prefix>.<basename> through the canonical codesign channel, but only when an
+# identity is set (CI), so a local unsigned Debug build is untouched. CONFIG-scoped
+# so the paths match whichever configuration was built.
+SWIFT_MK_SIGN_PRODUCTS := Products/Build/$(CONFIG)/lmd Products/Build/$(CONFIG)/lmd-serve
+SWIFT_MK_SIGN_BUNDLES_DIR := Products/Build/$(CONFIG)
+SWIFT_MK_SIGN_IDENTIFIER_PREFIX := io.goodkind.lmd
+
 # Release artifacts for the shared _release.yml pipeline: build, post-build
 # codesign, then lmd-dev's own notarization (bare CLI zips cannot be stapled,
 # so the shared workflow runs with notarize disabled), then the zip into dist/.
