@@ -1,16 +1,19 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    branches: [main]
+  push:
+    branches-ignore: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  ci:
+  # The caller job id is the middle segment of every reusable-workflow status
+  # check name (`CI / swift / build`).
+  swift:
     uses: agoodkind/swift-makefile/.github/workflows/_ci.yml@main
     with:
       runner: macos-26
@@ -18,6 +21,10 @@ jobs:
       setup-target: preflight
       targets: '["build","test"]'
       make-args: "CONFIG=Release"
+      # build signs the CLI binaries + MLX bundle via SWIFT_MK_SIGN_* (Makefile).
+      import-signing-cert: true
+      signing-identity-name: "Developer ID Application: Alex Goodkind (H3BMXM4W7H)"
+      apple-team-id: H3BMXM4W7H
       extra-cache-paths: |
         .build
         Tuist/.build
