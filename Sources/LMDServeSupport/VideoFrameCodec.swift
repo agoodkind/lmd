@@ -13,11 +13,8 @@
 //  status the in-process backend produced.
 //
 
-import AppLogger
 import Foundation
 import SwiftLMHostProtocol
-
-private let log = AppLogger.logger(category: "VideoFrameCodec")
 
 /// How a video result was shaped before serialization. The broker rebuilds the
 /// matching `BackendChatResult` case from this header.
@@ -117,20 +114,11 @@ public enum VideoFrameCodec {
     case .streaming(let statusCode, let contentType, let events, let appendDoneFrame, _):
       let header = VideoResultHeader(
         shape: .streaming, statusCode: statusCode, contentType: contentType)
-      log.debug(
-        "video.frame_send kind=header ts_mono=\(DispatchTime.now().uptimeNanoseconds, privacy: .public)"
-      )
       send(.chunk(requestID: requestID, data: try encoder.encode(header)))
       // Render each event to its exact SSE bytes, the same bytes the in-process
       // path streams to the client, so the broker can replay them verbatim.
-      var sentChunks = 0
       for try await event in events {
-        let frameData = try encodeBackendStreamEvent(event)
-        sentChunks += 1
-        log.debug(
-          "video.frame_send kind=chunk seq=\(sentChunks, privacy: .public) ts_mono=\(DispatchTime.now().uptimeNanoseconds, privacy: .public)"
-        )
-        send(.chunk(requestID: requestID, data: frameData))
+        send(.chunk(requestID: requestID, data: try encodeBackendStreamEvent(event)))
       }
       if appendDoneFrame {
         send(.chunk(requestID: requestID, data: backendDoneFrame()))
