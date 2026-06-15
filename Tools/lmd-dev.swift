@@ -496,7 +496,7 @@ final class DevTool {
   private func buildSwiftPackage(configuration: String) throws {
     try runPassthrough(
       "swift",
-      ["build", "-c", swiftPackageConfiguration(configuration)],
+      swiftBuildArguments(["-c", swiftPackageConfiguration(configuration)]),
       environment: try buildEnvironment()
     )
   }
@@ -506,7 +506,7 @@ final class DevTool {
   private func buildSwiftPackageProduct(_ product: String, configuration: String) throws {
     try runPassthrough(
       "swift",
-      ["build", "-c", swiftPackageConfiguration(configuration), "--product", product],
+      swiftBuildArguments(["-c", swiftPackageConfiguration(configuration), "--product", product]),
       environment: try buildEnvironment()
     )
   }
@@ -762,13 +762,13 @@ final class DevTool {
     env["LMD_BINARY_DIR"] = releaseBuildDirectory().path
     try runPassthrough(
       "swift",
-      ["build", "--build-tests", "-c", swiftPackageConfiguration(configuration)],
+      swiftBuildArguments(["--build-tests", "-c", swiftPackageConfiguration(configuration)]),
       environment: env
     )
     try stageMetallibForSwiftTest(configuration: configuration)
     try runPassthrough(
       "swift",
-      ["test", "--skip-build", "-c", swiftPackageConfiguration(configuration)],
+      swiftTestArguments(["--skip-build", "-c", swiftPackageConfiguration(configuration)]),
       environment: env
     )
   }
@@ -788,7 +788,7 @@ final class DevTool {
     env["LMD_BINARY_DIR"] = releaseBuildDirectory().path
     try runPassthrough(
       "swift",
-      ["build", "--build-tests", "-c", swiftPackageConfiguration(configuration)],
+      swiftBuildArguments(["--build-tests", "-c", swiftPackageConfiguration(configuration)]),
       environment: env
     )
     try stageMetallibForSwiftTest(configuration: configuration)
@@ -802,10 +802,10 @@ final class DevTool {
     env["LMD_TEST_BASE_URL"] = "http://localhost:5401"
     try runPassthrough(
       "swift",
-      [
-        "test", "--skip-build", "-c", swiftPackageConfiguration(configuration),
+      swiftTestArguments([
+        "--skip-build", "-c", swiftPackageConfiguration(configuration),
         "--filter", "IntegrationTests.(EmbeddingsRouteTests|XPCBrokerTests|HostSpawnTests)",
-      ],
+      ]),
       environment: env
     )
   }
@@ -1585,6 +1585,22 @@ final class DevTool {
     // set, so this layer only passes the environment through. xcodebuild
     // paths strip the two-word wrappers in xcodeBuildEnvironment().
     ProcessInfo.processInfo.environment
+  }
+
+  /// Shared SwiftPM cache flags from swift-makefile. Custom SwiftPM paths in
+  /// this dev tool append them explicitly so they stay aligned with
+  /// swift-makefile's first-class local Swift cache surface.
+  private func swiftPackageCacheArguments() -> [String] {
+    let rawValue = ProcessInfo.processInfo.environment["SWIFT_MK_SWIFTPM_CACHE_ARGS"] ?? ""
+    return rawValue.split(whereSeparator: \.isWhitespace).map(String.init)
+  }
+
+  private func swiftBuildArguments(_ arguments: [String]) -> [String] {
+    ["build"] + swiftPackageCacheArguments() + arguments
+  }
+
+  private func swiftTestArguments(_ arguments: [String]) -> [String] {
+    ["test"] + swiftPackageCacheArguments() + arguments
   }
 
   /// Environment for `xcodebuild` invocations. Deliberately leaves `CC`/`CXX`
