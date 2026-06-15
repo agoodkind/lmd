@@ -23,9 +23,20 @@ SWIFT_BUILD_CMD = $(LMD_DEV) build $(CONFIG)
 SWIFT_TEST_CMD = $(LMD_DEV) test
 SWIFT_CLEAN_CMD = $(LMD_DEV) clean
 SWIFT_DEPLOY_CMD = $(LMD_DEV) install $(CONFIG)
-SWIFT_FORMAT_TARGETS := Sources Tests Tools
-SWIFTLINT_TARGETS := Sources Tests Tools
-SWIFTCHECK_EXTRA_TARGETS := Sources Tests Tools
+# The dev tool is now an SPM package under Tools/, so Tools/.build holds the
+# vendored swift-makefile checkout (thousands of files). Lint owned sources by an
+# explicit file list that prunes any .build, never the bare Tools directory, so
+# swiftlint does not recurse the vendored tree and overflow git check-ignore.
+SWIFT_SOURCE_ROOTS := Sources Tests Tools/lmd-dev
+SWIFT_OWNED_SWIFT_FILES := $(shell find $(SWIFT_SOURCE_ROOTS) -path '*/.build/*' -prune -o -name '*.swift' -print)
+SWIFT_PACKAGE_MANIFESTS := Package.swift Tools/Package.swift Tools/lmd-dev.swift
+SWIFT_MK_EXCLUDE_PATHS := ^Tools/.build/
+
+SWIFT_FORMAT_TARGETS := $(SWIFT_OWNED_SWIFT_FILES) $(SWIFT_PACKAGE_MANIFESTS)
+SWIFTLINT_TARGETS := $(SWIFT_FORMAT_TARGETS)
+SWIFTLINT_EXCLUDE_PATHS := $(SWIFT_MK_EXCLUDE_PATHS)
+SWIFTCHECK_EXTRA_TARGETS := $(SWIFT_FORMAT_TARGETS)
+SWIFTCHECK_EXTRA_EXCLUDE_PATHS := $(SWIFT_MK_EXCLUDE_PATHS)
 
 # swift-mk owns post-build signing of the bare CLI binaries the xcconfig override
 # cannot reach. lmd declares the built products, the resource-bundle directory, and
