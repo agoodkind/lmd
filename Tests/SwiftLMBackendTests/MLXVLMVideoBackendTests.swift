@@ -160,12 +160,12 @@ final class MLXVLMVideoBackendTests: XCTestCase {
     )
 
     let response = MLXVLMVideoChatCompletionResponse(
-      id: "chatcmpl-test",
-      created: 1,
       model: "local-vlm",
       content: "A short answer.",
       metadata: metadata,
-      completionInfo: completionInfo
+      completionInfo: completionInfo,
+      id: "chatcmpl-test",
+      created: 1
     )
 
     expect(response.object) == "chat.completion"

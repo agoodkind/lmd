@@ -28,6 +28,11 @@ actor EmbeddingHost {
   let tuning: EmbeddingRuntimeTuning
   private let queue: EmbeddingJobQueue
   private var backend: EmbeddingBackendProtocol?
+  // mlx 0.32 keeps Metal command encoders in thread-local storage, so every
+  // MLX GPU call (model launch and each forward) must run on one fixed OS
+  // thread or the second request faults with "no Stream(gpu, 0) in current
+  // thread". This executor pins all embedding GPU work to that one thread.
+  private let gpuThread = GPUThread()
 
   init(modelPath: String, tuning: EmbeddingRuntimeTuning = .fallback) {
     self.modelPath = modelPath
@@ -52,7 +57,9 @@ actor EmbeddingHost {
       descriptor: descriptor,
       tuning: self.tuning
     )
-    try await backend.launch()
+    try await withTaskExecutorPreference(gpuThread) {
+      try await backend.launch()
+    }
     self.backend = backend
     log.notice(
       "embedding.host_tuning slot_budget=\(self.tuning.slotBudget, privacy: .public) max_rows=\(self.tuning.maxRows, privacy: .public) forwards=\(self.tuning.maxConcurrentForwards, privacy: .public) lane=\(self.tuning.priorityLaneEnabled, privacy: .public)"
@@ -130,8 +137,10 @@ actor EmbeddingHost {
     }
     let vectors: [[Float]]
     do {
-      vectors = try await TraceTaskLocal.$requestID.withValue(request.requestID) {
-        try await backend.embed(inputs: inputs)
+      vectors = try await withTaskExecutorPreference(gpuThread) {
+        try await TraceTaskLocal.$requestID.withValue(request.requestID) {
+          try await backend.embed(inputs: inputs)
+        }
       }
     } catch {
       recordRequestSpan(
