@@ -84,15 +84,9 @@ actor VideoHost {
       // The backend pins the model load and generation to its own GPU thread, so
       // the result's event stream can be drained outside this preference. The
       // preference covers frame sampling and the load for the buffered path.
-      log.debug(
-        "video.complete_call_begin stream=\(request.stream, privacy: .public) ts_mono=\(DispatchTime.now().uptimeNanoseconds, privacy: .public)"
-      )
       let result = try await withTaskExecutorPreference(gpuThread) {
         try await backend.complete(routeRequest)
       }
-      log.debug(
-        "video.complete_returned stream=\(request.stream, privacy: .public) ts_mono=\(DispatchTime.now().uptimeNanoseconds, privacy: .public)"
-      )
       try await VideoFrameCodec.stream(
         result: result, requestID: request.requestID, send: send)
       recordRequestSpan(
