@@ -151,6 +151,8 @@ private let naxKernelSources = [
   "fp_quantized_nax",
 ]
 
+// MARK: - NAX build
+
 extension DevTool {
   /// The macOS 26.5 Metal compiler miscompiles the runtime-JIT form of the M5
   /// neural-accelerator (NAX) GEMM kernels, producing NaN, while compiling the
