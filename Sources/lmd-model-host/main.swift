@@ -194,10 +194,7 @@ do {
           }
           Task {
             defer { box.sendMetricsSnapshot() }
-            let frames = await videoHost.frames(for: request)
-            for frame in frames {
-              box.send(frame)
-            }
+            await videoHost.serve(request, send: box.send)
           }
         case .chat:
           guard let chatHost else {

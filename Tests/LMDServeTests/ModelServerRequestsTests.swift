@@ -197,6 +197,66 @@ final class ModelServerRequestsTests: XCTestCase {
     expect(server.lastRequest?.stream ?? true) == false
   }
 
+  func testStreamingVideoResponseForwardsBodyChunksAsRawBytes() async throws {
+    let id = "chatcmpl-test"
+    let model = videoModel()
+    let events = AsyncThrowingStream<BackendStreamEvent, Error> { continuation in
+      continuation.yield(.role(id: id, created: 1, model: model.id, role: "assistant"))
+      continuation.yield(.content(id: id, created: 1, model: model.id, content: "hi"))
+      continuation.yield(
+        .finish(id: id, created: 1, model: model.id, finishReason: "stop", usage: nil))
+      continuation.finish()
+    }
+    let encoded = try await VideoFrameCodec.encode(
+      result: .streaming(
+        statusCode: 200,
+        contentType: "text/event-stream",
+        events: events,
+        appendDoneFrame: true,
+        lifetimeToken: nil
+      ),
+      requestID: UUID()
+    )
+    // The reference body is every chunk after the header: the verbatim SSE bytes
+    // the host serialized, including the terminal [DONE] line.
+    var expected = Data()
+    for frame in encoded.dropFirst() {
+      if case .chunk(_, let bytes) = frame {
+        expected.append(bytes)
+      }
+    }
+    let server = FakeModelServer(modelID: model.id, sizeBytes: model.sizeBytes) { request in
+      encoded.map { frame in rekey(frame, to: request.requestID) }
+    }
+
+    let result = try await completeVideoChatWithModelServer(
+      server: server,
+      request: routeRequest(model: model, wantsStream: true),
+      requestID: UUID()
+    )
+
+    guard case let .streaming(statusCode, contentType, rebuilt, appendDone, _) = result
+    else {
+      fail("expected streaming result")
+      return
+    }
+    expect(statusCode) == 200
+    expect(contentType) == "text/event-stream"
+    // The host already serialized [DONE]; the broker must not re-append one.
+    expect(appendDone) == false
+    var assembled = Data()
+    for try await event in rebuilt {
+      guard case .rawBytes(let bytes) = event else {
+        fail("expected rawBytes events")
+        return
+      }
+      assembled.append(bytes)
+    }
+    expect(assembled) == expected
+    expect(server.lastRequest?.kind) == .video
+    expect(server.lastRequest?.stream ?? false) == true
+  }
+
   func testVideoMissingSamplingFPSThrowsTypedError() async {
     let model = ModelDescriptor(
       id: "/models/video",
