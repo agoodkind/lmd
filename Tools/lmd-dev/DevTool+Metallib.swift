@@ -107,6 +107,7 @@ extension DevTool {
       try fileManager.createDirectory(at: runnerDirectory, withIntermediateDirectories: true)
       try copyReplacingItem(
         at: metallib, to: runnerDirectory.appendingPathComponent("mlx.metallib"))
+      try stageNaxLibraries(from: naxLibraryDirectory(), to: runnerDirectory)
       staged += 1
     }
     try writeLine("  staged mlx.metallib next to \(staged) test runner(s)")
@@ -123,5 +124,150 @@ extension DevTool {
     environmentMap.removeValue(forKey: "CC")
     environmentMap.removeValue(forKey: "CXX")
     return environmentMap
+  }
+}
+
+// MARK: - NAX ahead-of-time kernels
+
+/// Shared inputs for compiling one NAX kernel into a `.metallib`: the source
+/// roots, the output directory, and the deployment-target-pinned compile flags.
+struct NaxBuildContext {
+  let kernelsDirectory: URL
+  let includeRoot: URL
+  let output: URL
+  let compileFlags: [String]
+  let deploymentTarget: String
+}
+
+/// The M5 NAX kernel sources compiled ahead-of-time, each relative to the
+/// mlx-swift kernels directory and without the `.metal` extension.
+private let naxKernelSources = [
+  "steel/gemm/kernels/steel_gemm_fused_nax",
+  "steel/gemm/kernels/steel_gemm_splitk_nax",
+  "steel/gemm/kernels/steel_gemm_gather_nax",
+  "steel/gemm/kernels/steel_gemm_segmented_nax",
+  "steel/attn/kernels/steel_attention_nax",
+  "quantized_nax",
+  "fp_quantized_nax",
+]
+
+extension DevTool {
+  /// The macOS 26.5 Metal compiler miscompiles the runtime-JIT form of the M5
+  /// neural-accelerator (NAX) GEMM kernels, producing NaN, while compiling the
+  /// same kernel source ahead-of-time from its `.metal` file is correct. This
+  /// builds those kernels into `Derived/nax/<source>.metallib`, which the
+  /// mlx-swift runtime loads instead of JIT-compiling (see device.cpp
+  /// get_library and docs/bf16-nax-investigation.md). Additive: if the source or
+  /// the Metal compiler is absent, the directory stays empty and the runtime
+  /// JIT-compiles exactly as before.
+  func buildNaxAotLibraries(configuration _: String) throws {
+    Output.debug("buildNaxAotLibraries")
+    guard let kernelsDirectory = forkMlxKernelsDirectory() else {
+      try writeLine("  nax: mlx-swift kernel source not found, runtime will JIT")
+      return
+    }
+    let includeRoot =
+      kernelsDirectory
+      .deletingLastPathComponent()  // metal
+      .deletingLastPathComponent()  // backend
+      .deletingLastPathComponent()  // mlx (inner)
+      .deletingLastPathComponent()  // Source/Cmlx/mlx (outer)
+    let output = naxLibraryDirectory()
+    if fileManager.fileExists(atPath: output.path) {
+      try fileManager.removeItem(at: output)
+    }
+    try fileManager.createDirectory(at: output, withIntermediateDirectories: true)
+
+    // Match mlx-core's CMake metal command exactly: no -std (the default metal
+    // version is correct), and -mmacosx-version-min set to the host OS. The
+    // macOS 26.5 metal4.0 codegen miscompiles the M5 NAX bf16 GEMM; forcing
+    // -std=metal4.0 or omitting the deployment target produces wrong bf16.
+    let osVersion = ProcessInfo.processInfo.operatingSystemVersion
+    let deploymentTarget =
+      "\(osVersion.majorVersion).\(osVersion.minorVersion).\(osVersion.patchVersion)"
+    let compileFlags = [
+      "-x", "metal", "-Wall", "-Wextra", "-fno-fast-math",
+      "-Wno-c++17-extensions", "-Wno-c++20-extensions",
+      "-mmacosx-version-min=\(deploymentTarget)",
+    ]
+    let context = NaxBuildContext(
+      kernelsDirectory: kernelsDirectory,
+      includeRoot: includeRoot,
+      output: output,
+      compileFlags: compileFlags,
+      deploymentTarget: deploymentTarget
+    )
+    Output.notice(
+      "nax build kernels=\(naxKernelSources.count) deploymentTarget=\(deploymentTarget)")
+    try writeLine(
+      "  nax: build_begin kernels=\(naxKernelSources.count) deployment_target=\(deploymentTarget)")
+    var built = 0
+    for source in naxKernelSources {
+      let didBuild = try compileNaxKernel(source: source, context: context)
+      if didBuild {
+        built += 1
+      }
+    }
+    if built == 0 {
+      try writeLine("  nax: no kernels built, runtime will JIT")
+    }
+  }
+
+  /// Compile one NAX kernel `.metal` source into a `.metallib`, removing the
+  /// intermediate `.air` file. Returns `false` when the source is absent so the
+  /// caller counts only the kernels that actually built.
+  private func compileNaxKernel(source: String, context: NaxBuildContext) throws -> Bool {
+    let metalFile = context.kernelsDirectory.appendingPathComponent(source + ".metal")
+    guard fileManager.fileExists(atPath: metalFile.path) else {
+      try writeLine("  nax: \(source).metal not present, skipping")
+      return false
+    }
+    let stem = (source as NSString).lastPathComponent
+    let airFile = context.output.appendingPathComponent(stem + ".air")
+    let libraryFile = context.output.appendingPathComponent(stem + ".metallib")
+    try runPassthrough(
+      "xcrun",
+      ["-sdk", "macosx", "metal"] + context.compileFlags
+        + [
+          "-I", context.kernelsDirectory.path, "-I", context.includeRoot.path,
+          "-c", metalFile.path, "-o", airFile.path,
+        ])
+    try runPassthrough(
+      "xcrun",
+      [
+        "-sdk", "macosx", "metal", "-mmacosx-version-min=\(context.deploymentTarget)",
+        airFile.path, "-o", libraryFile.path,
+      ])
+    if fileManager.fileExists(atPath: airFile.path) {
+      try fileManager.removeItem(at: airFile)
+    }
+    Output.debug("nax kernel built=\(stem)")
+    try writeLine("  nax: built \(stem).metallib")
+    return true
+  }
+
+  /// Locate the mlx-swift fork's Metal kernel sources, whether the dependency is
+  /// a `swift package edit` symlink (`Packages/mlx-swift`) or a resolved checkout
+  /// (`.build/checkouts/mlx-swift`).
+  private func forkMlxKernelsDirectory() -> URL? {
+    let relative = "Source/Cmlx/mlx/mlx/backend/metal/kernels"
+    let candidates = [
+      repoRoot.appendingPathComponent("Packages/mlx-swift"),
+      repoRoot.appendingPathComponent(".build/checkouts/mlx-swift"),
+    ]
+    for candidate in candidates {
+      let kernels = candidate.appendingPathComponent(relative)
+      let probe = kernels.appendingPathComponent(
+        "steel/gemm/kernels/steel_gemm_fused_nax.metal")
+      if fileManager.fileExists(atPath: probe.path) {
+        return kernels
+      }
+    }
+    return nil
+  }
+
+  /// The directory holding the ahead-of-time-compiled NAX metallibs.
+  func naxLibraryDirectory() -> URL {
+    repoRoot.appendingPathComponent("Derived/nax")
   }
 }

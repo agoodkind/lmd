@@ -37,6 +37,7 @@ extension DevTool {
   func build(configuration: String) throws {
     try buildSwiftPackage(configuration: configuration)
     try buildMetallib(configuration: configuration)
+    try buildNaxAotLibraries(configuration: configuration)
     try stageBuildArtifacts(products: productBinaries, configuration: configuration)
   }
 
@@ -45,6 +46,7 @@ extension DevTool {
   func buildProduct(_ product: String, configuration: String) throws {
     try buildSwiftPackageProduct(product, configuration: configuration)
     try buildMetallib(configuration: configuration)
+    try buildNaxAotLibraries(configuration: configuration)
     try stageBuildArtifacts(products: [product], configuration: configuration)
   }
 
@@ -353,6 +355,30 @@ extension DevTool {
         try writeLine("  staged \(item.lastPathComponent)")
       }
     }
+    try stageNaxLibraries(from: naxLibraryDirectory(), to: destination)
+  }
+
+  /// Copy the ahead-of-time-compiled NAX metallibs from `sourceNaxDirectory` into
+  /// `<destinationParent>/nax/`, beside the binary or bundle that resolves them
+  /// via `current_binary_dir()/nax`. No-op when no NAX libraries are present.
+  func stageNaxLibraries(from sourceNaxDirectory: URL, to destinationParent: URL) throws {
+    Output.debug("stageNaxLibraries source=\(sourceNaxDirectory.path)")
+    guard fileManager.fileExists(atPath: sourceNaxDirectory.path) else {
+      return
+    }
+    let entries = try fileManager.contentsOfDirectory(
+      at: sourceNaxDirectory, includingPropertiesForKeys: nil)
+    let metallibs = entries.filter { $0.pathExtension == "metallib" }
+    guard !metallibs.isEmpty else {
+      return
+    }
+    let destination = destinationParent.appendingPathComponent("nax")
+    try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+    for library in metallibs {
+      try copyReplacingItem(
+        at: library, to: destination.appendingPathComponent(library.lastPathComponent))
+    }
+    try writeLine("  staged nax/ (\(metallibs.count) metallib) -> \(destination.path)")
   }
 
   private func runtimeResourceSearchRoots(configuration: String) -> [URL] {
@@ -373,5 +399,7 @@ extension DevTool {
           "  installed \(destinationDirectory.appendingPathComponent(resourceName).path)")
       }
     }
+    try stageNaxLibraries(
+      from: sourceDirectory.appendingPathComponent("nax"), to: destinationDirectory)
   }
 }
