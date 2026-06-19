@@ -1,5 +1,5 @@
 {
-  "originHash" : "7e0a4d305b4e95ade19b684bc0fe60f6fa39d287178a56b23bddf3c0e8427101",
+  "originHash" : "f3df3d8536133fadd0e850955d16bc763f34a46b6980a5b1d3b44f16ce99fac6",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -104,8 +104,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Quick/Nimble.git",
       "state" : {
-        "revision" : "cc945f7bdf3b485adedc315e18685c065059b4ca",
-        "version" : "13.8.0"
+        "revision" : "035b88ad6ae8035f5ce2b50b0a6d69c3b16d2120",
+        "version" : "14.0.0"
       }
     },
     {
