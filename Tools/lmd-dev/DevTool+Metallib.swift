@@ -20,6 +20,7 @@ extension DevTool {
   /// this xcodebuild call exists for that one capability.
   func buildMetallib(configuration: String) throws {
     Output.debug("buildMetallib configuration=\(configuration)")
+    try ensureMetalToolchain()
     try tuistInstallAndGenerate()
     // The generator name is data, bound to a constant, so swift-mk's build-tooling
     // rule does not read it as spawning the tool: swift-mk does the xcodebuild call.
@@ -43,6 +44,7 @@ extension DevTool {
   /// if absent. Safe to run repeatedly.
   func preflight() throws {
     try runSwiftMk(["toolchain", "version"])
+    try ensureMetalToolchain()
     do {
       let path = try captureMetalPath()
       try writeLine("[preflight] metal: \(path)")
@@ -61,6 +63,13 @@ extension DevTool {
       captureOutput: true
     )
     return result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func ensureMetalToolchain() throws {
+    // GitHub runners can expose the standalone metal path before xcodebuild's
+    // CompileMetalFile step can use the on-demand component.
+    Output.debug("ensureMetalToolchain")
+    try runSwiftMk(["toolchain", "download-component", "MetalToolchain"])
   }
 
   /// Path to the mlx-swift Xcode project that Tuist generates under
