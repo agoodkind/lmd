@@ -252,6 +252,7 @@ let project = Project(
         .target(name: "AppLogger"),
         .target(name: "SwiftLMCore"),
         .target(name: "SwiftLMBackend"),
+        .target(name: "SwiftLMControl"),
         .target(name: "SwiftLMRuntime"),
         .target(name: "SwiftLMTrace"),
         .target(name: "SwiftLMMetrics"),

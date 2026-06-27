@@ -71,6 +71,11 @@ final class BrokerProtocolTests: XCTestCase {
       .pullEvent(.progress(line: "12% done")),
       .pullCompleted(slug: "BAAI/bge-m3", destination: "/tmp/x"),
       .embeddings([[0.1, 0.2], [0.3, 0.4]]),
+      .error(
+        .init(
+          kind: .servicePaused,
+          message: "service paused to preserve battery (low_power_mode)"
+        )),
       .error(.init(kind: .modelNotFound, message: "missing")),
     ]
     for response in cases {

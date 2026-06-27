@@ -94,18 +94,27 @@ private enum LoadedDecision {
   case served(RoutedServer)
 }
 
+private enum WaitOutcome: Sendable, Equatable {
+  case drained
+  case queueFull
+  case powerPaused(reason: String)
+  case retry
+  case timedOut
+}
+
 /// A request parked until it can proceed, either waiting for a concurrency slot
 /// on a specific model or for memory to admit a load. Lives only in
-/// `ModelRouter`'s actor-isolated state. Resumed with `true` when woken to retry
-/// and `false` when the wait times out or the model is torn down. `priority` is
-/// the requestor's load priority, used to wake admission waiters highest first;
-/// concurrency-slot waiters share a single default and wake FIFO.
+/// `ModelRouter`'s actor-isolated state. Resumed with a typed outcome so the
+/// caller can distinguish a normal retry from timeout, teardown, or a power-stop
+/// cancellation. `priority` is the requestor's load priority, used to wake
+/// admission waiters highest first; concurrency-slot waiters share a single
+/// default and wake FIFO.
 private final class ConcurrencyWaiter {
   let id: UUID
   let priority: Int
-  let continuation: CheckedContinuation<Bool, Never>
+  let continuation: CheckedContinuation<WaitOutcome, Never>
 
-  init(id: UUID, priority: Int, continuation: CheckedContinuation<Bool, Never>) {
+  init(id: UUID, priority: Int, continuation: CheckedContinuation<WaitOutcome, Never>) {
     self.id = id
     self.priority = priority
     self.continuation = continuation
@@ -179,6 +188,7 @@ public actor ModelRouter {
   /// embedding requests are refused with `RouteError.powerPaused`; in-flight
   /// requests already past the admission guard finish normally.
   private var powerHalted = false
+  private var powerHaltReason: String?
 
   public let eventSink: @Sendable (RouterLifecycleEvent) -> Void
 
@@ -537,6 +547,7 @@ public actor ModelRouter {
     case backendLaunchFailed(modelID: String)
     case concurrencyLimitExceeded(modelID: String, limit: Int)
     case loadConfigConflict(modelID: String)
+    case queueDrained(modelID: String)
     case wrongKindForChat(modelID: String)
     case wrongKindForEmbedding(modelID: String)
     case powerPaused(reason: String)
@@ -586,8 +597,15 @@ public actor ModelRouter {
         if Date() >= deadline {
           throw error
         }
-        if await waitForAdmission(priority: requestorPriority, until: deadline) == false {
+        switch await waitForAdmission(priority: requestorPriority, until: deadline) {
+        case .retry:
+          continue
+        case .timedOut, .queueFull:
           throw error
+        case .drained:
+          throw RouteError.queueDrained(modelID: model.id)
+        case .powerPaused(let reason):
+          throw RouteError.powerPaused(reason: reason)
         }
       }
     }
@@ -600,7 +618,7 @@ public actor ModelRouter {
     switch error {
     case .insufficientHeadroom, .modelYielding:
       return true
-    case .backendLaunchFailed, .concurrencyLimitExceeded, .loadConfigConflict,
+    case .backendLaunchFailed, .concurrencyLimitExceeded, .loadConfigConflict, .queueDrained,
       .wrongKindForChat, .wrongKindForEmbedding, .powerPaused:
       return false
     }
@@ -613,7 +631,7 @@ public actor ModelRouter {
     deadline: Date
   ) async throws -> RoutedServer {
     if powerHalted {
-      throw RouteError.powerPaused(reason: "battery")
+      throw RouteError.powerPaused(reason: powerHaltReason ?? "battery")
     }
     pruneStoppedServers()
     try validateRouteKind(model: model, kind: kind)
@@ -671,10 +689,16 @@ public actor ModelRouter {
     if let concurrencyLimit = concurrencyLimit(for: kind), entry.inFlight >= concurrencyLimit {
       let slot = await waitForConcurrencySlot(
         modelID: model.id, timeoutNanos: remainingNanos(until: deadline))
-      if slot == false {
+      switch slot {
+      case .retry:
+        return .retry
+      case .timedOut, .queueFull:
         throw RouteError.concurrencyLimitExceeded(modelID: model.id, limit: concurrencyLimit)
+      case .drained:
+        throw RouteError.queueDrained(modelID: model.id)
+      case .powerPaused(let reason):
+        throw RouteError.powerPaused(reason: reason)
       }
-      return .retry
     }
     var admitted = entry
     admitted.lastUsed = Date()
@@ -901,17 +925,15 @@ public actor ModelRouter {
     queueTimeoutNanos = nanos
   }
 
-  /// Suspend until a slot for `modelID` frees. Returns `true` when woken to
-  /// retry the capacity check, `false` when the wait timed out or the model was
-  /// torn down. The caller re-checks state after a `true` result, since a fresh
-  /// request may have taken the freed slot first.
+  /// Suspend until a slot for `modelID` frees. The caller re-checks state after
+  /// `.retry`, since a fresh request may have taken the freed slot first.
   private func waitForConcurrencySlot(
     modelID: String,
     timeoutNanos: UInt64,
     priority: Int = 0
-  ) async -> Bool {
+  ) async -> WaitOutcome {
     let waiterID = UUID()
-    return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+    return await withCheckedContinuation { continuation in
       concurrencyWaiters[modelID, default: []].append(
         ConcurrencyWaiter(id: waiterID, priority: priority, continuation: continuation))
       Task.detached { [weak self] in
@@ -921,7 +943,7 @@ public actor ModelRouter {
     }
   }
 
-  /// Resume a still-queued waiter with `false` after its timeout elapsed. A
+  /// Resume a still-queued waiter with `.timedOut` after its timeout elapsed. A
   /// no-op if the waiter was already woken or drained, since its id is gone.
   private func expireConcurrencyWaiter(modelID: String, waiterID: UUID) {
     guard var waiters = concurrencyWaiters[modelID],
@@ -931,7 +953,7 @@ public actor ModelRouter {
     }
     let waiter = waiters.remove(at: index)
     concurrencyWaiters[modelID] = waiters.isEmpty ? nil : waiters
-    waiter.continuation.resume(returning: false)
+    waiter.continuation.resume(returning: .timedOut)
   }
 
   /// Wake the oldest waiter for `modelID`, if any, after a slot frees.
@@ -941,17 +963,20 @@ public actor ModelRouter {
     }
     let waiter = waiters.removeFirst()
     concurrencyWaiters[modelID] = waiters.isEmpty ? nil : waiters
-    waiter.continuation.resume(returning: true)
+    waiter.continuation.resume(returning: .retry)
   }
 
-  /// Resume every waiter for `modelID` with `false`, used when the model is
-  /// unloaded or evicted so no queued request hangs forever.
-  private func drainConcurrencyWaiters(modelID: String) {
+  /// Resume every waiter for `modelID` with `outcome`, used when queued work can
+  /// no longer proceed.
+  private func drainConcurrencyWaiters(
+    modelID: String,
+    outcome: WaitOutcome = .drained
+  ) {
     guard let waiters = concurrencyWaiters.removeValue(forKey: modelID) else {
       return
     }
     for waiter in waiters {
-      waiter.continuation.resume(returning: false)
+      waiter.continuation.resume(returning: outcome)
     }
   }
 
@@ -963,13 +988,15 @@ public actor ModelRouter {
   }
 
   /// Park a load that cannot be admitted yet until memory frees or the request's
-  /// deadline passes. Returns `true` when woken to retry, `false` when the queue
+  /// deadline passes. Returns a typed outcome so the caller can propagate a
+  /// power-stop cancellation distinctly from a timeout or teardown.
+  /// Returns `.queueFull` when the queue
   /// is full. Reuses the concurrency waiter's timer under a reserved key so no
   /// second timer is introduced.
-  private func waitForAdmission(priority: Int, until deadline: Date) async -> Bool {
+  private func waitForAdmission(priority: Int, until deadline: Date) async -> WaitOutcome {
     let parked = concurrencyWaiters[Self.admissionWaiterKey]?.count ?? 0
     if parked >= Self.maxAdmissionWaiters {
-      return false
+      return .queueFull
     }
     return await waitForConcurrencySlot(
       modelID: Self.admissionWaiterKey,
@@ -993,7 +1020,7 @@ public actor ModelRouter {
       return lhs.offset < rhs.offset
     }
     for entry in ordered {
-      entry.element.continuation.resume(returning: true)
+      entry.element.continuation.resume(returning: .retry)
     }
   }
 
@@ -1011,13 +1038,20 @@ public actor ModelRouter {
     powerHalted
   }
 
+  public func powerPauseReason() -> String? {
+    powerHaltReason
+  }
+
   /// Apply a battery throttle level: cap embedding concurrency, set inter-request
   /// pacing, forward the level to every loaded embedding server so it can shrink
   /// the GPU cache, and at `hard` halt admission so new chat and embedding
   /// requests are refused while in-flight requests drain. Concurrency is never
   /// raised above the configured ceiling, and `none` restores the configured cap
   /// with zero pacing and clears the halt.
-  public func applyPowerThrottle(_ level: PowerThrottleLevel) {
+  public func applyPowerThrottle(
+    _ level: PowerThrottleLevel,
+    haltReason: String = "battery"
+  ) {
     let concurrency: Int?
     let pacingNanos: UInt64
     switch level {
@@ -1035,10 +1069,19 @@ public actor ModelRouter {
     embeddingPacingNanos = pacingNanos
     currentThrottleLevel = level
     powerHalted = (level == .hard)
+    powerHaltReason = level == .hard ? haltReason : nil
     let wireLevel = wireThrottleLevel(level)
     for state in routes.values {
       if case .loaded(let entry) = state, entry.kind == .embedding {
         entry.server.applyPowerThrottle(wireLevel)
+      }
+    }
+    if let powerHaltReason {
+      for modelID in Array(concurrencyWaiters.keys) {
+        drainConcurrencyWaiters(
+          modelID: modelID,
+          outcome: .powerPaused(reason: powerHaltReason)
+        )
       }
     }
     log.notice(
@@ -1087,7 +1130,7 @@ public actor ModelRouter {
   /// the lifecycle event for why it left.
   @discardableResult
   private func removeRoute(modelID: String) -> RouteState? {
-    drainConcurrencyWaiters(modelID: modelID)
+    drainConcurrencyWaiters(modelID: modelID, outcome: .drained)
     draining.remove(modelID)
     guard let state = routes.removeValue(forKey: modelID) else {
       return nil
@@ -1167,7 +1210,7 @@ public actor ModelRouter {
     for modelID in modelIDs {
       unload(modelID: modelID)
     }
-    drainConcurrencyWaiters(modelID: Self.admissionWaiterKey)
+    drainConcurrencyWaiters(modelID: Self.admissionWaiterKey, outcome: .drained)
   }
 
   private func finishLoad(
@@ -1211,11 +1254,18 @@ public actor ModelRouter {
       {
         let slot = await waitForConcurrencySlot(
           modelID: model.id, timeoutNanos: remainingNanos(until: deadline))
-        if slot == false {
+        switch slot {
+        case .retry:
+          break
+        case .timedOut, .queueFull:
           throw RouteError.concurrencyLimitExceeded(
             modelID: model.id,
             limit: concurrencyLimit
           )
+        case .drained:
+          throw RouteError.queueDrained(modelID: model.id)
+        case .powerPaused(let reason):
+          throw RouteError.powerPaused(reason: reason)
         }
         guard case .loaded(let refreshed)? = routes[model.id] else {
           throw RouteError.backendLaunchFailed(modelID: model.id)

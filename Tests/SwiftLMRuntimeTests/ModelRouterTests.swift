@@ -660,6 +660,50 @@ final class ModelRouterTests: XCTestCase {
     expect(timedOut) == true
   }
 
+  func testAdmissionQueueFullKeepsHeadroomError() async throws {
+    let router = makeQueueRouter(totalGB: 20, requestWaitTimeoutMillis: 5_000)
+    let recorder = ParkedTaskOutcomeRecorder()
+    var parkedTasks: [Task<Void, Never>] = []
+    parkedTasks.reserveCapacity(256)
+    for index in 0..<256 {
+      let model = desc("huge-\(index)", 50)
+      parkedTasks.append(
+        Task {
+          do {
+            _ = try await router.routeAndBegin(model)
+            await recorder.recordFailure("parked request \(index) unexpectedly completed")
+          } catch let error as ModelRouter.RouteError {
+            guard case .powerPaused = error else {
+              await recorder.recordFailure(
+                "expected parked request \(index) to fail with powerPaused, got \(error)"
+              )
+              return
+            }
+          } catch {
+            await recorder.recordFailure("unexpected error \(error)")
+          }
+        })
+    }
+    try await Task.sleep(nanoseconds: 50_000_000)
+
+    do {
+      _ = try await router.routeAndBegin(desc("overflow", 50))
+      fail("expected the overflow request to surface insufficientHeadroom immediately")
+    } catch let error as ModelRouter.RouteError {
+      guard case .insufficientHeadroom = error else {
+        fail("expected insufficientHeadroom, got \(error)")
+        return
+      }
+    }
+
+    await router.applyPowerThrottle(.hard, haltReason: "low_power_mode")
+    for task in parkedTasks {
+      _ = await task.result
+    }
+    let failures = await recorder.messages()
+    expect(failures) == []
+  }
+
   // MARK: - Concurrency queue
 
   private func makeChatRouter(chatMaxConcurrency: Int) -> ModelRouter {
@@ -768,8 +812,54 @@ final class ModelRouterTests: XCTestCase {
     do {
       _ = try await second
       fail("expected the drained waiter to surface an error rather than hang")
-    } catch is ModelRouter.RouteError {
-      // Expected: a drained waiter resolves instead of hanging.
+    } catch let error as ModelRouter.RouteError {
+      guard case .queueDrained(let drainedModelID) = error else {
+        fail("expected queueDrained, got \(error)")
+        return
+      }
+      expect(drainedModelID) == model.id
+    }
+  }
+
+  func testHardCancelsQueuedConcurrencyWaiterAsPowerPaused() async throws {
+    let router = makeChatRouter(chatMaxConcurrency: 1)
+    let model = desc("A", 10)
+    _ = try await router.routeAndBegin(model)
+
+    async let second = router.routeAndBegin(model)
+    try await Task.sleep(nanoseconds: 50_000_000)
+    await router.applyPowerThrottle(.hard, haltReason: "low_power_mode")
+
+    do {
+      _ = try await second
+      fail("expected queued waiter to fail with powerPaused")
+    } catch let error as ModelRouter.RouteError {
+      guard case .powerPaused(let reason) = error else {
+        fail("expected powerPaused, got \(error)")
+        return
+      }
+      expect(reason) == "low_power_mode"
+    }
+  }
+
+  func testHardCancelsQueuedAdmissionWaiterAsPowerPaused() async throws {
+    let router = makeQueueRouter(totalGB: 80, requestWaitTimeoutMillis: 5_000)
+    _ = try await router.routeAndBegin(desc("A", 50))
+    let waitingModel = desc("B", 50)
+
+    async let second: ModelServer = router.routeAndBegin(waitingModel)
+    try await Task.sleep(nanoseconds: 30_000_000)
+    await router.applyPowerThrottle(.hard, haltReason: "low_power_mode")
+
+    do {
+      _ = try await second
+      fail("expected queued admission waiter to fail with powerPaused")
+    } catch let error as ModelRouter.RouteError {
+      guard case .powerPaused(let reason) = error else {
+        fail("expected powerPaused, got \(error)")
+        return
+      }
+      expect(reason) == "low_power_mode"
     }
   }
 
@@ -800,6 +890,12 @@ private actor OrderRecorder {
   private var recorded: [Int] = []
   func append(_ value: Int) { recorded.append(value) }
   func values() -> [Int] { recorded }
+}
+
+private actor ParkedTaskOutcomeRecorder {
+  private var failures: [String] = []
+  func recordFailure(_ message: String) { failures.append(message) }
+  func messages() -> [String] { failures }
 }
 
 /// Acquire a chat slot then record `index`. A free function so `async let` does
