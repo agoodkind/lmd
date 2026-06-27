@@ -798,8 +798,6 @@ struct SwiftLMD {
       )
     )
     try await app.runService()
-    withExtendedLifetime(powerMonitor) {}
-    withExtendedLifetime(powerStateObserver) {}
   }
 }
 
