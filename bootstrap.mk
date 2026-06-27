@@ -8,6 +8,7 @@ SWIFT_MK := .make/swift.mk
 SWIFT_MK_BASE_URL ?= https://raw.githubusercontent.com/agoodkind/swift-makefile/main
 SWIFT_MK_API_REPO ?= agoodkind/swift-makefile
 SWIFT_MK_API_REF ?= main
+SWIFT_MK_OSV_CONFIG ?= .make/osv-scanner.toml
 SWIFT_MK_SWIFTLINT_CONFIG ?= .make/swiftlint.yml
 SWIFT_MK_SWIFT_FORMAT_CONFIG ?= .make/swift-format.json
 SWIFT_MK_PERIPHERY_CONFIG ?= .make/periphery.yml
@@ -59,12 +60,14 @@ endef
 
 ifeq ($(strip $(SWIFT_MK_SKIP_FETCH)),1)
 SWIFT_MK_FETCH_CHECK := $(call _swift_mk_require_fetched,$(SWIFT_MK))
+SWIFT_MK_FETCH_CHECK += $(call _swift_mk_require_fetched,$(SWIFT_MK_OSV_CONFIG))
 SWIFT_MK_FETCH_CHECK += $(call _swift_mk_require_fetched,$(SWIFT_MK_SWIFTLINT_CONFIG))
 SWIFT_MK_FETCH_CHECK += $(call _swift_mk_require_fetched,$(SWIFT_MK_SWIFT_FORMAT_CONFIG))
 SWIFT_MK_FETCH_CHECK += $(call _swift_mk_require_fetched,$(SWIFT_MK_PERIPHERY_CONFIG))
 SWIFT_MK_FETCH_CHECK += $(foreach m,$(SWIFT_MK_MODULES),$(call _swift_mk_require_fetched,.make/$(m)))
 else
 $(if $(filter ok,$(shell mkdir -p .make && if $(call _swift_mk_fetch,swift.mk,$(SWIFT_MK)); then printf ok; else printf fail; fi)),,$(error swift-makefile failed to fetch swift.mk))
+$(if $(filter ok,$(shell mkdir -p .make && if [ -f osv-scanner.toml ]; then cp osv-scanner.toml $(SWIFT_MK_OSV_CONFIG); else $(call _swift_mk_fetch,osv-scanner.toml,$(SWIFT_MK_OSV_CONFIG)); fi; if [ -s "$(SWIFT_MK_OSV_CONFIG)" ]; then printf ok; else printf fail; fi)),,$(error swift-makefile failed to fetch osv-scanner.toml))
 $(if $(filter ok,$(shell mkdir -p .make && if $(call _swift_mk_fetch,.swiftlint.yml,$(SWIFT_MK_SWIFTLINT_CONFIG)); then printf ok; else printf fail; fi)),,$(error swift-makefile failed to fetch .swiftlint.yml))
 $(if $(filter ok,$(shell mkdir -p .make && if $(call _swift_mk_fetch,.swift-format,$(SWIFT_MK_SWIFT_FORMAT_CONFIG)); then printf ok; else printf fail; fi)),,$(error swift-makefile failed to fetch .swift-format))
 $(if $(filter ok,$(shell mkdir -p .make && if $(call _swift_mk_fetch,.periphery.yml,$(SWIFT_MK_PERIPHERY_CONFIG)); then printf ok; else printf fail; fi)),,$(error swift-makefile failed to fetch .periphery.yml))

@@ -656,7 +656,10 @@ struct SwiftLMD {
       resumePct: config.batteryResumePct
     )
     let powerMonitor = PowerMonitor(config: powerConfig) {
-      Battery.read().percent
+      PowerMonitor.Reading(
+        percent: Battery.read().percent,
+        isLowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled
+      )
     }
     powerMonitor.setOnChange { level in
       let throttle: PowerThrottleLevel
@@ -671,7 +674,13 @@ struct SwiftLMD {
       Task { await router.applyPowerThrottle(throttle) }
     }
     powerMonitor.start()
-    _ = powerMonitor
+    let powerStateObserver = NotificationCenter.default.addObserver(
+      of: ProcessInfo.processInfo,
+      for: .powerStateDidChange
+    ) { (_: ProcessInfo.PowerStateDidChangeMessage) in
+      powerMonitor.reevaluate()
+    }
+    _ = powerStateObserver
 
     // XPC control surface for first-party Swift clients (lmd CLI,
     // lmd-tui). Shares `state` with the HTTP routes so both transports
@@ -789,6 +798,8 @@ struct SwiftLMD {
       )
     )
     try await app.runService()
+    withExtendedLifetime(powerMonitor) {}
+    withExtendedLifetime(powerStateObserver) {}
   }
 }
 

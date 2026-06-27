@@ -14,15 +14,15 @@ private let log = AppLogger.logger(category: "PowerMonitor")
 
 // MARK: - Power monitor
 
-/// Watches battery charge and reports a graded throttle ``Level``.
+/// Watches battery charge and Low Power Mode and reports a graded throttle
+/// ``Level``.
 ///
 /// There are three levels. `mild` is a plain threshold band: it applies while
 /// charge sits in `engagePct < charge <= mildEngagePct` and turns off above
-/// `mildEngagePct`, with no memory. `hard` is the stop level and is the only one
-/// with hysteresis: it engages at `charge <= engagePct` and holds all the way
-/// until charge recovers to `resumePct`, so a battery hovering or slowly
-/// recharging never bounces the stop on and off. While `hard` is held it
-/// overrides `mild`.
+/// `mildEngagePct`, with no memory. `hard` is the stop level. Low Power Mode
+/// always forces that stop immediately. Outside Low Power Mode, battery-driven
+/// `hard` keeps its hysteresis: once engaged at `charge <= engagePct`, it holds
+/// until charge recovers to `resumePct`.
 ///
 /// This type stays in `SwiftLMMonitor`, which depends only on `AppLogger`, so it
 /// keeps its own `Level` enum; the broker translates it to the shared
@@ -34,6 +34,28 @@ public final class PowerMonitor: @unchecked Sendable {
     case hard = 2
   }
 
+  public struct Reading: Sendable, Equatable {
+    public let percent: Int
+    public let isLowPowerModeEnabled: Bool
+
+    public init(percent: Int, isLowPowerModeEnabled: Bool) {
+      self.percent = percent
+      self.isLowPowerModeEnabled = isLowPowerModeEnabled
+    }
+  }
+
+  enum HardReason: Sendable, Equatable {
+    case battery
+    case lowPowerMode
+  }
+
+  struct State: Sendable, Equatable {
+    let level: Level
+    let hardReason: HardReason?
+
+    static let steady = State(level: .none, hardReason: nil)
+  }
+
   public struct Config: Sendable {
     /// Engage the `hard` stop when charge is at or below this percent. Zero
     /// disables the monitor.
@@ -41,9 +63,9 @@ public final class PowerMonitor: @unchecked Sendable {
     /// Engage `mild` when charge is at or below this percent (but above
     /// `engagePct`). Must sit above `engagePct` and below `resumePct`.
     public let mildEngagePct: Int
-    /// Release `hard` only once charge recovers to or above this percent. The
-    /// gap from `engagePct` to `resumePct` is the anti-flap dead band for the
-    /// stop.
+    /// Release battery-driven `hard` only once charge recovers to or above this
+    /// percent. The gap from `engagePct` to `resumePct` is the anti-flap dead
+    /// band for the battery stop.
     public let resumePct: Int
     public let intervalSeconds: Double
 
@@ -64,16 +86,16 @@ public final class PowerMonitor: @unchecked Sendable {
   }
 
   private let config: Config
-  private let reading: @Sendable () -> Int
+  private let reading: @Sendable () -> Reading
   private let lock = NSLock()
-  private var level: Level = .none
+  private var state: State = .steady
   private var onChangeHandler: (@Sendable (Level) -> Void)?
   private var stopRequested = false
   private var started = false
 
-  /// `reading` returns the current battery charge percent (0...100).
+  /// `reading` returns the current battery charge and Low Power Mode state.
   @preconcurrency
-  public init(config: Config, reading: @escaping @Sendable () -> Int) {
+  public init(config: Config, reading: @escaping @Sendable () -> Reading) {
     self.config = config
     self.reading = reading
   }
@@ -90,7 +112,7 @@ public final class PowerMonitor: @unchecked Sendable {
   public func currentLevel() -> Level {
     lock.lock()
     defer { lock.unlock() }
-    return level
+    return state.level
   }
 
   /// Start polling. A disabled config or a second call is a no-op.
@@ -107,6 +129,7 @@ public final class PowerMonitor: @unchecked Sendable {
     started = true
     lock.unlock()
 
+    reevaluate()
     log.notice(
       """
       power.monitor_started engage_pct=\(self.config.engagePct, privacy: .public) \
@@ -126,6 +149,14 @@ public final class PowerMonitor: @unchecked Sendable {
     lock.unlock()
   }
 
+  /// Force an immediate recompute from the current reading.
+  public func reevaluate() {
+    guard config.isDisabled == false else {
+      return
+    }
+    applyReading(reading())
+  }
+
   private func runLoop() {
     while true {
       lock.lock()
@@ -142,50 +173,55 @@ public final class PowerMonitor: @unchecked Sendable {
   }
 
   private func sampleOnce() {
-    let percent = reading()
+    applyReading(reading())
+  }
+
+  private func applyReading(_ reading: Reading) {
     lock.lock()
-    let previous = level
-    let next = PowerMonitor.nextLevel(percent: percent, config: config, previous: previous)
-    level = next
+    let previous = state
+    let next = PowerMonitor.nextState(reading: reading, config: config, previous: previous)
+    state = next
     let handler = onChangeHandler
     lock.unlock()
 
     guard next != previous else {
       return
     }
+    lock.lock()
+    let stillCurrent = (state == next)
+    lock.unlock()
+    guard stillCurrent else {
+      return
+    }
     log.notice(
       """
-      power.throttle_changed level=\(next.rawValue, privacy: .public) \
-      percent=\(percent, privacy: .public)
+      power.throttle_changed level=\(next.level.rawValue, privacy: .public) \
+      percent=\(reading.percent, privacy: .public) \
+      low_power_mode=\(reading.isLowPowerModeEnabled, privacy: .public)
       """
     )
-    handler?(next)
+    handler?(next.level)
   }
 
-  // MARK: - Pure level computation (tested directly)
+  // MARK: - Pure state computation (tested directly)
 
-  /// Compute the next level from the live charge and the previous level.
-  ///
-  /// `hard` is the only level with hysteresis: once engaged at `engagePct` it
-  /// holds until charge climbs back to `resumePct`, which is the whole anti-flap
-  /// mechanism for the stop, and it overrides `mild` while held. `mild` is a
-  /// plain band with no memory, so outside a hard hold the level follows the
-  /// live charge: `hard` at or below `engagePct`, `mild` at or below
-  /// `mildEngagePct`, otherwise `none`.
-  static func nextLevel(percent: Int, config: Config, previous: Level) -> Level {
-    if previous == .hard {
-      if percent >= config.resumePct {
-        return .none
+  static func nextState(reading: Reading, config: Config, previous: State) -> State {
+    if reading.isLowPowerModeEnabled {
+      return State(level: .hard, hardReason: .lowPowerMode)
+    }
+    if previous.level == .hard, previous.hardReason == .battery {
+      if reading.percent >= config.resumePct {
+        return .steady
       }
-      return .hard
+      return State(level: .hard, hardReason: .battery)
     }
-    if percent <= config.engagePct {
-      return .hard
+    if reading.percent <= config.engagePct {
+      return State(level: .hard, hardReason: .battery)
     }
-    if percent <= config.mildEngagePct {
-      return .mild
+    if reading.percent <= config.mildEngagePct {
+      return State(level: .mild, hardReason: nil)
     }
-    return .none
+    return .steady
   }
 
   deinit {
