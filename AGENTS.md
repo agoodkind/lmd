@@ -59,7 +59,7 @@ Why it diverges, so nobody "fixes" it back into the broker or rewrites it in-pro
   - `Tools/lmd-dev.swift` orchestrates both, then stages SwiftPM binaries and the Xcode-built bundle into `Products/Build/Release/`. `make install` reads only from that single staging directory.
 - `make debug` is the SwiftPM half only (unoptimized binaries, no metallib refresh).
 - `make test` runs the full suite via Tuist.
-- `make check`-style aggregate target does not exist; the CI workflow defines the canonical battery (build + test + log-audit + smoke).
+- `make check`-style aggregate target does not exist; the CI workflow defines the canonical battery (build + test + smoke).
 
 ## 5. Logging policy (NON-NEGOTIABLE)
 
@@ -79,7 +79,7 @@ After `AppLogger.bootstrap`, every executable that depends on a swift-log-using 
   private let log = AppLogger.logger(category: "ModelRouter")
   ```
 - Category is PascalCase, one-to-one with the file's logical type/module. No generic categories (`app`, `misc`, `default`).
-- `Logger(subsystem:...)` is constructed only inside `Sources/AppLogger/`. Anywhere else is a violation caught by `make log-audit`.
+- `Logger(subsystem:...)` is constructed only inside `Sources/AppLogger/`. Anywhere else is a logging-policy violation.
 
 ### 5.3 Privacy annotations
 
@@ -114,7 +114,7 @@ Any code path that can exceed ~50ms wall time brackets itself with `OSSignposter
 
 ### 5.7 Verification
 
-`make log-audit` greps Sources/ for forbidden patterns (`print(`, direct `Logger(subsystem:`, `import Logging` outside the bridge file). It must exit clean before any commit that touches Swift files.
+The lint gates check the owned Swift sources (`Sources`, `Tests`, and `Tools/lmd-dev`, per `SWIFT_SOURCE_ROOTS`) for the repo's shared SwiftLint, format, dead-code, and swiftcheck rules. They must exit clean before any commit that touches Swift files.
 
 ## 6. Concurrency
 
