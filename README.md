@@ -87,7 +87,7 @@ log show --predicate 'subsystem == "io.goodkind.lmd" AND category == "Broker"' -
 log show --subsystem io.goodkind.lmd --last 30m --style ndjson
 ```
 
-Data artifacts (`memory.jsonl`, bench `results/*.json`) live under `LMD_DATA_DIR` and are separate from logs. The Apple-native logging policy itself is enforced by `make log-audit` and codified in `AGENTS.md` §5.
+Data artifacts (`memory.jsonl`, bench `results/*.json`) live under `LMD_DATA_DIR` and are separate from logs. The Apple-native logging policy is codified in `AGENTS.md` §5, and `make lint` runs the shared formatting and static-analysis gates.
 
 ## Develop
 
@@ -97,8 +97,8 @@ SwiftPM pulls [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) from `
 make build              # hybrid SwiftPM (binaries) + xcodebuild (metallib)
 make debug              # SwiftPM debug build only (no metallib refresh)
 make test               # unit + snapshot + integration tests
+make lint               # formatting and static-analysis gates
 make tui-qa             # interactive TUI QA: tmux + pty + iTerm drivers
-make log-audit          # enforce the Apple-native logging policy
 make run-tui            # launch the TUI in foreground
 make run-serve          # run the broker in foreground (bypasses launchd)
 make restart-serve      # pick up a new broker binary under launchd
