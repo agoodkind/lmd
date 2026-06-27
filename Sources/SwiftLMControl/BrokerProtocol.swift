@@ -306,6 +306,7 @@ public struct BrokerError: Codable, Sendable, Error {
     case wrongKindForChat = "wrong_kind_for_chat"
     case wrongKindForEmbedding = "wrong_kind_for_embedding"
     case capacityExceeded = "capacity_exceeded"
+    case servicePaused = "service_paused"
     case launchFailed = "launch_failed"
     case embeddingFailed = "embedding_failed"
     case notConfigured = "not_configured"

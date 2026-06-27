@@ -143,10 +143,7 @@ private final class SessionHandler: @unchecked Sendable {
       return runBlockingResponse { try await self.metrics() }
 
     case .pullStart(let slug):
-      // Streaming: ack with .ok synchronously, then fan out progress frames
-      // back to the client via the bound session.
-      startPull(slug: slug)
-      return .ok
+      return runBlockingResponse { await self.pullStart(slug: slug) }
     case .events:
       startEvents()
       return .ok
@@ -184,6 +181,14 @@ private final class SessionHandler: @unchecked Sendable {
       )
       return .error(BrokerError(kind: .launchFailed, message: "\(error)"))
     }
+  }
+
+  private func pullStart(slug: String) async -> BrokerResponse {
+    if let reason = await state.router.powerPauseReason() {
+      return .error(brokerServicePausedError(reason: reason))
+    }
+    startPull(slug: slug)
+    return .ok
   }
 
   private func unload(request: ModelUnloadRequest) async throws -> BrokerResponse {
@@ -251,7 +256,7 @@ private final class SessionHandler: @unchecked Sendable {
           "error": String(describing: error),
         ]
       )
-      return .error(BrokerError(kind: .embeddingFailed, message: "route: \(error)"))
+      return .error(xpcEmbeddingRouteBrokerError(error))
     }
 
     let routerInfo = await state.router.embeddingLoadInfo(modelID: descriptor.id)
