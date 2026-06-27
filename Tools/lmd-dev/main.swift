@@ -56,7 +56,11 @@ struct CommandResult {
 
 // MARK: - DevTool
 
-final class DevTool {
+// `@unchecked Sendable` is sound here: every stored property is an immutable `let`,
+// the type is used single-threaded by the CLI, and the only cross-concurrency use is
+// the decoupled build's `GatedBuild.run` compile closure, which `self` is captured by
+// and which runs synchronously within the same call.
+final class DevTool: @unchecked Sendable {
   let fileManager = FileManager.default
   let environment = Environment()
   let repoRoot: URL
