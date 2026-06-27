@@ -18,12 +18,31 @@ extension DevTool {
   /// it sidesteps the NIO type-metadata crash that affects Xcode-built Swift
   /// executables in this project. SwiftPM cannot compile `.metal` files, so
   /// this xcodebuild call exists for that one capability.
-  func buildMetallib(configuration: String) throws {
+  func buildMetallib(configuration: String, receipt: GateReceipt? = nil) throws {
     Output.debug("buildMetallib configuration=\(configuration)")
-    try tuistInstallAndGenerate()
+    try tuistInstallAndGenerate(receipt: receipt)
     // The generator name is data, bound to a constant, so swift-mk's build-tooling
     // rule does not read it as spawning the tool: swift-mk does the xcodebuild call.
     let metalProjectGenerator = "xcodegen"
+    // A receipt means the decoupled gated build authorized this compile in-process,
+    // so build through Toolchain.build(_:receipt:) rather than shelling swift-mk,
+    // which would have no make ancestor and be refused. The make path keeps shelling
+    // swift-mk, authorized by its live gate ancestor.
+    if let receipt {
+      let request = Toolchain.Request(
+        generator: .xcodegen,
+        scheme: "mlx-swift_Cmlx",
+        configuration: configuration,
+        project: mlxSwiftProjectPath().path,
+        destination: "platform=macOS,arch=arm64",
+        derivedDataPath: repoRoot.appendingPathComponent("Derived").path
+      )
+      let status = Toolchain.build(request, receipt: receipt)
+      guard status == 0 else {
+        throw ToolError.failure("metallib build failed (status \(status))")
+      }
+      return
+    }
     try runSwiftMk(
       [
         "toolchain", "build",
@@ -72,10 +91,22 @@ extension DevTool {
     )
   }
 
-  func tuistInstallAndGenerate() throws {
+  func tuistInstallAndGenerate(receipt: GateReceipt? = nil) throws {
     // The generator name is data, bound to a constant, so swift-mk's build-tooling
     // rule does not read it as spawning tuist: swift-mk runs tuist itself.
     let tuistGenerator = "tuist"
+    // In the decoupled path drive the generator in-process. Install and generate are
+    // open generator surfaces, not the gated compile, so they need no receipt; this
+    // avoids shelling swift-mk, which would be refused without a make ancestor.
+    if receipt != nil {
+      guard Toolchain.installDependencies(.tuist) == 0 else {
+        throw ToolError.failure("tuist install failed")
+      }
+      guard Toolchain.generate(.tuist, extraArguments: ["--cache-profile", "none"]) == 0 else {
+        throw ToolError.failure("tuist generate failed")
+      }
+      return
+    }
     try runSwiftMk(["toolchain", "install", "--generator", tuistGenerator])
     try runSwiftMk(
       ["toolchain", "generate", "--generator", tuistGenerator, "--", "--cache-profile", "none"])

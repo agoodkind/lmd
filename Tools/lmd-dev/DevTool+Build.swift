@@ -59,10 +59,10 @@ extension DevTool {
   /// gated path runs, minus the per-step GateProof guards since the gate has already
   /// passed in this process.
   private func buildDecoupled(configuration: String) throws {
-    let request = GatedBuild.Request(entry: "lmd build \(configuration)") { _ in
+    let request = GatedBuild.Request(entry: "lmd build \(configuration)") { receipt in
       do {
         try self.buildSwiftPackageWithoutGate(configuration: configuration)
-        try self.buildMetallib(configuration: configuration)
+        try self.buildMetallib(configuration: configuration, receipt: receipt)
         try self.buildNaxAotLibraries(configuration: configuration)
         try self.stageBuildArtifacts(
           products: productBinaries, configuration: configuration)
