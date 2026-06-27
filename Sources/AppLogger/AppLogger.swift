@@ -18,9 +18,9 @@
 //      private let log = AppLogger.logger(category: "ModelRouter")
 //      log.notice("model.loaded id=\(id, privacy: .public)")
 //
-//  Direct `Logger(subsystem:...)` construction is forbidden elsewhere.
-//  `make log-audit` enforces this. The bridge in
-//  `SwiftLogBridge.swift` routes transitive `swift-log` traffic
+//  Direct `Logger(subsystem:...)` construction is forbidden elsewhere by
+//  repo policy. The bridge in `SwiftLogBridge.swift` routes transitive
+//  `swift-log` traffic
 //  (Hummingbird, async-http-client, swift-nio) through the same
 //  subsystem, so one `log stream --subsystem io.goodkind.lmd` captures
 //  everything.
