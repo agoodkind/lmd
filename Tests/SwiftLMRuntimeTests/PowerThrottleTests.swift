@@ -150,10 +150,11 @@ final class RouterPowerThrottleTests: XCTestCase {
       _ = try await router.routeAndBegin(model)
       fail("expected powerPaused")
     } catch let error as ModelRouter.RouteError {
-      guard case .powerPaused = error else {
+      guard case .powerPaused(let reason) = error else {
         fail("expected powerPaused, got \(error)")
         return
       }
+      expect(reason) == "battery"
     } catch {
       fail("unexpected error \(error)")
     }
@@ -172,10 +173,11 @@ final class RouterPowerThrottleTests: XCTestCase {
       _ = try await router.routeEmbeddingAndBegin(model)
       fail("expected powerPaused")
     } catch let error as ModelRouter.RouteError {
-      guard case .powerPaused = error else {
+      guard case .powerPaused(let reason) = error else {
         fail("expected powerPaused, got \(error)")
         return
       }
+      expect(reason) == "battery"
     } catch {
       fail("unexpected error \(error)")
     }
