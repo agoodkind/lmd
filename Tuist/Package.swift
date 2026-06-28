@@ -1,4 +1,11 @@
 // swift-tools-version: 6.1
+//
+//  Package.swift
+//  lmd
+//
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-05-10.
+//  Copyright © 2026, all rights reserved.
+//
 
 import PackageDescription
 
@@ -7,13 +14,13 @@ import PackageDescription
 
   let packageSettings = PackageSettings(
     productTypes: [
-      "SwiftTerm": .framework,
+      "SwiftTerm": .framework
     ],
     baseProductType: .staticFramework,
     targetSettings: [
       "SwiftTerm": [
-        "EXCLUDED_SOURCE_FILE_NAMES": "Shaders.metal",
-      ],
+        "EXCLUDED_SOURCE_FILE_NAMES": "Shaders.metal"
+      ]
     ]
   )
 #endif
