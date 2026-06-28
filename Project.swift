@@ -1,4 +1,15 @@
+//
+//  Project.swift
+//  lmd
+//
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-05-10.
+//  Copyright © 2026, all rights reserved.
+//
+
 import ProjectDescription
+
+/// The editor indent and tab width applied to the generated project's text settings.
+private let editorTextWidth: UInt = 2
 
 let swiftSixSettings: Settings = .settings(
   base: [
@@ -13,7 +24,7 @@ let swiftSixSettings: Settings = .settings(
 
 let swiftFiveSettings: Settings = .settings(
   base: [
-    "SWIFT_VERSION": "5.0",
+    "SWIFT_VERSION": "5.0"
   ]
 )
 
@@ -118,7 +129,7 @@ let project = Project(
   organizationName: "Goodkind",
   options: .options(
     automaticSchemesOptions: .disabled,
-    textSettings: .textSettings(indentWidth: 2, tabWidth: 2)
+    textSettings: .textSettings(indentWidth: editorTextWidth, tabWidth: editorTextWidth)
   ),
   targets: [
     frameworkTarget(
@@ -186,13 +197,13 @@ let project = Project(
     frameworkTarget(
       "SwiftLMMonitor",
       dependencies: [
-        .target(name: "AppLogger"),
+        .target(name: "AppLogger")
       ]
     ),
     frameworkTarget(
       "SwiftLMTUI",
       dependencies: [
-        .target(name: "AppLogger"),
+        .target(name: "AppLogger")
       ]
     ),
     frameworkTarget(
@@ -242,7 +253,7 @@ let project = Project(
       deploymentTargets: deploymentTargets,
       sources: ["Sources/lmd-qa/**/*.swift"],
       dependencies: [
-        .external(name: "SwiftTerm"),
+        .external(name: "SwiftTerm")
       ],
       settings: swiftFiveSettings
     ),
