@@ -94,10 +94,12 @@ private enum LoadedDecision {
   case served(RoutedServer)
 }
 
+// MARK: - WaitOutcome
+
 private enum WaitOutcome: Sendable, Equatable {
   case drained
-  case queueFull
   case powerPaused(reason: String)
+  case queueFull
   case retry
   case timedOut
 }

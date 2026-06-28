@@ -334,6 +334,7 @@ private let bytesPerGigabyte = 1_073_741_824.0
 private let httpStatusBadRequest = 400
 private let httpStatusConflict = 409
 private let httpStatusTooManyRequests = 429
+
 func idleCutoff(
   for candidate: EvictionCandidate,
   defaultChat: TimeInterval,

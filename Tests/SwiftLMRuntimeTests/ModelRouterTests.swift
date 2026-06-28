@@ -701,7 +701,7 @@ final class ModelRouterTests: XCTestCase {
       _ = await task.result
     }
     let failures = await recorder.messages()
-    expect(failures) == []
+    expect(failures.isEmpty) == true
   }
 
   // MARK: - Concurrency queue
@@ -757,14 +757,17 @@ final class ModelRouterTests: XCTestCase {
     let model = desc("A", 10)
     _ = try await router.routeAndBegin(model)  // never released
 
-    do {
-      _ = try await router.routeAndBegin(model)
-      fail("expected concurrencyLimitExceeded after the queue wait timed out")
-    } catch let error as ModelRouter.RouteError {
+    let result = await Task { try await router.routeAndBegin(model) }.result
+    switch result {
+    case .failure(let error as ModelRouter.RouteError):
       guard case .concurrencyLimitExceeded = error else {
         fail("expected concurrencyLimitExceeded, got \(error)")
         return
       }
+    case .failure(let error):
+      fail("expected concurrencyLimitExceeded, got unexpected error \(error)")
+    case .success:
+      fail("expected concurrencyLimitExceeded after the queue wait timed out")
     }
   }
 
@@ -789,14 +792,17 @@ final class ModelRouterTests: XCTestCase {
     let snapshot = await router.snapshot()
     expect(snapshot.loaded.first?.inFlightRequests) == 4
 
-    do {
-      _ = try await router.routeAndBegin(model)  // fifth queues, then times out
-      fail("expected the fifth request to queue and time out")
-    } catch let error as ModelRouter.RouteError {
+    let result = await Task { try await router.routeAndBegin(model) }.result
+    switch result {
+    case .failure(let error as ModelRouter.RouteError):
       guard case .concurrencyLimitExceeded = error else {
         fail("expected concurrencyLimitExceeded, got \(error)")
         return
       }
+    case .failure(let error):
+      fail("expected concurrencyLimitExceeded, got unexpected error \(error)")
+    case .success:
+      fail("expected the fifth request to queue and time out")
     }
   }
 
@@ -804,20 +810,22 @@ final class ModelRouterTests: XCTestCase {
     let router = makeChatRouter(chatMaxConcurrency: 1)
     let model = desc("A", 10)
     _ = try await router.routeAndBegin(model)
-
-    async let second = router.routeAndBegin(model)
+    let second = Task { try await router.routeAndBegin(model) }
     try await Task.sleep(nanoseconds: 50_000_000)  // let the second request queue
     await router.unload(modelID: model.id)
 
-    do {
-      _ = try await second
-      fail("expected the drained waiter to surface an error rather than hang")
-    } catch let error as ModelRouter.RouteError {
+    let result = await second.result
+    switch result {
+    case .failure(let error as ModelRouter.RouteError):
       guard case .queueDrained(let drainedModelID) = error else {
         fail("expected queueDrained, got \(error)")
         return
       }
       expect(drainedModelID) == model.id
+    case .failure(let error):
+      fail("expected queueDrained, got unexpected error \(error)")
+    case .success:
+      fail("expected the drained waiter to surface an error rather than hang")
     }
   }
 
@@ -825,20 +833,22 @@ final class ModelRouterTests: XCTestCase {
     let router = makeChatRouter(chatMaxConcurrency: 1)
     let model = desc("A", 10)
     _ = try await router.routeAndBegin(model)
-
-    async let second = router.routeAndBegin(model)
+    let second = Task { try await router.routeAndBegin(model) }
     try await Task.sleep(nanoseconds: 50_000_000)
     await router.applyPowerThrottle(.hard, haltReason: "low_power_mode")
 
-    do {
-      _ = try await second
-      fail("expected queued waiter to fail with powerPaused")
-    } catch let error as ModelRouter.RouteError {
+    let result = await second.result
+    switch result {
+    case .failure(let error as ModelRouter.RouteError):
       guard case .powerPaused(let reason) = error else {
         fail("expected powerPaused, got \(error)")
         return
       }
       expect(reason) == "low_power_mode"
+    case .failure(let error):
+      fail("expected powerPaused, got unexpected error \(error)")
+    case .success:
+      fail("expected queued waiter to fail with powerPaused")
     }
   }
 
@@ -846,20 +856,22 @@ final class ModelRouterTests: XCTestCase {
     let router = makeQueueRouter(totalGB: 80, requestWaitTimeoutMillis: 5_000)
     _ = try await router.routeAndBegin(desc("A", 50))
     let waitingModel = desc("B", 50)
-
-    async let second: ModelServer = router.routeAndBegin(waitingModel)
+    let second = Task { try await router.routeAndBegin(waitingModel) }
     try await Task.sleep(nanoseconds: 30_000_000)
     await router.applyPowerThrottle(.hard, haltReason: "low_power_mode")
 
-    do {
-      _ = try await second
-      fail("expected queued admission waiter to fail with powerPaused")
-    } catch let error as ModelRouter.RouteError {
+    let result = await second.result
+    switch result {
+    case .failure(let error as ModelRouter.RouteError):
       guard case .powerPaused(let reason) = error else {
         fail("expected powerPaused, got \(error)")
         return
       }
       expect(reason) == "low_power_mode"
+    case .failure(let error):
+      fail("expected powerPaused, got unexpected error \(error)")
+    case .success:
+      fail("expected queued admission waiter to fail with powerPaused")
     }
   }
 
@@ -869,18 +881,36 @@ final class ModelRouterTests: XCTestCase {
     _ = try await router.routeAndBegin(model)  // holds the only slot
 
     let order = OrderRecorder()
-    async let w0: Void = acquireThenRecord(router: router, model: model, index: 0, order: order)
+    let w0 = Task {
+      try await acquireThenRecord(router: router, model: model, index: 0, order: order)
+    }
     try await Task.sleep(nanoseconds: 20_000_000)
-    async let w1: Void = acquireThenRecord(router: router, model: model, index: 1, order: order)
+    let w1 = Task {
+      try await acquireThenRecord(router: router, model: model, index: 1, order: order)
+    }
     try await Task.sleep(nanoseconds: 20_000_000)
-    async let w2: Void = acquireThenRecord(router: router, model: model, index: 2, order: order)
+    let w2 = Task {
+      try await acquireThenRecord(router: router, model: model, index: 2, order: order)
+    }
     try await Task.sleep(nanoseconds: 20_000_000)
 
     for _ in 0..<3 {
       await router.requestDone(modelID: model.id)
       try await Task.sleep(nanoseconds: 20_000_000)
     }
-    _ = await [w0, w1, w2]
+    let w0Result = await w0.result
+    let w1Result = await w1.result
+    let w2Result = await w2.result
+    for result in [w0Result, w1Result, w2Result] {
+      guard case .success = result else {
+        if case .failure(let error) = result {
+          fail("expected queued waiter to acquire a slot, got \(error)")
+        } else {
+          fail("expected queued waiter to acquire a slot")
+        }
+        return
+      }
+    }
     let recorded = await order.values()
     expect(recorded) == [0, 1, 2]
   }
@@ -892,8 +922,11 @@ private actor OrderRecorder {
   func values() -> [Int] { recorded }
 }
 
+// MARK: - ParkedTaskOutcomeRecorder
+
 private actor ParkedTaskOutcomeRecorder {
   private var failures: [String] = []
+
   func recordFailure(_ message: String) { failures.append(message) }
   func messages() -> [String] { failures }
 }
@@ -905,13 +938,9 @@ private func acquireThenRecord(
   model: ModelDescriptor,
   index: Int,
   order: OrderRecorder
-) async {
-  do {
-    _ = try await router.routeAndBegin(model)
-    await order.append(index)
-  } catch {
-    // The FIFO test never exercises the failure path.
-  }
+) async throws {
+  _ = try await router.routeAndBegin(model)
+  await order.append(index)
 }
 
 private actor DelayedModelServerSpawner {

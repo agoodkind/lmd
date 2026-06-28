@@ -20,6 +20,19 @@ private struct DecodedErrorResult: Equatable {
   let message: String
 }
 
+// MARK: - DecodedErrorEnvelope
+
+private struct DecodedErrorEnvelope: Decodable {
+  let error: ErrorBody
+
+  struct ErrorBody: Decodable {
+    let type: String
+    let message: String
+  }
+}
+
+// MARK: - RouteErrorMappingTests
+
 final class RouteErrorMappingTests: XCTestCase {
   func testChatPowerPauseMapsToServicePausedPayload() {
     let payload = chatRouteErrorPayload(
@@ -45,7 +58,8 @@ final class RouteErrorMappingTests: XCTestCase {
 
     expect(payload.statusCode) == 503
     expect(payload.type) == "model_unloaded"
-    expect(payload.message) == "embedding model was unloaded while request was queued; retry shortly"
+    expect(payload.message)
+      == "embedding model was unloaded while request was queued; retry shortly"
   }
 
   func testChatRoutePayloadBuildsServicePausedEnvelope() throws {
@@ -81,15 +95,17 @@ final class RouteErrorMappingTests: XCTestCase {
       fail("expected buffered error result")
       throw NSError(domain: "RouteErrorMappingTests", code: 1)
     }
-    guard
-      let json = try JSONSerialization.jsonObject(with: body) as? [String: Any],
-      let error = json["error"] as? [String: Any],
-      let type = error["type"] as? String,
-      let message = error["message"] as? String
-    else {
-      fail("expected error JSON body")
+    let envelope: DecodedErrorEnvelope
+    do {
+      envelope = try JSONDecoder().decode(DecodedErrorEnvelope.self, from: body)
+    } catch {
+      fail("expected decodable error JSON body, got \(error)")
       throw NSError(domain: "RouteErrorMappingTests", code: 2)
     }
-    return DecodedErrorResult(statusCode: statusCode, type: type, message: message)
+    return DecodedErrorResult(
+      statusCode: statusCode,
+      type: envelope.error.type,
+      message: envelope.error.message
+    )
   }
 }
