@@ -561,6 +561,7 @@ public actor ModelRouter {
       snapshot: .current()
     )
     var routed: RoutedServer?
+    var wokeForAdmission = false
     defer {
       BackendTrace.notice(
         phase: TracePhase.Router.routeEnd.rawValue,
@@ -579,16 +580,31 @@ public actor ModelRouter {
         let result = try await attemptRoute(
           model, kind: kind, loadConfig: loadConfig, deadline: deadline)
         routed = result
+        if wokeForAdmission {
+          // This task was woken by a freed-headroom signal and succeeded. Pass
+          // the baton so the next parked waiter can claim any headroom that
+          // remains, instead of stalling until the next unload. Still one at a
+          // time, so this does not reintroduce the thundering-herd race.
+          wakeNextAdmissionWaiter()
+        }
         return result.server
       } catch let error as RouteError where Self.isAdmissionFailure(error) {
         // Cannot be served right now but may be once memory frees: park in the
         // admission queue until woken or the request's deadline passes.
         if Date() >= deadline {
+          if wokeForAdmission {
+            wakeNextAdmissionWaiter()
+          }
           throw error
+        }
+        if wokeForAdmission {
+          wakeNextAdmissionWaiter()
+          wokeForAdmission = false
         }
         if await waitForAdmission(priority: requestorPriority, until: deadline) == false {
           throw error
         }
+        wokeForAdmission = true
       }
     }
   }
@@ -977,24 +993,20 @@ public actor ModelRouter {
       priority: priority)
   }
 
-  /// Wake every parked admission waiter, highest priority first and FIFO within a
-  /// priority, after memory frees. Each retries its route and re-parks if it still
-  /// cannot be admitted.
-  private func wakeAdmissionWaiters() {
-    guard let waiters = concurrencyWaiters.removeValue(forKey: Self.admissionWaiterKey),
-      !waiters.isEmpty
-    else {
+  /// Wake one parked admission waiter, highest priority first and FIFO within a
+  /// priority. Waking one at a time gives the selected task the first chance to
+  /// reserve freed headroom instead of racing every parked request at once.
+  private func wakeNextAdmissionWaiter() {
+    guard var waiters = concurrencyWaiters[Self.admissionWaiterKey], !waiters.isEmpty else {
       return
     }
-    let ordered = waiters.enumerated().sorted { lhs, rhs in
-      if lhs.element.priority != rhs.element.priority {
-        return lhs.element.priority > rhs.element.priority
-      }
-      return lhs.offset < rhs.offset
+    var selectedIndex = waiters.startIndex
+    for index in waiters.indices where waiters[index].priority > waiters[selectedIndex].priority {
+      selectedIndex = index
     }
-    for entry in ordered {
-      entry.element.continuation.resume(returning: true)
-    }
+    let waiter = waiters.remove(at: selectedIndex)
+    concurrencyWaiters[Self.admissionWaiterKey] = waiters.isEmpty ? nil : waiters
+    waiter.continuation.resume(returning: true)
   }
 
   // MARK: - Battery throttle
@@ -1081,8 +1093,8 @@ public actor ModelRouter {
 
   /// The single teardown path: remove `modelID` and release everything parked
   /// behind it. Drains queued concurrency waiters so none hangs, clears any
-  /// draining flag, and wakes admission waiters highest-priority-first because
-  /// memory just freed (a loaded model's RSS or a loading model's reservation).
+  /// draining flag, and wakes one admission waiter (highest priority first)
+  /// because memory just freed (a loaded model's RSS or a loading model's reservation).
   /// Returns the removed state, or nil if it was already gone; the caller emits
   /// the lifecycle event for why it left.
   @discardableResult
@@ -1092,7 +1104,7 @@ public actor ModelRouter {
     guard let state = routes.removeValue(forKey: modelID) else {
       return nil
     }
-    wakeAdmissionWaiters()
+    wakeNextAdmissionWaiter()
     return state
   }
 
