@@ -14,11 +14,12 @@ LMD_DEV = SWIFT_MK_BIN="$(SWIFT_MK_BIN)" swift Tools/lmd-dev.swift
 # swift-mk owns build/test/clean/lint/fmt/check; the dev tool runs the compile.
 SWIFT_MK_MODULES := swift-build.mk swift-release.mk
 SWIFT_MK_OWN_RUN := 1
-# The MLX metallib build needs the on-demand Metal toolchain. lmd composes the
-# ensure from the engine's generic preflight rail: check for the compiler, on a
-# miss download the component, re-check, fail loud.
-SWIFT_PREFLIGHT_CHECK_CMD = xcrun --find metal
-SWIFT_PREFLIGHT_ENSURE_CMD = "$(SWIFT_MK_BIN)" toolchain download-component MetalToolchain
+# The MLX metallib build needs the on-demand Metal toolchain. lmd-dev ensures it
+# in-code: buildMetallib and preflight run `swift-mk toolchain download-component
+# MetalToolchain` unconditionally, on every metallib path (build, test,
+# test-integration, smoke, preflight). That replaces the old swift-mk preflight
+# rail, whose `xcrun --find metal` check false-passed when the binary was present
+# but the toolchain component was not.
 SWIFT_BUILD_CMD = $(LMD_DEV) build $(CONFIG)
 SWIFT_TEST_CMD = $(LMD_DEV) test
 SWIFT_CLEAN_CMD = $(LMD_DEV) clean
