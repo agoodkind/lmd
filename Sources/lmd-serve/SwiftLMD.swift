@@ -646,17 +646,23 @@ struct SwiftLMD {
 
     // Battery throttle: graded levels with a single wide release. `mild` is a
     // plain band that slows embeddings while charge sits in LMD_BATTERY_MILD_PCT
-    // (default 35) down to LMD_BATTERY_THROTTLE_PCT (default 20). `hard` is the
-    // stop: at LMD_BATTERY_THROTTLE_PCT or below it refuses new chat and
-    // embedding requests, and it holds until charge recovers to
-    // LMD_BATTERY_RESUME_PCT (default 80). Mirrors the memory-pressure monitor.
+    // (default 35) down to LMD_BATTERY_THROTTLE_PCT (default 20). Battery-driven
+    // `hard` is the stop: at LMD_BATTERY_THROTTLE_PCT or below it refuses new
+    // chat and embedding requests, and it holds until charge recovers to
+    // LMD_BATTERY_RESUME_PCT (default 80). Low Power Mode also forces `hard`,
+    // even at high charge, and releasing Low Power Mode falls back to the
+    // battery-derived level instead of using the battery resume hold. Mirrors the
+    // memory-pressure monitor.
     let powerConfig = PowerMonitor.Config(
       engagePct: config.batteryThrottlePct,
       mildEngagePct: config.batteryMildPct,
       resumePct: config.batteryResumePct
     )
     let powerMonitor = PowerMonitor(config: powerConfig) {
-      Battery.read().percent
+      PowerMonitor.Reading(
+        percent: Battery.read().percent,
+        isLowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled
+      )
     }
     powerMonitor.setOnChange { level in
       let throttle: PowerThrottleLevel
@@ -671,7 +677,13 @@ struct SwiftLMD {
       Task { await router.applyPowerThrottle(throttle) }
     }
     powerMonitor.start()
-    _ = powerMonitor
+    let powerStateObserver = NotificationCenter.default.addObserver(
+      of: ProcessInfo.processInfo,
+      for: .powerStateDidChange
+    ) { (_: ProcessInfo.PowerStateDidChangeMessage) in
+      powerMonitor.reevaluate()
+    }
+    _ = powerStateObserver
 
     // XPC control surface for first-party Swift clients (lmd CLI,
     // lmd-tui). Shares `state` with the HTTP routes so both transports

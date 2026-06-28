@@ -25,88 +25,179 @@ final class PowerMonitorLevelTests: XCTestCase {
     )
   }
 
+  private func reading(
+    percent: Int,
+    isLowPowerModeEnabled: Bool = false
+  ) -> PowerMonitor.Reading {
+    PowerMonitor.Reading(
+      percent: percent,
+      isLowPowerModeEnabled: isLowPowerModeEnabled
+    )
+  }
+
   func testHardEngagesAtOrBelowEngageThreshold() {
-    expect(PowerMonitor.nextLevel(percent: 20, config: self.config(), previous: .none)) == .hard
-    expect(PowerMonitor.nextLevel(percent: 12, config: self.config(), previous: .none)) == .hard
+    expect(
+      PowerMonitor.nextState(
+        reading: self.reading(percent: 20),
+        config: self.config(),
+        previous: .steady
+      )
+    ) == .init(level: .hard, hardReason: .battery)
+    expect(
+      PowerMonitor.nextState(
+        reading: self.reading(percent: 12),
+        config: self.config(),
+        previous: .steady
+      )
+    ) == .init(level: .hard, hardReason: .battery)
   }
 
   func testMildEngagesInsideTheBand() {
-    expect(PowerMonitor.nextLevel(percent: 35, config: self.config(), previous: .none)) == .mild
-    expect(PowerMonitor.nextLevel(percent: 30, config: self.config(), previous: .none)) == .mild
-    expect(PowerMonitor.nextLevel(percent: 21, config: self.config(), previous: .none)) == .mild
+    expect(
+      PowerMonitor.nextState(
+        reading: self.reading(percent: 35),
+        config: self.config(),
+        previous: .steady
+      )
+    ) == .init(level: .mild, hardReason: nil)
+    expect(
+      PowerMonitor.nextState(
+        reading: self.reading(percent: 30),
+        config: self.config(),
+        previous: .steady
+      )
+    ) == .init(level: .mild, hardReason: nil)
+    expect(
+      PowerMonitor.nextState(
+        reading: self.reading(percent: 21),
+        config: self.config(),
+        previous: .steady
+      )
+    ) == .init(level: .mild, hardReason: nil)
   }
 
   func testNoneAboveMildThreshold() {
-    expect(PowerMonitor.nextLevel(percent: 36, config: self.config(), previous: .none))
-      == PowerMonitor.Level.none
-    expect(PowerMonitor.nextLevel(percent: 50, config: self.config(), previous: .none))
-      == PowerMonitor.Level.none
+    expect(
+      PowerMonitor.nextState(
+        reading: self.reading(percent: 36),
+        config: self.config(),
+        previous: .steady
+      )
+    ) == .steady
+    expect(
+      PowerMonitor.nextState(
+        reading: self.reading(percent: 50),
+        config: self.config(),
+        previous: .steady
+      )
+    ) == .steady
   }
 
   func testMildDoesNotHold() {
-    // mild has no memory: above the mild threshold it turns off immediately.
-    expect(PowerMonitor.nextLevel(percent: 36, config: self.config(), previous: .mild))
-      == PowerMonitor.Level.none
-    expect(PowerMonitor.nextLevel(percent: 50, config: self.config(), previous: .mild))
-      == PowerMonitor.Level.none
+    expect(
+      PowerMonitor.nextState(
+        reading: self.reading(percent: 36),
+        config: self.config(),
+        previous: .init(level: .mild, hardReason: nil)
+      )
+    ) == .steady
+    expect(
+      PowerMonitor.nextState(
+        reading: self.reading(percent: 50),
+        config: self.config(),
+        previous: .init(level: .mild, hardReason: nil)
+      )
+    ) == .steady
   }
 
-  func testHardHoldsThroughTheBandWhileRecharging() {
-    // Engaged at 20, then charging climbs through the band: stays hard until 80.
-    var level = PowerMonitor.Level.hard
+  func testBatteryHardHoldsThroughTheBandWhileRecharging() {
+    var state = PowerMonitor.State(level: .hard, hardReason: .battery)
     for percent in stride(from: 21, through: 79, by: 1) {
-      level = PowerMonitor.nextLevel(percent: percent, config: self.config(), previous: level)
-      expect(level) == .hard
+      state = PowerMonitor.nextState(
+        reading: self.reading(percent: percent),
+        config: self.config(),
+        previous: state
+      )
+      expect(state) == .init(level: .hard, hardReason: .battery)
     }
-    level = PowerMonitor.nextLevel(percent: 80, config: self.config(), previous: level)
-    expect(level) == PowerMonitor.Level.none
+    state = PowerMonitor.nextState(
+      reading: self.reading(percent: 80),
+      config: self.config(),
+      previous: state
+    )
+    expect(state) == .steady
   }
 
-  func testHardHoldOverridesMild() {
-    // While hard is held, a charge inside the mild band stays hard, not mild.
-    expect(PowerMonitor.nextLevel(percent: 30, config: self.config(), previous: .hard)) == .hard
-    expect(PowerMonitor.nextLevel(percent: 25, config: self.config(), previous: .hard)) == .hard
-  }
-
-  func testReleasesAtOrAboveResumeThreshold() {
-    expect(PowerMonitor.nextLevel(percent: 80, config: self.config(), previous: .hard))
-      == PowerMonitor.Level.none
-    expect(PowerMonitor.nextLevel(percent: 95, config: self.config(), previous: .hard))
-      == PowerMonitor.Level.none
+  func testBatteryHardHoldOverridesMild() {
+    expect(
+      PowerMonitor.nextState(
+        reading: self.reading(percent: 30),
+        config: self.config(),
+        previous: .init(level: .hard, hardReason: .battery)
+      )
+    ) == .init(level: .hard, hardReason: .battery)
+    expect(
+      PowerMonitor.nextState(
+        reading: self.reading(percent: 25),
+        config: self.config(),
+        previous: .init(level: .hard, hardReason: .battery)
+      )
+    ) == .init(level: .hard, hardReason: .battery)
   }
 
   func testDrainingEscalatesNoneToMildToHard() {
-    var level = PowerMonitor.Level.none
+    var state = PowerMonitor.State.steady
     for percent in stride(from: 79, through: 36, by: -1) {
-      level = PowerMonitor.nextLevel(percent: percent, config: self.config(), previous: level)
-      expect(level) == PowerMonitor.Level.none
+      state = PowerMonitor.nextState(
+        reading: self.reading(percent: percent),
+        config: self.config(),
+        previous: state
+      )
+      expect(state) == .steady
     }
     for percent in stride(from: 35, through: 21, by: -1) {
-      level = PowerMonitor.nextLevel(percent: percent, config: self.config(), previous: level)
-      expect(level) == .mild
+      state = PowerMonitor.nextState(
+        reading: self.reading(percent: percent),
+        config: self.config(),
+        previous: state
+      )
+      expect(state) == .init(level: .mild, hardReason: nil)
     }
-    level = PowerMonitor.nextLevel(percent: 20, config: self.config(), previous: level)
-    expect(level) == .hard
+    state = PowerMonitor.nextState(
+      reading: self.reading(percent: 20),
+      config: self.config(),
+      previous: state
+    )
+    expect(state) == .init(level: .hard, hardReason: .battery)
   }
 
-  func testNoFlapHoveringAtEngageThreshold() {
-    // Once hard engages at 20, hovering 20/21/22 stays hard until 80.
-    var level = PowerMonitor.Level.none
-    for percent in [20, 21, 20, 22, 21, 20] {
-      level = PowerMonitor.nextLevel(percent: percent, config: self.config(), previous: level)
-    }
-    expect(level) == .hard
+  func testLowPowerModeForcesHardAtHighBattery() {
+    let state = PowerMonitor.nextState(
+      reading: self.reading(percent: 90, isLowPowerModeEnabled: true),
+      config: self.config(),
+      previous: .steady
+    )
+    expect(state) == .init(level: .hard, hardReason: .lowPowerMode)
   }
 
-  func testMildFollowsLiveChargeAtItsEdge() {
-    // mild is a plain band by design, so it toggles at the 35% edge.
-    var level = PowerMonitor.Level.none
-    level = PowerMonitor.nextLevel(percent: 36, config: self.config(), previous: level)
-    expect(level) == PowerMonitor.Level.none
-    level = PowerMonitor.nextLevel(percent: 35, config: self.config(), previous: level)
-    expect(level) == .mild
-    level = PowerMonitor.nextLevel(percent: 36, config: self.config(), previous: level)
-    expect(level) == PowerMonitor.Level.none
+  func testTurningOffLowPowerModeFallsBackToBatteryDerivedLevel() {
+    let previous = PowerMonitor.State(level: .hard, hardReason: .lowPowerMode)
+    let state = PowerMonitor.nextState(
+      reading: self.reading(percent: 50, isLowPowerModeEnabled: false),
+      config: self.config(),
+      previous: previous
+    )
+    expect(state) == .steady
+  }
+
+  func testTurningOffLowPowerModeFallsBackToMildWhenBatteryStillLow() {
+    let previous = PowerMonitor.State(level: .hard, hardReason: .lowPowerMode)
+    let state = PowerMonitor.nextState(
+      reading: self.reading(percent: 30, isLowPowerModeEnabled: false),
+      config: self.config(),
+      previous: previous
+    )
+    expect(state) == .init(level: .mild, hardReason: nil)
   }
 
   func testDisabledWhenEngageIsZero() {
