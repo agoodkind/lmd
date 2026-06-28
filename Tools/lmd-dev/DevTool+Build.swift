@@ -35,10 +35,59 @@ extension DevTool {
   /// reads exclusively from that staging directory and does not need to know
   /// about either build system.
   func build(configuration: String) throws {
-    try buildSwiftPackage(configuration: configuration)
-    try buildMetallib(configuration: configuration)
-    try buildNaxAotLibraries(configuration: configuration)
-    try stageBuildArtifacts(products: productBinaries, configuration: configuration)
+    // Under `make` (or any live swift-mk gate ancestor), the existing GateProof
+    // guards in the SwiftPM build steps authorize the compile, so run the build
+    // directly. With no such ancestor (a direct `lmd-dev build`), run swift-mk's
+    // hard lint gate in-process through GatedBuild.run and compile under the minted
+    // receipt instead, so a decoupled build still gates without a make ancestor.
+    if GateProof.isCurrentlyGated() {
+      try buildSwiftPackage(configuration: configuration)
+      try buildMetallib(configuration: configuration)
+      try buildNaxAotLibraries(configuration: configuration)
+      try stageBuildArtifacts(products: productBinaries, configuration: configuration)
+    } else {
+      try buildDecoupled(configuration: configuration)
+    }
+  }
+
+  /// Build with no `make`/`swift-mk` ancestor by running swift-mk's hard lint gate
+  /// in-process, then compiling under the receipt the gate mints. lmd declares no
+  /// generate, dead-code coverage, or log-audit command in its Makefile, so the gate
+  /// runs with no hooks and its dead-code step is the package periphery scan; lmd
+  /// signing is post-build codesign, not an xcconfig override, so no signing options
+  /// are passed. The compile closure runs the same SwiftPM and metallib steps the
+  /// gated path runs, minus the per-step GateProof guards since the gate has already
+  /// passed in this process.
+  private func buildDecoupled(configuration: String) throws {
+    let request = GatedBuild.Request(entry: "lmd build \(configuration)") { receipt in
+      do {
+        try self.buildSwiftPackageWithoutGate(configuration: configuration)
+        try self.buildMetallib(configuration: configuration, receipt: receipt)
+        try self.buildNaxAotLibraries(configuration: configuration)
+        try self.stageBuildArtifacts(
+          products: productBinaries, configuration: configuration)
+        return 0
+      } catch {
+        Output.error("lmd decoupled compile failed: \(error)")
+        return 1
+      }
+    }
+    let status = GatedBuild.run(request)
+    guard status == 0 else {
+      throw ToolError.failure("gated build failed (status \(status))")
+    }
+  }
+
+  /// The SwiftPM build of every product without the GateProof guard, for the
+  /// decoupled path where `GatedBuild.run` has already run the hard gate in-process
+  /// and minted the receipt that authorizes this compile.
+  private func buildSwiftPackageWithoutGate(configuration: String) throws {
+    Output.debug("buildSwiftPackageWithoutGate configuration=\(configuration)")
+    try runPassthrough(
+      "swift",
+      ["build", "-c", swiftPackageConfiguration(configuration)],
+      environment: buildEnvironment()
+    )
   }
 
   /// Build a single product binary plus the metallib. Used by smoke targets

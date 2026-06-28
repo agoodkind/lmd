@@ -10,8 +10,7 @@
 //  (Hummingbird, async-http-client, swift-nio, swift-service-lifecycle)
 //  lands under the shared subsystem.
 //
-//  This is the ONLY file in the project that may `import Logging`.
-//  Enforced by `make log-audit`.
+//  This file owns the bridge from swift-log handlers to os.Logger.
 //
 
 import Foundation
