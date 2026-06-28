@@ -81,7 +81,7 @@ extension DevTool {
   /// The SwiftPM build of every product without the GateProof guard, for the
   /// decoupled path where `GatedBuild.run` has already run the hard gate in-process
   /// and minted the receipt that authorizes this compile.
-  func buildSwiftPackageWithoutGate(configuration: String) throws {
+  private func buildSwiftPackageWithoutGate(configuration: String) throws {
     Output.debug("buildSwiftPackageWithoutGate configuration=\(configuration)")
     try runPassthrough(
       "swift",

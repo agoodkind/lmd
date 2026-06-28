@@ -30,6 +30,12 @@ extension DevTool {
     // which would have no make ancestor and be refused. The make path keeps shelling
     // swift-mk, authorized by its live gate ancestor.
     if let receipt {
+      // Match xcodeBuildEnvironment(): xcodebuild's compiler probe execs the whole
+      // CC value as one path, so a two-word ccache CC such as "ccache /usr/bin/clang"
+      // breaks it. The in-process Toolchain.build inherits this process's environment,
+      // so clear CC/CXX here the same way the shelled make path does.
+      unsetenv("CC")
+      unsetenv("CXX")
       let request = Toolchain.Request(
         generator: .xcodegen,
         scheme: "mlx-swift_Cmlx",
