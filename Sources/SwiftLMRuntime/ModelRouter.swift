@@ -108,9 +108,9 @@ private enum WaitOutcome: Sendable, Equatable {
 /// on a specific model or for memory to admit a load. Lives only in
 /// `ModelRouter`'s actor-isolated state. Resumed with a typed outcome so the
 /// caller can distinguish a normal retry from timeout, teardown, or a power-stop
-/// cancellation. `priority` is the requestor's load priority, used to wake
-/// admission waiters highest first; concurrency-slot waiters share a single
-/// default and wake FIFO.
+/// cancellation. `priority` is the requestor's load priority, used as a
+/// best-effort resume hint for admission waiters; concurrency-slot waiters share
+/// a single default and wake FIFO.
 private final class ConcurrencyWaiter {
   let id: UUID
   let priority: Int
@@ -1006,9 +1006,10 @@ public actor ModelRouter {
       priority: priority)
   }
 
-  /// Wake every parked admission waiter, highest priority first and FIFO within a
-  /// priority, after memory frees. Each retries its route and re-parks if it still
-  /// cannot be admitted.
+  /// Wake every parked admission waiter after memory frees. Higher-priority
+  /// waiters are resumed first, with FIFO order inside a priority, but Swift
+  /// concurrency does not guarantee that resumed tasks execute in that order.
+  /// Each request retries its route and re-parks if it still cannot be admitted.
   private func wakeAdmissionWaiters() {
     guard let waiters = concurrencyWaiters.removeValue(forKey: Self.admissionWaiterKey),
       !waiters.isEmpty
@@ -1126,8 +1127,9 @@ public actor ModelRouter {
 
   /// The single teardown path: remove `modelID` and release everything parked
   /// behind it. Drains queued concurrency waiters so none hangs, clears any
-  /// draining flag, and wakes admission waiters highest-priority-first because
-  /// memory just freed (a loaded model's RSS or a loading model's reservation).
+  /// draining flag, and resumes admission waiters because memory just freed
+  /// (a loaded model's RSS or a loading model's reservation). The resume order
+  /// is only a best-effort priority hint.
   /// Returns the removed state, or nil if it was already gone; the caller emits
   /// the lifecycle event for why it left.
   @discardableResult
