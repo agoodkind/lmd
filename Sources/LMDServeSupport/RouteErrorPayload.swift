@@ -1,5 +1,5 @@
 //
-//  RouteErrorMapping.swift
+//  RouteErrorPayload.swift
 //  LMDServeSupport
 //
 //  Created by Alexander Goodkind <alex@goodkind.io> on 2026-06-26.

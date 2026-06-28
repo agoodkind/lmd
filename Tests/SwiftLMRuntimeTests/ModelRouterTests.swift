@@ -688,7 +688,7 @@ final class ModelRouterTests: XCTestCase {
 
     do {
       _ = try await router.routeAndBegin(desc("overflow", 50))
-      fail("expected the overflow request to surface insufficientHeadroom immediately")
+      fail("expected the overflow request to surface insufficientHeadroom")
     } catch let error as ModelRouter.RouteError {
       guard case .insufficientHeadroom = error else {
         fail("expected insufficientHeadroom, got \(error)")
