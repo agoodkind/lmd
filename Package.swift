@@ -183,6 +183,7 @@ let package = Package(
         "AppLogger",
         "SwiftLMCore",
         "SwiftLMBackend",
+        "SwiftLMControl",
         "SwiftLMRuntime",
         "SwiftLMTrace",
         "SwiftLMMetrics",

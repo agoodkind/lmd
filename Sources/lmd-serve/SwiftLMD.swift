@@ -331,8 +331,9 @@ func openAIModelId(_ m: ModelDescriptor) -> String {
 
 private let bytesPerGigabyte = 1_073_741_824.0
 
-/// HTTP 503 status used for retriable capacity and yielding responses.
-private let httpStatusServiceUnavailable = 503
+private let httpStatusBadRequest = 400
+private let httpStatusConflict = 409
+private let httpStatusTooManyRequests = 429
 
 func idleCutoff(
   for candidate: EvictionCandidate,
@@ -433,12 +434,19 @@ func performModelLoad(
   }
 
   let startedAt = Date()
-  if descriptor.kind == .embedding {
-    _ = try await state.router.routeEmbeddingAndBegin(descriptor, loadConfig: loadConfig)
-    await state.router.embeddingRequestDone(modelID: descriptor.id)
-  } else {
-    _ = try await state.router.routeAndBegin(descriptor, loadConfig: loadConfig)
-    await state.router.requestDone(modelID: descriptor.id)
+  do {
+    if descriptor.kind == .embedding {
+      _ = try await state.router.routeEmbeddingAndBegin(descriptor, loadConfig: loadConfig)
+      await state.router.embeddingRequestDone(modelID: descriptor.id)
+    } else {
+      _ = try await state.router.routeAndBegin(descriptor, loadConfig: loadConfig)
+      await state.router.requestDone(modelID: descriptor.id)
+    }
+  } catch let error as ModelRouter.RouteError {
+    if case let .powerPaused(reason) = error {
+      throw brokerServicePausedError(reason: reason)
+    }
+    throw error
   }
   state.aliasStore.set(loadConfig.identifier, descriptor: descriptor)
   return ModelLoadResponse(
@@ -666,15 +674,22 @@ struct SwiftLMD {
     }
     powerMonitor.setOnChange { level in
       let throttle: PowerThrottleLevel
+      let haltReason: String
       switch level {
       case .none:
         throttle = .none
+        haltReason = "battery"
       case .mild:
         throttle = .mild
+        haltReason = "battery"
       case .hard:
         throttle = .hard
+        haltReason =
+          ProcessInfo.processInfo.isLowPowerModeEnabled
+          ? "low_power_mode"
+          : "battery"
       }
-      Task { await router.applyPowerThrottle(throttle) }
+      Task { await router.applyPowerThrottle(throttle, haltReason: haltReason) }
     }
     powerMonitor.start()
     let powerStateObserver = NotificationCenter.default.addObserver(
@@ -955,7 +970,15 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
         body: .init(byteBuffer: ByteBuffer(data: data))
       )
     } catch let error as BrokerError {
-      let status: HTTPResponse.Status = error.kind == .modelNotFound ? .notFound : .badRequest
+      let status: HTTPResponse.Status
+      switch error.kind {
+      case .modelNotFound:
+        status = .notFound
+      case .servicePaused:
+        status = .serviceUnavailable
+      default:
+        status = .badRequest
+      }
       return errorResponse(status: status, message: error.message, type: error.kind.rawValue)
     } catch {
       return errorResponse(
@@ -1044,7 +1067,15 @@ func registerRoutes(on router: Router<BasicRequestContext>, state: BrokerState) 
         body: .init(byteBuffer: ByteBuffer(data: data))
       )
     } catch let error as BrokerError {
-      let status: HTTPResponse.Status = error.kind == .modelNotFound ? .notFound : .badRequest
+      let status: HTTPResponse.Status
+      switch error.kind {
+      case .modelNotFound:
+        status = .notFound
+      case .servicePaused:
+        status = .serviceUnavailable
+      default:
+        status = .badRequest
+      }
       return errorResponse(status: status, message: error.message, type: error.kind.rawValue)
     } catch {
       return errorResponse(
@@ -1177,56 +1208,19 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
         "error": String(describing: err),
       ]
     )
-    switch err {
-    case .insufficientHeadroom:
-      return errorResponse(
-        status: .serviceUnavailable,
-        message: "not enough free memory to load embedding model while keeping the reserve",
-        type: "capacity_exceeded"
-      )
-    case .backendLaunchFailed:
-      return errorResponse(
-        status: .serviceUnavailable,
-        message: "failed to load embedding model",
-        type: "launch_failed"
-      )
-    case .concurrencyLimitExceeded(_, let limit):
-      return errorResponse(
-        status: .tooManyRequests,
-        message: "embedding concurrency limit reached (\(limit))",
-        type: "capacity_exceeded"
-      )
-    case .loadConfigConflict:
-      return errorResponse(
-        status: .conflict,
-        message: "embedding model is busy with a different load configuration",
-        type: "load_config_conflict"
-      )
-    case .wrongKindForChat:
-      return errorResponse(
-        status: .badRequest,
-        message: "model is an embedding model; use POST /v1/embeddings",
-        type: "invalid_request_error"
-      )
-    case .wrongKindForEmbedding:
-      return errorResponse(
-        status: .badRequest,
-        message: "model is not an embedding model",
-        type: "invalid_request_error"
-      )
-    case .powerPaused(let reason):
-      return errorResponse(
-        status: .serviceUnavailable,
-        message: "service paused to preserve battery (\(reason))",
-        type: "service_paused"
-      )
-    case .modelYielding:
-      return errorResponse(
-        status: .serviceUnavailable,
-        message: "embedding model yielded memory to a higher-priority load; retry shortly",
-        type: "model_yielding"
-      )
+    let payload = embeddingRouteErrorPayload(err)
+    let status: HTTPResponse.Status
+    switch payload.statusCode {
+    case httpStatusBadRequest:
+      status = .badRequest
+    case httpStatusConflict:
+      status = .conflict
+    case httpStatusTooManyRequests:
+      status = .tooManyRequests
+    default:
+      status = .serviceUnavailable
     }
+    return errorResponse(status: status, message: payload.message, type: payload.type)
   }
 
   let routerInfo = await state.router.embeddingLoadInfo(modelID: descriptor.id)
@@ -1906,15 +1900,15 @@ private func videoRouteErrorResult(
   logContext: ChatProxyLogContext,
   traceContext: TraceContext
 ) -> BackendChatResult {
-  let errorMessage = "video chat backend failed: \(error)"
+  let payload = videoRouteErrorPayload(error)
   logChatRequestFailed(
     logContext,
     upstreamPort: nil,
     upstreamPath: request.endpoint.path,
-    statusCode: 503,
+    statusCode: payload.statusCode,
     stage: "route",
-    errorType: "video_backend_failed",
-    errorMessage: errorMessage
+    errorType: payload.type,
+    errorMessage: payload.message
   )
   BackendTrace.notice(
     phase: TracePhase.Broker.requestFailed.rawValue,
@@ -1924,14 +1918,14 @@ private func videoRouteErrorResult(
       for: logContext,
       additional: [
         "stage": "route",
-        "status_code": "503",
-        "error_type": "video_backend_failed",
+        "status_code": "\(payload.statusCode)",
+        "error_type": payload.type,
       ])
   )
   return backendErrorResult(
-    statusCode: 503,
-    message: errorMessage,
-    type: "video_backend_failed"
+    statusCode: payload.statusCode,
+    message: payload.message,
+    type: payload.type
   )
 }
 
@@ -1966,93 +1960,20 @@ private func xpcChatResult(
       requestID: logContext.requestID
     )
   } catch let err as ModelRouter.RouteError {
-    let statusCode: Int
-    let errorType: String
-    let errorMessage: String
-    let result: BackendChatResult
-    switch err {
-    case .insufficientHeadroom:
-      statusCode = 503
-      errorType = "capacity_exceeded"
-      errorMessage =
-        "not enough free memory to load \(prepared.model.displayName) while keeping the reserve"
-      result = backendErrorResult(
-        statusCode: 503,
-        message: errorMessage,
-        type: "capacity_exceeded"
-      )
-    case .backendLaunchFailed:
-      statusCode = 503
-      errorType = "launch_failed"
-      errorMessage = "failed to launch model \(prepared.model.displayName)"
-      result = backendErrorResult(
-        statusCode: 503,
-        message: errorMessage,
-        type: "launch_failed"
-      )
-    case .concurrencyLimitExceeded(_, let limit):
-      statusCode = 429
-      errorType = "capacity_exceeded"
-      errorMessage = "chat concurrency limit reached (\(limit))"
-      result = backendErrorResult(
-        statusCode: statusCode,
-        message: errorMessage,
-        type: errorType
-      )
-    case .loadConfigConflict:
-      statusCode = 409
-      errorType = "load_config_conflict"
-      errorMessage = "model is busy with a different load configuration"
-      result = backendErrorResult(
-        statusCode: statusCode,
-        message: errorMessage,
-        type: errorType
-      )
-    case .wrongKindForChat:
-      statusCode = 400
-      errorType = "invalid_request_error"
-      errorMessage = "model is an embedding model; use POST /v1/embeddings"
-      result = backendErrorResult(
-        statusCode: 400,
-        message: errorMessage,
-        type: "invalid_request_error"
-      )
-    case .wrongKindForEmbedding:
-      statusCode = 500
-      errorType = "internal_error"
-      errorMessage = "router configuration error"
-      result = backendErrorResult(
-        statusCode: 500,
-        message: errorMessage,
-        type: "internal_error"
-      )
-    case .powerPaused(let reason):
-      statusCode = 503
-      errorType = "service_paused"
-      errorMessage = "service paused to preserve battery (\(reason))"
-      result = backendErrorResult(
-        statusCode: 503,
-        message: errorMessage,
-        type: "service_paused"
-      )
-    case .modelYielding:
-      statusCode = httpStatusServiceUnavailable
-      errorType = "model_yielding"
-      errorMessage = "model yielded memory to a higher-priority load; retry shortly"
-      result = backendErrorResult(
-        statusCode: statusCode,
-        message: errorMessage,
-        type: "model_yielding"
-      )
-    }
+    let payload = chatRouteErrorPayload(err, modelDisplayName: prepared.model.displayName)
+    let result = backendErrorResult(
+      statusCode: payload.statusCode,
+      message: payload.message,
+      type: payload.type
+    )
     logChatRequestFailed(
       logContext,
       upstreamPort: nil,
       upstreamPath: prepared.endpoint.path,
-      statusCode: statusCode,
+      statusCode: payload.statusCode,
       stage: "route",
-      errorType: errorType,
-      errorMessage: "\(errorMessage): \(err)"
+      errorType: payload.type,
+      errorMessage: "\(payload.message): \(err)"
     )
     BackendTrace.notice(
       phase: TracePhase.Broker.requestFailed.rawValue,
@@ -2062,8 +1983,8 @@ private func xpcChatResult(
         for: logContext,
         additional: [
           "stage": "route",
-          "status_code": "\(statusCode)",
-          "error_type": errorType,
+          "status_code": "\(payload.statusCode)",
+          "error_type": payload.type,
         ])
     )
     return result
