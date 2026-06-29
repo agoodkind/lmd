@@ -311,8 +311,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swift-otel/swift-otel.git",
       "state" : {
-        "revision" : "636720d6dd4271ec1dea0efca70708d43376dec9",
-        "version" : "1.3.0"
+        "revision" : "599309ecc03d27f3331bb096c5bdcb4839b3d187",
+        "version" : "1.4.0"
       }
     },
     {
