@@ -200,10 +200,10 @@ extension DevTool {
         configuration: configuration,
         environment: ["LMD_BINARY_DIR": releaseBuildDirectory().path]),
       buildTests: true,
-      skipBuild: true,
-      afterBuildTests: { [self] in
-        stageMetallibBetweenBuildAndTest(configuration: configuration)
-      })
+      skipBuild: true
+    ) { [self] in
+      stageMetallibBetweenBuildAndTest(configuration: configuration)
+    }
     let status = SwiftPM.test(request)
     guard status == 0 else {
       throw ToolError.failure("swift test failed (status \(status))")
@@ -239,10 +239,10 @@ extension DevTool {
       package: swiftPackageRequest(configuration: configuration, environment: environment),
       buildTests: true,
       skipBuild: true,
-      filter: "IntegrationTests.(EmbeddingsRouteTests|XPCBrokerTests|HostSpawnTests)",
-      afterBuildTests: { [self] in
-        stageMetallibBetweenBuildAndTest(configuration: configuration)
-      })
+      filter: "IntegrationTests.(EmbeddingsRouteTests|XPCBrokerTests|HostSpawnTests)"
+    ) { [self] in
+      stageMetallibBetweenBuildAndTest(configuration: configuration)
+    }
     let status = SwiftPM.test(request)
     guard status == 0 else {
       throw ToolError.failure("swift test failed (status \(status))")
@@ -276,10 +276,10 @@ extension DevTool {
         ]),
       buildTests: true,
       skipBuild: true,
-      filter: "SwiftLMTUITests",
-      afterBuildTests: { [self] in
-        stageMetallibBetweenBuildAndTest(configuration: configuration)
-      })
+      filter: "SwiftLMTUITests"
+    ) { [self] in
+      stageMetallibBetweenBuildAndTest(configuration: configuration)
+    }
     let status = SwiftPM.test(request)
     guard status == 0 else {
       throw ToolError.failure("swift test failed (status \(status))")
