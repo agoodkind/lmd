@@ -180,6 +180,11 @@ extension DevTool {
 
   func test() throws {
     Output.debug("test")
+    // Fail fast and clearly when invoked without a swift-mk gate ancestor, before the
+    // metallib build below shells `swift-mk toolchain build` and fails opaquely.
+    if let status = GateProof.refusal(entry: "lmd build") {
+      throw ToolError.failure("gate proof refused (status \(status))")
+    }
     // Run the suite via SwiftPM instead of `tuist test`. Tuist's static-framework
     // SPM integration fails to propagate internal C-target module maps (EventSource
     // -> async-http-client / swift-nio / _NumericsShims) on Xcode 26, which breaks
@@ -261,6 +266,11 @@ extension DevTool {
 
   func snapshotUpdate() throws {
     Output.debug("snapshotUpdate")
+    // Fail fast and clearly when invoked without a swift-mk gate ancestor, before the
+    // metallib build below shells `swift-mk toolchain build` and fails opaquely.
+    if let status = GateProof.refusal(entry: "lmd build") {
+      throw ToolError.failure("gate proof refused (status \(status))")
+    }
     // Same SwiftPM path as `test()`: `tuist test` breaks on Xcode 26's static-framework
     // SPM integration, and SwiftLMTUITests is a SwiftPM test target, so the snapshots
     // update via `swift test --filter` with SNAPSHOT_UPDATE=1. The metallib is built and
