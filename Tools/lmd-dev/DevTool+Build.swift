@@ -61,7 +61,7 @@ extension DevTool {
   private func buildDecoupled(configuration: String) throws {
     let request = GatedBuild.Request(entry: "lmd build \(configuration)") { receipt in
       do {
-        try self.buildSwiftPackageWithoutGate(configuration: configuration)
+        try self.buildSwiftPackageWithoutGate(configuration: configuration, receipt: receipt)
         try self.buildMetallib(configuration: configuration, receipt: receipt)
         try self.buildNaxAotLibraries(configuration: configuration)
         try self.stageBuildArtifacts(
@@ -81,13 +81,28 @@ extension DevTool {
   /// The SwiftPM build of every product without the GateProof guard, for the
   /// decoupled path where `GatedBuild.run` has already run the hard gate in-process
   /// and minted the receipt that authorizes this compile.
-  private func buildSwiftPackageWithoutGate(configuration: String) throws {
+  private func buildSwiftPackageWithoutGate(configuration: String, receipt: GateReceipt) throws {
     Output.debug("buildSwiftPackageWithoutGate configuration=\(configuration)")
-    try runPassthrough(
-      "swift",
-      ["build", "-c", swiftPackageConfiguration(configuration)],
-      environment: buildEnvironment()
-    )
+    let status = SwiftPM.build(
+      swiftPackageRequest(configuration: configuration), receipt: receipt)
+    guard status == 0 else {
+      throw ToolError.failure("swift build failed (status \(status))")
+    }
+  }
+
+  /// The SwiftPM request that routes a `swift build`/`swift test` through swift-mk's
+  /// `SwiftPM` chokepoint, so the build takes the per-worktree build lock (the same
+  /// `Tools/.build` two builds in one worktree otherwise collide on) and inherits the
+  /// shared SwiftPM cache flags the engine injects via `SWIFT_MK_SWIFTPM_CACHE_ARGS`.
+  private func swiftPackageRequest(
+    configuration: String,
+    product: String? = nil,
+    environment: [String: String] = [:]
+  ) -> SwiftPM.Request {
+    let resolved: SwiftPM.Configuration =
+      configuration.lowercased() == "release" ? .release : .debug
+    return SwiftPM.Request(
+      configuration: resolved, product: product, environment: environment)
   }
 
   /// Build a single product binary plus the metallib. Used by smoke targets
@@ -104,28 +119,21 @@ extension DevTool {
   /// SwiftPM's convention: `debug`, `release`).
   func buildSwiftPackage(configuration: String) throws {
     Output.debug("buildSwiftPackage configuration=\(configuration)")
-    if let status = GateProof.refusal(entry: "lmd build") {
-      throw ToolError.failure("gate proof refused (status \(status))")
+    let status = SwiftPM.build(swiftPackageRequest(configuration: configuration))
+    guard status == 0 else {
+      throw ToolError.failure("swift build failed (status \(status))")
     }
-    try runPassthrough(
-      "swift",
-      ["build", "-c", swiftPackageConfiguration(configuration)],
-      environment: buildEnvironment()
-    )
   }
 
   /// SwiftPM build of one product. Faster than `buildSwiftPackage` when the
   /// caller only needs a single binary.
   func buildSwiftPackageProduct(_ product: String, configuration: String) throws {
     Output.debug("buildSwiftPackageProduct product=\(product) configuration=\(configuration)")
-    if let status = GateProof.refusal(entry: "lmd build") {
-      throw ToolError.failure("gate proof refused (status \(status))")
+    let status = SwiftPM.build(
+      swiftPackageRequest(configuration: configuration, product: product))
+    guard status == 0 else {
+      throw ToolError.failure("swift build failed (status \(status))")
     }
-    try runPassthrough(
-      "swift",
-      ["build", "-c", swiftPackageConfiguration(configuration), "--product", product],
-      environment: buildEnvironment()
-    )
   }
 
   /// Copy SwiftPM binaries and the Xcode-built metallib into the single
@@ -151,30 +159,29 @@ extension DevTool {
     try stageCompatibilityLinks(in: staging)
     try stageRuntimeResources(for: configuration)
   }
-
-  /// Environment for `swift build` invocations. Merges the parent environment
-  /// with `CC` and `CXX` set to a `ccache`/`sccache` wrapper when one is
-  /// enabled. `swift build` word-splits these values when it execs the
-  /// compiler, so the two-word `"<cache> /usr/bin/clang"` form works there.
-  ///
-  /// This form is NOT safe for `xcodebuild`: its `CreateBuildDescription`
-  /// compiler probe execs the whole `CC` value as a single file path instead
-  /// of word-splitting it, so a two-word `CC` fails to launch with
-  /// "is not an executable file". `xcodeBuildEnvironment()` is used for that
-  /// path instead.
-  func buildEnvironment() -> [String: String] {
-    // CC/CXX arrive from swift-mk's gated build when SWIFT_MK_BUILD_CACHE is
-    // set, so this layer only passes the environment through. The Xcode build
-    // paths strip the two-word wrappers in xcodeBuildEnvironment().
-    ProcessInfo.processInfo.environment
-  }
 }
 
 // MARK: - Test
 
 extension DevTool {
+  /// Stage the metallib next to the SwiftPM test runners between `--build-tests` and the
+  /// test run. Returns false to fail the test gate rather than throwing out of the
+  /// `@Sendable` afterBuildTests closure the SwiftPM chokepoint holds one build lock
+  /// across.
+  private func stageMetallibBetweenBuildAndTest(configuration: String) -> Bool {
+    do {
+      try stageMetallibForSwiftTest(configuration: configuration)
+      return true
+    } catch {
+      Output.error("staging metallib for swift test failed: \(error)")
+      return false
+    }
+  }
+
   func test() throws {
     Output.debug("test")
+    // Fail fast and clearly when invoked without a swift-mk gate ancestor, before the
+    // metallib build below shells `swift-mk toolchain build` and fails opaquely.
     if let status = GateProof.refusal(entry: "lmd build") {
       throw ToolError.failure("gate proof refused (status \(status))")
     }
@@ -189,23 +196,23 @@ extension DevTool {
     // SwiftPM cannot compile the Metal shaders, so it never produces mlx-swift's
     // metallib and an MLX test crashes with "Failed to load the default metallib".
     // The metallib is built by xcodebuild (the same step the product build uses),
-    // then colocated next to the test runner where mlx's loader looks first, and the
-    // tests run with --skip-build so that staging is not wiped by a rebuild.
+    // then colocated next to the test runner where mlx's loader looks first, between
+    // `--build-tests` and the `--skip-build` test run inside the chokepoint's held lock.
     let configuration = "Debug"
     try buildMetallib(configuration: configuration)
-    var env = ProcessInfo.processInfo.environment
-    env["LMD_BINARY_DIR"] = releaseBuildDirectory().path
-    try runPassthrough(
-      "swift",
-      ["build", "--build-tests", "-c", swiftPackageConfiguration(configuration)],
-      environment: env
-    )
-    try stageMetallibForSwiftTest(configuration: configuration)
-    try runPassthrough(
-      "swift",
-      ["test", "--skip-build", "-c", swiftPackageConfiguration(configuration)],
-      environment: env
-    )
+    let request = SwiftPM.TestRequest(
+      package: swiftPackageRequest(
+        configuration: configuration,
+        environment: ["LMD_BINARY_DIR": releaseBuildDirectory().path]),
+      buildTests: true,
+      skipBuild: true
+    ) { [self] in
+      stageMetallibBetweenBuildAndTest(configuration: configuration)
+    }
+    let status = SwiftPM.test(request)
+    guard status == 0 else {
+      throw ToolError.failure("swift test failed (status \(status))")
+    }
   }
 
   /// Run the integration suite against the isolated launchd test daemon.
@@ -218,35 +225,33 @@ extension DevTool {
   /// runs them, then tears the daemon down whatever the outcome.
   func testIntegration() throws {
     Output.debug("testIntegration")
-    if let status = GateProof.refusal(entry: "lmd build") {
-      throw ToolError.failure("gate proof refused (status \(status))")
-    }
     let configuration = "Debug"
     try build(configuration: configuration)
-    var env = ProcessInfo.processInfo.environment
-    env["LMD_BINARY_DIR"] = releaseBuildDirectory().path
-    try runPassthrough(
-      "swift",
-      ["build", "--build-tests", "-c", swiftPackageConfiguration(configuration)],
-      environment: env
-    )
-    try stageMetallibForSwiftTest(configuration: configuration)
-
+    // The product binaries the daemon runs are built above, so bring the isolated
+    // :5401 daemon up before the test-build below and tear it down whatever the
+    // outcome. The metallib is staged next to the test runners between `--build-tests`
+    // and the `--skip-build` run inside the chokepoint's held lock.
     try testDaemonUp()
     defer { teardownTestDaemonAfterIntegration() }
-
-    env["LMD_INTEGRATION"] = "1"
-    env["LMD_XPC_USE_LAUNCHD_DAEMON"] = "1"
-    env["LMD_CONTROL_SERVICE"] = "io.goodkind.lmd.control.test"
-    env["LMD_TEST_BASE_URL"] = "http://localhost:5401"
-    try runPassthrough(
-      "swift",
-      [
-        "test", "--skip-build", "-c", swiftPackageConfiguration(configuration),
-        "--filter", "IntegrationTests.(EmbeddingsRouteTests|XPCBrokerTests|HostSpawnTests)",
-      ],
-      environment: env
-    )
+    let environment: [String: String] = [
+      "LMD_BINARY_DIR": releaseBuildDirectory().path,
+      "LMD_INTEGRATION": "1",
+      "LMD_XPC_USE_LAUNCHD_DAEMON": "1",
+      "LMD_CONTROL_SERVICE": "io.goodkind.lmd.control.test",
+      "LMD_TEST_BASE_URL": "http://localhost:5401",
+    ]
+    let request = SwiftPM.TestRequest(
+      package: swiftPackageRequest(configuration: configuration, environment: environment),
+      buildTests: true,
+      skipBuild: true,
+      filter: "IntegrationTests.(EmbeddingsRouteTests|XPCBrokerTests|HostSpawnTests)"
+    ) { [self] in
+      stageMetallibBetweenBuildAndTest(configuration: configuration)
+    }
+    let status = SwiftPM.test(request)
+    guard status == 0 else {
+      throw ToolError.failure("swift test failed (status \(status))")
+    }
   }
 
   /// Best-effort teardown of the isolated test daemon after the integration run,
@@ -261,6 +266,8 @@ extension DevTool {
 
   func snapshotUpdate() throws {
     Output.debug("snapshotUpdate")
+    // Fail fast and clearly when invoked without a swift-mk gate ancestor, before the
+    // metallib build below shells `swift-mk toolchain build` and fails opaquely.
     if let status = GateProof.refusal(entry: "lmd build") {
       throw ToolError.failure("gate proof refused (status \(status))")
     }
@@ -270,23 +277,23 @@ extension DevTool {
     // colocated first, the same as the regular test run.
     let configuration = "Debug"
     try buildMetallib(configuration: configuration)
-    var env = ProcessInfo.processInfo.environment
-    env["LMD_BINARY_DIR"] = releaseBuildDirectory().path
-    env["SNAPSHOT_UPDATE"] = "1"
-    try runPassthrough(
-      "swift",
-      ["build", "--build-tests", "-c", swiftPackageConfiguration(configuration)],
-      environment: env
-    )
-    try stageMetallibForSwiftTest(configuration: configuration)
-    try runPassthrough(
-      "swift",
-      [
-        "test", "--skip-build", "-c", swiftPackageConfiguration(configuration),
-        "--filter", "SwiftLMTUITests",
-      ],
-      environment: env
-    )
+    let request = SwiftPM.TestRequest(
+      package: swiftPackageRequest(
+        configuration: configuration,
+        environment: [
+          "LMD_BINARY_DIR": releaseBuildDirectory().path,
+          "SNAPSHOT_UPDATE": "1",
+        ]),
+      buildTests: true,
+      skipBuild: true,
+      filter: "SwiftLMTUITests"
+    ) { [self] in
+      stageMetallibBetweenBuildAndTest(configuration: configuration)
+    }
+    let status = SwiftPM.test(request)
+    guard status == 0 else {
+      throw ToolError.failure("swift test failed (status \(status))")
+    }
   }
 }
 

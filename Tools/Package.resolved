@@ -1,5 +1,5 @@
 {
-  "originHash" : "3e808d41a10e8ba61e4dae7188e84408e6ad8fe5290f91cc316cbf13ece0a6fa",
+  "originHash" : "fca2300b11c776f646e7f92e0aeb181e35418797ea0e98516222fedf18050c1f",
   "pins" : [
     {
       "identity" : "aexml",
@@ -169,6 +169,15 @@
       "state" : {
         "revision" : "92448c359f00ebe36ae97d3bd9086f13c7692b5a",
         "version" : "1.13.2"
+      }
+    },
+    {
+      "identity" : "swift-makefile",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/agoodkind/swift-makefile.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "6c41704fe55a558445360e8652a7c1596c7930e5"
       }
     },
     {
