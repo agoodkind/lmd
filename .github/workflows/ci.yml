@@ -18,15 +18,17 @@ jobs:
       brew-packages: ccache
       setup-target: preflight
       make-args: "CONFIG=Release SWIFT_MK_SWIFTPM_COMPILE_CACHE=auto SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED=YES SWIFT_MK_SWIFTPM_CACHE_DIAGNOSTICS=1"
+      # Probe-only: namespace the caches so the populated SwiftPM CAS store saves
+      # under a fresh key, and use the dependencies profile so the build bucket
+      # (.build products) is NOT cached. The warm rerun then has a cold .build but
+      # a warm CAS, the exact cross-runner replay scenario.
+      cache-profile: dependencies
+      cache-version: spm-probe-1
       # build signs the CLI binaries + MLX bundle via SWIFT_MK_SIGN_* (Makefile).
       import-signing-cert: true
       signing-identity-name: "Developer ID Application: Alex Goodkind (H3BMXM4W7H)"
       apple-team-id: H3BMXM4W7H
       extra-cache-paths: |
-        .build
-        Tuist/.build
-        Derived
-        Products/Build
         ~/Library/Caches/org.swift.swiftpm
         ~/Library/Caches/ccache
     secrets: inherit
