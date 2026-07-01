@@ -12,21 +12,25 @@ jobs:
   # The caller job id is the middle segment of every reusable-workflow status
   # check name (`CI / swift / build`).
   swift:
-    uses: agoodkind/swift-makefile/.github/workflows/_ci.yml@main
+    uses: agoodkind/swift-makefile/.github/workflows/_ci.yml@compile-cache-rolling-lmdprobe
     with:
       runner: macos-26
       brew-packages: ccache
       setup-target: preflight
-      make-args: "CONFIG=Release"
+      # Opt into the SwiftPM compile cache with diagnostics. The rolling compile bucket
+      # (in the probed swift-makefile branch) is what this run validates on a real build.
+      make-args: "CONFIG=Release SWIFT_MK_SWIFTPM_COMPILE_CACHE=auto SWIFT_MK_SWIFTPM_CACHE_DIAGNOSTICS=1"
+      # Probe-only: dependencies profile so the build bucket (.build products) is NOT
+      # cached, and a unique cache-version so the probe's caches never touch lmd main's.
+      # The warm rerun then has a cold .build but a warm compile cache, so a replay is
+      # the compile cache doing its job, not .build being restored.
+      cache-profile: dependencies
+      cache-version: rolling-probe-1
       # build signs the CLI binaries + MLX bundle via SWIFT_MK_SIGN_* (Makefile).
       import-signing-cert: true
       signing-identity-name: "Developer ID Application: Alex Goodkind (H3BMXM4W7H)"
       apple-team-id: H3BMXM4W7H
       extra-cache-paths: |
-        .build
-        Tuist/.build
-        Derived
-        Products/Build
         ~/Library/Caches/org.swift.swiftpm
         ~/Library/Caches/ccache
     secrets: inherit
