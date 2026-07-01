@@ -15,6 +15,10 @@ jobs:
     uses: agoodkind/swift-makefile/.github/workflows/_ci.yml@compile-cache-rolling-lmdprobe
     with:
       runner: macos-26
+      # Probe-only: the dependencies profile forces a cold .build, so the full lmd
+      # build exceeds the 30-minute default and gets cancelled before the post-job
+      # compile-cache save. Raise it so the cold run completes and saves the pile.
+      timeout-minutes: 90
       brew-packages: ccache
       setup-target: preflight
       # Opt into the SwiftPM compile cache with diagnostics. The rolling compile bucket
