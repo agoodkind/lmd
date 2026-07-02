@@ -17,7 +17,7 @@ jobs:
       runner: macos-26
       brew-packages: ccache
       setup-target: preflight
-      make-args: "CONFIG=Release"
+      make-args: "CONFIG=Release SWIFT_MK_SWIFTPM_CACHE_DIAGNOSTICS=1"
       # build signs the CLI binaries + MLX bundle via SWIFT_MK_SIGN_* (Makefile).
       import-signing-cert: true
       signing-identity-name: "Developer ID Application: Alex Goodkind (H3BMXM4W7H)"
