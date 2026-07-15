@@ -26,6 +26,7 @@ When something needs to change, edit the source of truth, not this file:
 | CI release pipeline (sign + notarize + tag + release) | `.github/workflows/release.yml` |
 | Active design notes | `plan/*.md` |
 | User-facing overview | `README.md` |
+| Using and observing a running lmd | `docs/operations.md` |
 
 If you find yourself enumerating targets, categories, or filenames in prose, stop and link to the source of truth instead.
 

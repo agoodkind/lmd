@@ -41,6 +41,8 @@ The broker starts running immediately and at every subsequent login. Requires Xc
 The broker on 5400 speaks the OpenAI API. Point Cursor, humanify, or
 anything else at `http://localhost:5400` and it just works.
 
+To use and observe a running lmd from another tool or agent, see [docs/operations.md](docs/operations.md).
+
 ## Video
 
 `POST /v1/chat/completions` may include OpenAI-style `video_url` content parts
@@ -74,7 +76,9 @@ Smoke test from the dispatcher: `lmd embed -h` then `lmd embed -m <id> -t "hello
 
 ## Observability
 
-Everything structured flows through `os.Logger` under subsystem `io.goodkind.lmd`:
+lmd exposes two planes. For runtime state (loaded models, in-flight work, GPU memory, request spans), read the HTTP endpoints on `localhost:5400`: `/swiftlmd/loaded`, `/swiftlmd/metrics`, and `/swiftlmd/traces`. To use and observe a running lmd, see [docs/operations.md](docs/operations.md); for the field-by-field reference, see [docs/metrics.md](docs/metrics.md).
+
+For a log narrative, everything structured flows through `os.Logger` under subsystem `io.goodkind.lmd`:
 
 ```
 # Live tail.
