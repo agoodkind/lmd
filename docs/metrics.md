@@ -120,6 +120,10 @@ a metrics route is served, from the router's live state. Labels: `source_id`.
 | `lmd_broker_allocated_bytes` | Total bytes the router accounts to loaded models. |
 | `lmd_broker_available_bytes` | Available system memory from the router's memory reading. |
 | `lmd_broker_memory_under_pressure` | `1` when the memory reading reports pressure, else `0`. |
+| `lmd_embed_resolved_cache_limit_bytes` | MLX allocator cache cap resolved for embedding backends (from `LMD_MLX_CACHE_LIMIT_GB`, or auto from free memory). |
+| `lmd_embed_resolved_slot_budget` | Embedding batch slot budget resolved for the loaded embedding model. |
+
+The two `lmd_embed_resolved_*` gauges carry `source_id: broker`, but they are stamped when an embedding host spawns and resolves its tuning, not on every metrics serve.
 
 ### Backend trace plane
 
@@ -136,9 +140,24 @@ Emitted by `SnapshotSink` as a side effect of recording trace events
 
 | Name | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `lmd_chat_time_to_first_token_seconds` | histogram | `model_id`, `model_kind` | Request start to first streamed token event (`Sources/lmd-model-host/ChatHost.swift`). |
-| `lmd_chat_inter_token_seconds` | histogram | `model_id`, `model_kind` | Gap between consecutive streamed token events. |
-| `lmd_tokens_total` | counter | `model_id`, `model_kind` | Tokens per completed request. For chat, the count of SSE token events the proxy observed (the child reports no structured usage). For video, `usage.totalTokens` from the backend (`Sources/LMDServeSupport/VideoChatRouting.swift`). |
+| `lmd_chat_time_to_first_token_seconds` | histogram | `model_id`, `model_kind`, `source_id` | Request start to first streamed token event (`Sources/lmd-model-host/ChatHost.swift`). |
+| `lmd_chat_inter_token_seconds` | histogram | `model_id`, `model_kind`, `source_id` | Gap between consecutive streamed token events. |
+| `lmd_tokens_total` | counter | `model_id`, `model_kind`, `source_id` | Tokens per completed request. For chat, the count of SSE token events the proxy observed (the child reports no structured usage). For video, `usage.totalTokens` from the backend (`Sources/LMDServeSupport/VideoChatRouting.swift`). |
+
+Every series carries `source_id`, since the sink stamps it on each stored series (see Sources and merging). The `model_id` and `model_kind` labels apply to model-scoped series only.
+
+### Embedding host
+
+Emitted by the embedding model host (`source_id: host:embedding:<path>`) as it batches and runs embedding requests. Labels: `source_id`.
+
+| Name | Type | Meaning |
+| --- | --- | --- |
+| `lmd_embed_batch_tokens_real` | histogram | Real (unpadded) token count per embedding batch. |
+| `lmd_embed_batch_tokens_padded` | histogram | Padded token count per embedding batch, after padding inputs up to the batch shape. |
+| `lmd_embed_padding_ratio` | histogram | Padding fraction of each batch, a wasted-work indicator. |
+| `lmd_embed_tokens_per_second` | histogram | Embedding throughput per batch. |
+| `lmd_embed_queue_depth` | gauge | Embedding requests waiting for a batch slot. |
+| `lmd_embed_queue_wait_seconds` | histogram | Time an embedding request waited before admission. |
 
 ## Trace phases
 
@@ -192,11 +211,23 @@ taken at one request's phase boundary can include memory held by another
 request's in-flight evaluation. Treat per-request attribution as approximate;
 treat `mlx_peak` as exact.
 
-Phase events also carry phase-specific attributes. The embedding tokenize
-phases attach `batch_size`, `max_seq_len`, `total_tokens`, and
-`padding_ratio`; request boundaries attach `transport` and `input_count`;
-completed request spans attach `outcome`, `dims`, and `vector_count`. Set
-`LMD_TRACE_DISABLE_MLX_SNAPSHOT=1` to force the memory fields to zero in
+Phase events also carry phase-specific attributes, and every event carries the
+emitting `backend_obj`, its `load_id`, and the log `level`. The rest group by
+where they appear:
+
+- **Broker request boundaries** attach `client_request_id`, `endpoint`,
+  `transport`, `model_path`, `request_bytes`, `response_bytes`, `status_code`,
+  `stream`, `bytes`, and `inflight`. The proxied chat hop also attaches
+  `upstream_path` and `upstream_port`.
+- **Embedding tokenize phases** attach `batch_size`, `max_seq_len`,
+  `total_tokens`, `padding_ratio`, `padded_slots`, `sub_batches`, and
+  `row_count`.
+- **Completed embedding spans** (`embedding.request`) attach `input_count`,
+  `outcome`, `dims`, `vector_count`, and `vectors`.
+- **Completed chat spans** (`chat.request`) attach `outcome`, `token_events`,
+  `status_code`, `response_bytes`, `content_type`, and `stream`.
+
+Set `LMD_TRACE_DISABLE_MLX_SNAPSHOT=1` to force the memory fields to zero in
 environments without Metal (see `docs/configuration.md`).
 
 ## Prometheus exposition
@@ -232,10 +263,35 @@ it, and callers guard the import with `#if canImport(SwiftLMMetricsOTel)`, so
 the export arm is absent from metallib-only builds. A missing or invalid
 endpoint degrades to no export rather than failing startup.
 
-## What this plane does not cover
+## Sensor samples
 
-Sensor time series (thermal, battery, power) are a separate artifact: the
-sampler writes `memory.jsonl` under `LMD_DATA_DIR`, described in `README.md`.
-Unified-log events under subsystem `io.goodkind.lmd` are the logging plane,
-not metrics; the `BackendTrace` category mirrors the trace events described
-here with the same phase strings and memory fields.
+Thermal, battery, and power time series are a separate plane from metrics and
+logs. The sampler writes one JSON object per line to `memory.jsonl` under
+`LMD_DATA_DIR`, every `LMD_SAMPLE_INTERVAL` seconds (see
+`docs/configuration.md`). Each sample
+(`Sources/SwiftLMMonitor/SensorSampler.swift`) carries:
+
+- **Identity and time**: `ts` (ISO 8601 UTC), `source` (`lmd-serve`).
+- **Thermal**: `cpu_temp_c`, `gpu_temp_c`.
+- **Power**: `cpu_power_w`, `gpu_power_w`, `ane_power_w`, `sys_power_w`,
+  `batt_watts_signed`.
+- **Battery**: `batt_pct`, `ac_state`, `power_source`.
+- **CPU and GPU load**: `cpu_pct`, `gpu_pct`, `load1`.
+- **Memory**: `ram_used_gb`, `pressure_free_pct`, `pages_free`, `pages_active`,
+  `pages_inactive`, `pages_wired`, `pages_compressed`, and the `vm_stat`
+  counters `pageouts`, `pageins`, `compressions`, `decompressions`.
+- **Swap**: `swap_used`, `swap_total`, `swap_files`.
+
+This artifact is not served over HTTP and is not part of the metrics snapshot.
+
+## Logging plane
+
+Unified-log events under subsystem `io.goodkind.lmd` are the logging plane, not
+metrics. Each source file logs under one PascalCase category (see `AGENTS.md`
+section 5), so a category names the emitting type: request routing under
+`Broker` and `ModelRouter`; host lifecycle under `ModelHost`, `HostListener`,
+`XPCModelServer`, `ChatHost`, and `EmbeddingHost`; sensor and power sampling
+under `SensorSampler` and `PowerMonitor`; and `OSSignposter` intervals under
+`Performance`. The `BackendTrace` category mirrors the trace events described
+here, with the same phase strings and memory fields. The enforced category list
+lives in `Tests/Fixtures/expected-categories.txt`.

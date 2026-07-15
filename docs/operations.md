@@ -70,6 +70,15 @@ For an OS-level cross-check of GPU activity, use macmon, or `sudo powermetrics -
 
 The field-by-field reference for every metric, phase, and trace attribute lives in [docs/metrics.md](metrics.md).
 
+## Export to a collector
+
+lmd can push its telemetry to external systems. Both are off by default:
+
+- **OpenTelemetry**: set `OTEL_EXPORTER_OTLP_ENDPOINT` to export metrics and per-request spans to an OTLP collector. Each process identifies as `service.name` (`lmd-serve` or `lmd-model-host`) with `service.instance.id` set to its metrics source.
+- **Prometheus**: set `LMD_ENABLE_PROMETHEUS_METRICS` (or `LMD_ENABLE_METRICS`) to serve Prometheus text at `GET /metrics`. Histograms render as summaries, not buckets.
+
+lmd also samples thermal, battery, and power to `memory.jsonl` under `LMD_DATA_DIR`. See [docs/metrics.md](metrics.md) for the export contracts and the sensor field set.
+
 ## Handle a refusal or slowdown
 
 Each state below has a cause and a recovery. Recognize the symptom, then apply the fix.
@@ -90,7 +99,7 @@ For a narrative of what lmd did, tail the unified log:
 log stream --subsystem io.goodkind.lmd --info
 ```
 
-The logs are the narrative plane, and the metrics endpoints above are the state plane. [README.md](../README.md) has more log recipes.
+Each source logs under a PascalCase category such as `Broker`, `ModelRouter`, or `BackendTrace`, so you can filter the stream by category. The logs are the narrative plane, and the metrics endpoints above are the state plane. [README.md](../README.md) has more log recipes.
 
 ## See Also
 
