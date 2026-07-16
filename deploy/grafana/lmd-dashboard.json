@@ -17,26 +17,27 @@
   },
   "panels": [
     {
-      "title": "Request rate (per kind)",
+      "title": "Completed request rate (per kind)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "sum by (kind, result) (rate(lmd_requests_total[1m]))",
-          "legendFormat": "{{kind}} {{result}}"
+          "expr": "sum by (model_kind) (rate(lmd_backend_trace_events_total{phase=\"request_completed\"}[1m]))",
+          "legendFormat": "{{model_kind}}"
         }
       ]
     },
     {
-      "title": "Time by phase (p95)",
+      "title": "Time by phase (avg)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, phase) (rate(lmd_phase_duration_seconds_bucket[5m])))",
-          "legendFormat": "{{phase}} p95"
+          "expr": "sum by (phase) (rate(lmd_backend_phase_duration_seconds_sum[5m])) / sum by (phase) (rate(lmd_backend_phase_duration_seconds_count[5m]))",
+          "legendFormat": "{{phase}} avg"
         }
       ]
     },
@@ -47,56 +48,36 @@
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "sum by (phase) (rate(lmd_phase_duration_seconds_sum[5m]))",
+          "expr": "sum by (phase) (rate(lmd_backend_phase_duration_seconds_sum[5m]))",
           "legendFormat": "{{phase}}"
         }
       ]
     },
     {
-      "title": "Request duration p50/p95",
+      "title": "Request duration (avg / max)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum by (le, kind) (rate(lmd_request_duration_seconds_bucket[5m])))",
-          "legendFormat": "{{kind}} p50"
+          "expr": "sum by (span) (rate(lmd_backend_request_duration_seconds_sum[5m])) / sum by (span) (rate(lmd_backend_request_duration_seconds_count[5m]))",
+          "legendFormat": "{{span}} avg"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le, kind) (rate(lmd_request_duration_seconds_bucket[5m])))",
-          "legendFormat": "{{kind}} p95"
+          "expr": "max by (span) (lmd_backend_request_duration_seconds_max)",
+          "legendFormat": "{{span}} max"
         }
       ]
     },
     {
-      "title": "GPU memory",
+      "title": "Models loaded",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-      "fieldConfig": { "defaults": { "unit": "bytes" } },
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [
-        { "expr": "lmd_gpu_active_bytes", "legendFormat": "active" },
-        { "expr": "lmd_gpu_cache_bytes", "legendFormat": "cache" },
-        { "expr": "lmd_gpu_peak_bytes", "legendFormat": "peak" }
+        { "expr": "lmd_broker_loaded_models", "legendFormat": "models loaded" }
       ]
-    },
-    {
-      "title": "In-flight requests + models loaded",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "targets": [
-        { "expr": "lmd_inflight_requests", "legendFormat": "inflight {{kind}}" },
-        { "expr": "lmd_models_loaded", "legendFormat": "models loaded" }
-      ]
-    },
-    {
-      "title": "GPU power (W)",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 16 },
-      "fieldConfig": { "defaults": { "unit": "watt" } },
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "targets": [{ "expr": "lmd_power_watts", "legendFormat": "system power" }]
     }
   ]
 }
