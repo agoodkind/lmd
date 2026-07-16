@@ -120,10 +120,15 @@ a metrics route is served, from the router's live state. Labels: `source_id`.
 | `lmd_broker_allocated_bytes` | Total bytes the router accounts to loaded models. |
 | `lmd_broker_available_bytes` | Available system memory from the router's memory reading. |
 | `lmd_broker_memory_under_pressure` | `1` when the memory reading reports pressure, else `0`. |
+
+### Embedding tuning gauges
+
+Resolved when an embedding host spawns and stamped on the broker source (`source_id: broker`). Unlike the broker gauges above, they are not refreshed on each metrics serve, so read them as the tuning in effect since the last embedding-host spawn, not live broker state.
+
+| Name | Meaning |
+| --- | --- |
 | `lmd_embed_resolved_cache_limit_bytes` | MLX allocator cache cap resolved for embedding backends (from `LMD_MLX_CACHE_LIMIT_GB`, or auto from free memory). |
 | `lmd_embed_resolved_slot_budget` | Embedding batch slot budget resolved for the loaded embedding model. |
-
-The two `lmd_embed_resolved_*` gauges carry `source_id: broker`, but they are stamped when an embedding host spawns and resolves its tuning, not on every metrics serve.
 
 ### Backend trace plane
 
