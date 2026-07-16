@@ -1,25 +1,50 @@
 # Categories emitted by first-party code under subsystem io.goodkind.lmd.
-# One per Swift source file that emits log events. Categories are PascalCase
-# and one-to-one with the Swift type or module they belong to.
+# One per Swift source file that declares an AppLogger category. Categories are
+# PascalCase and one-to-one with the Swift type or module they belong to.
 #
-# The runtime smoke command (swift Tools/lmd-dev.swift log-smoke) asserts every category
-# below appears at least once during a full exercise of the system.
+# This file documents the declared category surface. The
+# `swift Tools/lmd-dev.swift log-smoke` command does NOT read this file and does
+# NOT assert category coverage; it runs `lmd --help` plus `lmd ls`, captures the
+# unified log, and fails only if a line contains a `<private>` redaction. Keep
+# this list in sync with the source by hand.
 #
-# Pure helpers (ANSI escape helpers, layout math, key/mouse byte parsers)
-# do not have loggers because they do not fail and have no mutations.
+# Pure helpers (ANSI escape helpers, layout math, key/mouse byte parsers) do not
+# have loggers because they do not fail and have no mutations.
 #
 # Add new categories here in the same commit that introduces them.
 
-# Executables
+# Signposts (AppLogger.signposter)
+Performance
+
+# Executables - lmd-bench
 BenchRunner
+
+# Executables - lmd-serve
 Broker
-Dispatcher
+HostListener
+XPCControl
+XPCModelServer
+
+# Executables - lmd (dispatcher)
 DispatcherCLI
-MonitorSampler
+
+# Executables - lmd-tui
 TUIHost
+
+# Executables - lmd-model-host
+ModelHost
+ChatHost
+EmbeddingHost
+VideoHost
 
 # SwiftLMBackend
 SwiftLMServer
+MLXVLMVideoBackend
+
+# SwiftLMEmbed
+EmbeddingBackendFactory
+NVEmbeddingBackend
+NVMistralBiDirectionalModel
 
 # SwiftLMRuntime
 BenchConfig
@@ -27,8 +52,15 @@ BenchOrchestrator
 BrokerBenchBackend
 FanCoordinator
 JSONEnforcement
+LiveFanSMCController
 ModelCatalog
 ModelRouter
+
+# SwiftLMTrace
+BackendTrace
+
+# SwiftLMControl
+BrokerClient
 
 # SwiftLMMonitor
 AvailableMemorySensor
@@ -36,18 +68,21 @@ BatterySensor
 MacmonClient
 MemoryPressureMonitor
 MemoryPressureSensor
+PowerMonitor
+SensorSampler
 ShellExec
 SwapSensor
 VMStatSensor
 
 # SwiftLMTUI
-Dashboard
+BenchTab
+EventsTab
 LibraryTab
+MetricsTab
 MonitorTab
 Screen
 TabRouter
 
-# swift-log transitive callers (Hummingbird, swift-nio, etc.) arrive
-# under whatever category they set themselves. They are out of our
-# control and not enumerated here. The runtime smoke only asserts
-# first-party category coverage.
+# swift-log transitive callers (Hummingbird, swift-nio, etc.) arrive under
+# whatever category they set themselves. They are out of our control and not
+# enumerated here.
