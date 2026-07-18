@@ -83,7 +83,7 @@ lmd also samples thermal, battery, and power to `memory.jsonl` under `LMD_DATA_D
 
 Each state below has a cause and a recovery. Recognize the symptom, then apply the fix.
 
-- **Battery pause.** lmd paused inference to preserve battery. New chat and embedding requests return HTTP `503` with `{"error":{"type":"service_paused","message":"service paused to preserve battery (battery)"}}`, and in-flight requests drain. lmd resumes at `LMD_BATTERY_RESUME_PCT` charge, or sooner on AC power.
+- **Battery pause.** lmd paused inference to preserve battery. New chat and embedding requests return HTTP `503` with `{"error":{"type":"service_paused","message":"service paused to preserve battery (battery)"}}`, and in-flight requests drain. lmd resumes once charge climbs back to `LMD_BATTERY_RESUME_PCT`.
 - **Slower embeddings on battery.** In a mild battery band, lmd paces embedding requests and leaves chat untouched. Connect power to lift the pacing.
 - **Wrong model kind.** A chat request against an embedding id, or the reverse, returns HTTP `400`. Call `/v1/models` and pick an id whose `kind` matches the request.
 - **Model unloaded after idle.** A model unloads after `LMD_IDLE_MINUTES` (chat) or `LMD_EMBEDDING_IDLE_MINUTES` (embedding). The next request reloads it, so the first call after idle is slower.
