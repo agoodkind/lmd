@@ -25,6 +25,7 @@ private let testStderrTailLineCount = 20
 private let testBatteryThrottleDefault = "0"
 private let testBatteryMildDefault = "1"
 private let testBatteryResumeDefault = "2"
+private let testBatteryHighPowerOverrideDefault = "true"
 /// Default OTLP export settings for the test daemon plist.
 private let testOTLPProtocolDefault = "grpc"
 private let testOTLPMetricIntervalDefault = "2000"
@@ -206,6 +207,11 @@ extension DevTool {
         "{{LMD_BATTERY_RESUME_PCT}}",
         env["LMD_TEST_BATTERY_RESUME_PCT"]
           ?? testBatteryResumeDefault
+      ),
+      (
+        "{{LMD_BATTERY_HIGHPOWER_OVERRIDE}}",
+        env["LMD_TEST_BATTERY_HIGHPOWER_OVERRIDE"]
+          ?? testBatteryHighPowerOverrideDefault
       ),
       ("{{OTEL_EXPORTER_OTLP_ENDPOINT}}", env["OTEL_EXPORTER_OTLP_ENDPOINT"] ?? ""),
       (

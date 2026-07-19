@@ -31,6 +31,7 @@ final class BrokerConfigTests: XCTestCase {
     env[BrokerConfigKey.batteryThrottlePct.rawValue] = "20"
     env[BrokerConfigKey.batteryMildPct.rawValue] = "35"
     env[BrokerConfigKey.batteryResumePct.rawValue] = "80"
+    env[BrokerConfigKey.batteryHighPowerOverride.rawValue] = "true"
     env[BrokerConfigKey.disableXPC.rawValue] = "0"
     env[BrokerConfigKey.idleMinutes.rawValue] = "15"
     env[BrokerConfigKey.embeddingIdleMinutes.rawValue] = "60"
@@ -91,6 +92,7 @@ final class BrokerConfigTests: XCTestCase {
     expect(config.batteryThrottlePct) == 20
     expect(config.batteryMildPct) == 35
     expect(config.batteryResumePct) == 80
+    expect(config.batteryHighPowerOverride) == true
     expect(config.disableXPC) == false
     expect(config.idleMinutes) == 15
     expect(config.embeddingIdleMinutes) == 60

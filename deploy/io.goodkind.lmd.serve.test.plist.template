@@ -73,6 +73,8 @@
         <string>{{LMD_BATTERY_MILD_PCT}}</string>
         <key>LMD_BATTERY_RESUME_PCT</key>
         <string>{{LMD_BATTERY_RESUME_PCT}}</string>
+        <key>LMD_BATTERY_HIGHPOWER_OVERRIDE</key>
+        <string>{{LMD_BATTERY_HIGHPOWER_OVERRIDE}}</string>
 
         <key>LMD_DISABLE_XPC</key>
         <string>0</string>

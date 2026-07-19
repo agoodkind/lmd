@@ -24,6 +24,11 @@ private let log = AppLogger.logger(category: "PowerMonitor")
 /// `hard` keeps its hysteresis: once engaged at `charge <= engagePct`, it holds
 /// until charge recovers to `resumePct`.
 ///
+/// One escape lifts the battery-driven `hard`: when `highPowerOverride` is set
+/// and the reading is on AC power in High Power energy mode, the hard stop and
+/// its hysteresis hold are skipped. The `mild` band still applies while charge
+/// is low, and Low Power Mode still forces `hard`.
+///
 /// This type stays in `SwiftLMMonitor`, which depends only on `AppLogger`, so it
 /// keeps its own `Level` enum; the broker translates it to the shared
 /// `PowerThrottleLevel` when wiring the router.
@@ -37,10 +42,21 @@ public final class PowerMonitor: @unchecked Sendable {
   public struct Reading: Sendable, Equatable {
     public let percent: Int
     public let isLowPowerModeEnabled: Bool
+    /// True when the machine is drawing from the power adapter.
+    public let isOnACPower: Bool
+    /// True when the active macOS Energy Mode is High Power.
+    public let isHighPowerMode: Bool
 
-    public init(percent: Int, isLowPowerModeEnabled: Bool) {
+    public init(
+      percent: Int,
+      isLowPowerModeEnabled: Bool,
+      isOnACPower: Bool = false,
+      isHighPowerMode: Bool = false
+    ) {
       self.percent = percent
       self.isLowPowerModeEnabled = isLowPowerModeEnabled
+      self.isOnACPower = isOnACPower
+      self.isHighPowerMode = isHighPowerMode
     }
   }
 
@@ -67,17 +83,23 @@ public final class PowerMonitor: @unchecked Sendable {
     /// percent. The gap from `engagePct` to `resumePct` is the anti-flap dead
     /// band for the battery stop.
     public let resumePct: Int
+    /// When true, being on AC power in High Power energy mode lifts the
+    /// battery-driven `hard` stop. The `mild` band still applies while charge is
+    /// low, and Low Power Mode still forces `hard`.
+    public let highPowerOverride: Bool
     public let intervalSeconds: Double
 
     public init(
       engagePct: Int,
       mildEngagePct: Int,
       resumePct: Int,
+      highPowerOverride: Bool = true,
       intervalSeconds: Double = 15
     ) {
       self.engagePct = engagePct
       self.mildEngagePct = mildEngagePct
       self.resumePct = resumePct
+      self.highPowerOverride = highPowerOverride
       self.intervalSeconds = intervalSeconds
     }
 
@@ -197,7 +219,9 @@ public final class PowerMonitor: @unchecked Sendable {
       """
       power.throttle_changed level=\(next.level.rawValue, privacy: .public) \
       percent=\(reading.percent, privacy: .public) \
-      low_power_mode=\(reading.isLowPowerModeEnabled, privacy: .public)
+      low_power_mode=\(reading.isLowPowerModeEnabled, privacy: .public) \
+      on_ac=\(reading.isOnACPower, privacy: .public) \
+      high_power=\(reading.isHighPowerMode, privacy: .public)
       """
     )
     handler?(next.level)
@@ -209,14 +233,21 @@ public final class PowerMonitor: @unchecked Sendable {
     if reading.isLowPowerModeEnabled {
       return State(level: .hard, hardReason: .lowPowerMode)
     }
-    if previous.level == .hard, previous.hardReason == .battery {
-      if reading.percent >= config.resumePct {
-        return .steady
+    // On AC power in High Power energy mode, the operator has opted into full
+    // performance while plugged in, so skip the battery hysteresis hold and the
+    // hard engage. The mild band below still applies while charge is low.
+    let acHighPowerOverride =
+      config.highPowerOverride && reading.isOnACPower && reading.isHighPowerMode
+    if acHighPowerOverride == false {
+      if previous.level == .hard, previous.hardReason == .battery {
+        if reading.percent >= config.resumePct {
+          return .steady
+        }
+        return State(level: .hard, hardReason: .battery)
       }
-      return State(level: .hard, hardReason: .battery)
-    }
-    if reading.percent <= config.engagePct {
-      return State(level: .hard, hardReason: .battery)
+      if reading.percent <= config.engagePct {
+        return State(level: .hard, hardReason: .battery)
+      }
     }
     if reading.percent <= config.mildEngagePct {
       return State(level: .mild, hardReason: nil)

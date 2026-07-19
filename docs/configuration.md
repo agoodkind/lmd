@@ -33,6 +33,7 @@ registry the plist and this doc are checked against.
 | `LMD_BATTERY_THROTTLE_PCT` | int | 0..100 | `20` | Battery charge at or below which the hard stop engages: new chat and embedding requests are refused with HTTP 503 while in-flight requests drain. Held until `LMD_BATTERY_RESUME_PCT`. `0` disables the monitor. |
 | `LMD_BATTERY_MILD_PCT` | int | 0..100, and `> LMD_BATTERY_THROTTLE_PCT` and `< LMD_BATTERY_RESUME_PCT` | `35` | Battery charge at or below which the mild embedding slow-down engages. A plain band with no hold: it applies between this value and `LMD_BATTERY_THROTTLE_PCT`, and turns off above it. |
 | `LMD_BATTERY_RESUME_PCT` | int | 0..100 | `80` | Battery charge at or above which the hard stop releases (a wide band so the stop does not flap). |
+| `LMD_BATTERY_HIGHPOWER_OVERRIDE` | bool | `1/0`, `true/false`, `yes/no`, `on/off` | `true` | When on, being on AC power in the macOS High Power energy mode lifts the battery hard stop, so lmd keeps serving below `LMD_BATTERY_THROTTLE_PCT`. The mild embedding slow-down still applies while charge is low, and Low Power Mode still forces the stop. |
 | `LMD_DISABLE_XPC` | bool | `1/0`, `true/false`, `yes/no`, `on/off` | `0` | Disable the XPC control surface used by `lmd` and `lmd-tui`. |
 | `LMD_IDLE_MINUTES` | int | >= 0 | `15` | Idle minutes before a chat model is unloaded. |
 | `LMD_EMBEDDING_IDLE_MINUTES` | int | >= 0 | `60` | Idle minutes before an embedding model is unloaded. |

@@ -659,17 +659,24 @@ struct SwiftLMD {
     // chat and embedding requests, and it holds until charge recovers to
     // LMD_BATTERY_RESUME_PCT (default 80). Low Power Mode also forces `hard`,
     // even at high charge, and releasing Low Power Mode falls back to the
-    // battery-derived level instead of using the battery resume hold. Mirrors the
+    // battery-derived level instead of using the battery resume hold. When
+    // LMD_BATTERY_HIGHPOWER_OVERRIDE is on, AC power in High Power energy mode
+    // lifts the `hard` stop (the `mild` band still applies). Mirrors the
     // memory-pressure monitor.
     let powerConfig = PowerMonitor.Config(
       engagePct: config.batteryThrottlePct,
       mildEngagePct: config.batteryMildPct,
-      resumePct: config.batteryResumePct
+      resumePct: config.batteryResumePct,
+      highPowerOverride: config.batteryHighPowerOverride
     )
     let powerMonitor = PowerMonitor(config: powerConfig) {
-      PowerMonitor.Reading(
-        percent: Battery.read().percent,
-        isLowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled
+      let snapshot = Battery.read()
+      let onAC = snapshot.acState == "charging" || snapshot.acState == "ac_not_charging"
+      return PowerMonitor.Reading(
+        percent: snapshot.percent,
+        isLowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled,
+        isOnACPower: onAC,
+        isHighPowerMode: onAC ? Battery.highPowerModeActive() : false
       )
     }
     powerMonitor.setOnChange { level in

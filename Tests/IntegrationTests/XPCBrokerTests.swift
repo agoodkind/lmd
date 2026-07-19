@@ -164,6 +164,7 @@ final class XPCBrokerTests: XCTestCase {
     env["LMD_BATTERY_THROTTLE_PCT"] = "20"
     env["LMD_BATTERY_MILD_PCT"] = "35"
     env["LMD_BATTERY_RESUME_PCT"] = "80"
+    env["LMD_BATTERY_HIGHPOWER_OVERRIDE"] = "true"
     env["LMD_DATA_DIR"] = NSTemporaryDirectory()
     env["LMD_SAMPLE_INTERVAL"] = "15"
     env["LMD_PROMPT_CACHE_MAX_TOKENS"] = ""
