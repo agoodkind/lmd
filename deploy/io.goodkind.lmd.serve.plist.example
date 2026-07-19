@@ -75,6 +75,8 @@
         <string>35</string>
         <key>LMD_BATTERY_RESUME_PCT</key>
         <string>80</string>
+        <key>LMD_BATTERY_HIGHPOWER_OVERRIDE</key>
+        <string>true</string>
         <key>LMD_DISABLE_XPC</key>
         <string>0</string>
         <key>LMD_IDLE_MINUTES</key>

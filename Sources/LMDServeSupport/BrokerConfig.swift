@@ -32,28 +32,29 @@ import Foundation
 /// `XPC_SERVICE_NAME` is also absent: launchd provides it as process identity,
 /// it is not operator configuration.
 public enum BrokerConfigKey: String, CaseIterable, Sendable {
-  case host = "LMD_HOST"
-  case port = "LMD_PORT"
-  case reserveGB = "LMD_RESERVE_GB"
-  case swiftlmBinary = "LMD_SWIFTLM_BINARY"
-  case chatMaxConcurrency = "LMD_CHAT_MAX_CONCURRENCY"
-  case embeddingMaxConcurrency = "LMD_EMBEDDING_MAX_CONCURRENCY"
-  case embedBatchTokenBudget = "LMD_EMBED_BATCH_TOKEN_BUDGET"
-  case embedBatchMaxRows = "LMD_EMBED_BATCH_MAX_ROWS"
-  case embedPriorityMaxInputs = "LMD_EMBED_PRIORITY_MAX_INPUTS"
-  case embedPriorityMaxTokens = "LMD_EMBED_PRIORITY_MAX_TOKENS"
-  case embedPriorityLane = "LMD_EMBED_PRIORITY_LANE"
-  case batteryThrottlePct = "LMD_BATTERY_THROTTLE_PCT"
+  case batteryHighPowerOverride = "LMD_BATTERY_HIGHPOWER_OVERRIDE"
   case batteryMildPct = "LMD_BATTERY_MILD_PCT"
   case batteryResumePct = "LMD_BATTERY_RESUME_PCT"
-  case disableXPC = "LMD_DISABLE_XPC"
-  case idleMinutes = "LMD_IDLE_MINUTES"
-  case embeddingIdleMinutes = "LMD_EMBEDDING_IDLE_MINUTES"
+  case batteryThrottlePct = "LMD_BATTERY_THROTTLE_PCT"
+  case chatMaxConcurrency = "LMD_CHAT_MAX_CONCURRENCY"
   case dataDir = "LMD_DATA_DIR"
-  case sampleInterval = "LMD_SAMPLE_INTERVAL"
-  case promptCacheMaxTokens = "LMD_PROMPT_CACHE_MAX_TOKENS"
-  case promptCacheEnabled = "LMD_PROMPT_CACHE_ENABLED"
+  case disableXPC = "LMD_DISABLE_XPC"
+  case embedBatchMaxRows = "LMD_EMBED_BATCH_MAX_ROWS"
+  case embedBatchTokenBudget = "LMD_EMBED_BATCH_TOKEN_BUDGET"
+  case embeddingIdleMinutes = "LMD_EMBEDDING_IDLE_MINUTES"
+  case embeddingMaxConcurrency = "LMD_EMBEDDING_MAX_CONCURRENCY"
+  case embedPriorityLane = "LMD_EMBED_PRIORITY_LANE"
+  case embedPriorityMaxInputs = "LMD_EMBED_PRIORITY_MAX_INPUTS"
+  case embedPriorityMaxTokens = "LMD_EMBED_PRIORITY_MAX_TOKENS"
+  case host = "LMD_HOST"
+  case idleMinutes = "LMD_IDLE_MINUTES"
   case mlxCacheLimitGB = "LMD_MLX_CACHE_LIMIT_GB"
+  case port = "LMD_PORT"
+  case promptCacheEnabled = "LMD_PROMPT_CACHE_ENABLED"
+  case promptCacheMaxTokens = "LMD_PROMPT_CACHE_MAX_TOKENS"
+  case reserveGB = "LMD_RESERVE_GB"
+  case sampleInterval = "LMD_SAMPLE_INTERVAL"
+  case swiftlmBinary = "LMD_SWIFTLM_BINARY"
 }
 
 // MARK: - Source
@@ -132,6 +133,8 @@ public struct BrokerConfig: Sendable {
   public let batteryThrottlePct: Int
   public let batteryMildPct: Int
   public let batteryResumePct: Int
+  /// When true, AC power in High Power energy mode lifts the battery hard stop.
+  public let batteryHighPowerOverride: Bool
   public let disableXPC: Bool
   public let idleMinutes: Int
   public let embeddingIdleMinutes: Int
@@ -263,6 +266,7 @@ public struct BrokerConfig: Sendable {
         .batteryMildPct, String(mildPct),
         "must be less than LMD_BATTERY_RESUME_PCT (\(resumePct))")
     }
+    let batteryHighPowerOverrideValue = requireBool(.batteryHighPowerOverride)
     let disableXPC = requireBool(.disableXPC)
     let idleMinutes = requireInt(.idleMinutes, min: 0)
     let embeddingIdleMinutes = requireInt(.embeddingIdleMinutes, min: 0)
@@ -333,6 +337,7 @@ public struct BrokerConfig: Sendable {
       let throttlePct,
       let mildPct,
       let resumePct,
+      let batteryHighPowerOverrideValue,
       let disableXPC,
       let idleMinutes,
       let embeddingIdleMinutes,
@@ -359,6 +364,7 @@ public struct BrokerConfig: Sendable {
     self.batteryThrottlePct = throttlePct
     self.batteryMildPct = mildPct
     self.batteryResumePct = resumePct
+    self.batteryHighPowerOverride = batteryHighPowerOverrideValue
     self.disableXPC = disableXPC
     self.idleMinutes = idleMinutes
     self.embeddingIdleMinutes = embeddingIdleMinutes

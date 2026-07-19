@@ -92,4 +92,32 @@ final class BatteryParseTests: XCTestCase {
     expect(snap.percent) == 0
     expect(snap.acState) == "unknown"
   }
+
+  func testHighPowerModeDetectedFromPmset() {
+    let sample = """
+      Currently in use:
+       hibernatemode        3
+       powermode            2
+       womp                 1
+      """
+    expect(Battery.parseHighPowerMode(sample)) == true
+  }
+
+  func testAutomaticModeIsNotHighPower() {
+    let sample = """
+      Currently in use:
+       powermode            0
+       womp                 1
+      """
+    expect(Battery.parseHighPowerMode(sample)) == false
+  }
+
+  func testMissingPowerModeLineIsNotHighPower() {
+    let sample = """
+      Currently in use:
+       hibernatemode        3
+       womp                 1
+      """
+    expect(Battery.parseHighPowerMode(sample)) == false
+  }
 }

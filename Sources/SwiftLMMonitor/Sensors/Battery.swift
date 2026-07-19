@@ -73,6 +73,37 @@ public enum Battery {
     return (Double(mA) * Double(mV)) / 1_000_000
   }
 
+  /// True when the active macOS Energy Mode is High Power.
+  ///
+  /// Reads `pmset -g`, whose "Currently in use" block reports the `powermode`
+  /// value for the active power source. Macs without High Power support omit the
+  /// line, which reads as not-high-power.
+  public static func highPowerModeActive() -> Bool {
+    parseHighPowerMode(runCaptureStdout("/usr/bin/pmset", arguments: ["-g"]))
+  }
+
+  /// Parse `pmset -g` output for High Power energy mode. Exposed for tests.
+  ///
+  /// The `powermode` value is `2` for High Power and `0` for Automatic. The
+  /// line appears once in `pmset -g` (the currently-in-use settings), so the
+  /// first match is authoritative. A missing line returns `false`.
+  public static func parseHighPowerMode(_ text: String) -> Bool {
+    let highPowerModeValue = 2
+    for raw in text.split(separator: "\n") {
+      let line = String(raw)
+      guard line.contains("powermode") else {
+        continue
+      }
+      guard let match = line.range(of: #"powermode\s+(\d+)"#, options: .regularExpression)
+      else {
+        continue
+      }
+      let digits = String(line[match]).filter(\.isNumber)
+      return Int(digits) == highPowerModeValue
+    }
+    return false
+  }
+
   /// Parse `pmset -g batt` output. Exposed for tests.
   public static func parse(_ text: String) -> BatterySnapshot {
     if text.isEmpty {
