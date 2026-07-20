@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import BrokerConfigKeys
 import Foundation
 import SwiftMkCore
 
@@ -69,10 +70,27 @@ final class SmokeRunner {
     let process = Process()
     process.executableURL = brokerBinary
     process.arguments = []
+    // The broker fails fast unless every BrokerConfigKey is defined, so build a
+    // complete environment from the shared default and override only the keys the
+    // smoke run controls. Everything else takes its default from
+    // `defaultBrokerEnvironment`, the single source of truth this harness shares
+    // with the config tests.
     var environment = ProcessInfo.processInfo.environment
-    environment["LMD_HOST"] = configuration.host
-    environment["LMD_PORT"] = "\(configuration.port)"
-    environment["LMD_DISABLE_XPC"] = "1"
+    var overrides: [BrokerConfigKey: String] = [
+      .host: configuration.host,
+      .port: "\(configuration.port)",
+      .disableXPC: "1",
+      .dataDir: temporaryDirectory?.path ?? fileManager.temporaryDirectory.path,
+    ]
+    // The broker validates the SwiftLM binary is executable at boot even though
+    // smoke never spawns chat, so honor a real one from the environment and
+    // otherwise fall back to the default (`/usr/bin/true`) that passes the check.
+    if let swiftLMBinary = ProcessInfo.processInfo.environment["LMD_SWIFTLM_BINARY"],
+      !swiftLMBinary.isEmpty, fileManager.isExecutableFile(atPath: swiftLMBinary)
+    {
+      overrides[.swiftlmBinary] = swiftLMBinary
+    }
+    environment.merge(defaultBrokerEnvironment(overrides: overrides)) { _, new in new }
     process.environment = environment
     try process.run()
     brokerProcess = process

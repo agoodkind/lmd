@@ -148,31 +148,6 @@ final class XPCBrokerTests: XCTestCase {
     )
   }
 
-  private func buildBrokerEnvironment(host: String, port: Int, swiftLM: String) -> [String: String]
-  {
-    var env = ProcessInfo.processInfo.environment
-    env["LMD_HOST"] = host
-    env["LMD_PORT"] = "\(port)"
-    env["LMD_SWIFTLM_BINARY"] = swiftLM
-    env["LMD_IDLE_MINUTES"] = "120"
-    env["LMD_EMBEDDING_IDLE_MINUTES"] = "120"
-    // The broker now fails fast unless every configuration key is defined.
-    env["LMD_DISABLE_XPC"] = "0"
-    env["LMD_RESERVE_GB"] = "20"
-    env["LMD_CHAT_MAX_CONCURRENCY"] = "4"
-    env["LMD_EMBEDDING_MAX_CONCURRENCY"] = "4"
-    env["LMD_BATTERY_THROTTLE_PCT"] = "20"
-    env["LMD_BATTERY_MILD_PCT"] = "35"
-    env["LMD_BATTERY_RESUME_PCT"] = "80"
-    env["LMD_BATTERY_HIGHPOWER_OVERRIDE"] = "true"
-    env["LMD_DATA_DIR"] = NSTemporaryDirectory()
-    env["LMD_SAMPLE_INTERVAL"] = "15"
-    env["LMD_PROMPT_CACHE_MAX_TOKENS"] = ""
-    env["LMD_PROMPT_CACHE_ENABLED"] = "true"
-    env["LMD_MLX_CACHE_LIMIT_GB"] = "2"
-    return env
-  }
-
   private func pickEmbeddingModel() throws -> ModelDescriptor {
     let catalog = ModelCatalog(roots: ModelCatalog.defaultRoots)
     let models = catalog.allModels().filter { $0.kind == .embedding && $0.sizeBytes > 0 }
