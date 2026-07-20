@@ -30,6 +30,7 @@ let package = Package(
     .library(name: "SwiftLMControl", targets: ["SwiftLMControl"]),
     .library(name: "LMDServeSupport", targets: ["LMDServeSupport"]),
     .library(name: "SwiftLMHostProtocol", targets: ["SwiftLMHostProtocol"]),
+    .library(name: "BrokerConfigKeys", targets: ["BrokerConfigKeys"]),
   ],
   dependencies: [
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.7.0"),
@@ -61,6 +62,12 @@ let package = Package(
       name: "SwiftLMHostProtocol",
       dependencies: [],
       path: "Sources/SwiftLMHostProtocol",
+      swiftSettings: strictConcurrency
+    ),
+    .target(
+      name: "BrokerConfigKeys",
+      dependencies: [],
+      path: "Sources/BrokerConfigKeys",
       swiftSettings: strictConcurrency
     ),
     .target(
@@ -188,6 +195,7 @@ let package = Package(
         "SwiftLMTrace",
         "SwiftLMMetrics",
         "SwiftLMHostProtocol",
+        "BrokerConfigKeys",
         .product(name: "Hummingbird", package: "hummingbird"),
         .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
       ],
@@ -350,6 +358,7 @@ let package = Package(
         "SwiftLMCore",
         "SwiftLMRuntime",
         "SwiftLMHostProtocol",
+        "BrokerConfigKeys",
         .product(name: "Nimble", package: "Nimble"),
       ],
       path: "Tests/LMDServeTests",

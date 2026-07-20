@@ -152,6 +152,10 @@ let project = Project(
       dependencies: []
     ),
     frameworkTarget(
+      "BrokerConfigKeys",
+      dependencies: []
+    ),
+    frameworkTarget(
       "SwiftLMTrace",
       dependencies: [
         .target(name: "AppLogger"),
@@ -268,6 +272,7 @@ let project = Project(
         .target(name: "SwiftLMTrace"),
         .target(name: "SwiftLMMetrics"),
         .target(name: "SwiftLMHostProtocol"),
+        .target(name: "BrokerConfigKeys"),
         .external(name: "Hummingbird"),
         .external(name: "MLXLMCommon"),
       ]
@@ -374,6 +379,7 @@ let project = Project(
       dependencies: [
         .target(name: "LMDServeSupport"),
         .target(name: "SwiftLMCore"),
+        .target(name: "BrokerConfigKeys"),
       ]
     ),
     testTarget(

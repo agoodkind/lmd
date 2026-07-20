@@ -6,6 +6,7 @@
 //  Copyright © 2026, all rights reserved.
 //
 
+import BrokerConfigKeys
 import Foundation
 import Nimble
 import XCTest
@@ -14,33 +15,11 @@ import XCTest
 
 final class BrokerConfigTests: XCTestCase {
   /// A complete, valid environment for every key. Tests mutate a copy to
-  /// exercise individual failures.
+  /// exercise individual failures. This is the shared `defaultBrokerEnvironment`
+  /// the smoke harness spawns the broker with, so a value that stops parsing here
+  /// stops the smoke run too.
   private func completeEnvironment() -> [String: String] {
-    var env: [String: String] = [:]
-    env[BrokerConfigKey.host.rawValue] = "localhost"
-    env[BrokerConfigKey.port.rawValue] = "5400"
-    env[BrokerConfigKey.reserveGB.rawValue] = "20"
-    env[BrokerConfigKey.swiftlmBinary.rawValue] = "/usr/bin/true"
-    env[BrokerConfigKey.chatMaxConcurrency.rawValue] = "4"
-    env[BrokerConfigKey.embeddingMaxConcurrency.rawValue] = "4"
-    env[BrokerConfigKey.embedBatchTokenBudget.rawValue] = ""
-    env[BrokerConfigKey.embedBatchMaxRows.rawValue] = "256"
-    env[BrokerConfigKey.embedPriorityMaxInputs.rawValue] = "2"
-    env[BrokerConfigKey.embedPriorityMaxTokens.rawValue] = "2048"
-    env[BrokerConfigKey.embedPriorityLane.rawValue] = "true"
-    env[BrokerConfigKey.batteryThrottlePct.rawValue] = "20"
-    env[BrokerConfigKey.batteryMildPct.rawValue] = "35"
-    env[BrokerConfigKey.batteryResumePct.rawValue] = "80"
-    env[BrokerConfigKey.batteryHighPowerOverride.rawValue] = "true"
-    env[BrokerConfigKey.disableXPC.rawValue] = "0"
-    env[BrokerConfigKey.idleMinutes.rawValue] = "15"
-    env[BrokerConfigKey.embeddingIdleMinutes.rawValue] = "60"
-    env[BrokerConfigKey.dataDir.rawValue] = "/tmp"
-    env[BrokerConfigKey.sampleInterval.rawValue] = "15"
-    env[BrokerConfigKey.promptCacheMaxTokens.rawValue] = ""
-    env[BrokerConfigKey.promptCacheEnabled.rawValue] = "true"
-    env[BrokerConfigKey.mlxCacheLimitGB.rawValue] = "2"
-    return env
+    defaultBrokerEnvironment()
   }
 
   private func fixtureSource(
@@ -146,6 +125,24 @@ final class BrokerConfigTests: XCTestCase {
     for key in BrokerConfigKey.allCases {
       expect(env[key.rawValue]) != nil
     }
+  }
+
+  func testDefaultBrokerEnvironmentParsesEndToEnd() throws {
+    // The single source of truth the smoke harness spawns with must satisfy the
+    // parser without any overrides, so a default that drifts out of range fails
+    // here before it fails a smoke run with an opaque EX_CONFIG exit.
+    let environment = defaultBrokerEnvironment()
+    for key in BrokerConfigKey.allCases {
+      expect(environment[key.rawValue]) != nil
+    }
+    _ = try BrokerConfig(source: EnvironmentConfigSource(environment: environment))
+  }
+
+  func testDefaultBrokerEnvironmentAppliesOverrides() {
+    let environment = defaultBrokerEnvironment(overrides: [.port: "15999", .disableXPC: "1"])
+    expect(environment[BrokerConfigKey.port.rawValue]) == "15999"
+    expect(environment[BrokerConfigKey.disableXPC.rawValue]) == "1"
+    expect(environment[BrokerConfigKey.host.rawValue]) == "localhost"
   }
 
   func testMissingKeysAreAllReported() {

@@ -35,6 +35,18 @@ let swiftMakefilePackageName: String = {
   return "swift-makefile"
 }()
 
+// The root `lmd` package is consumed as a path dependency for the dependency-free
+// `BrokerConfigKeys` module, the single source of truth for the broker
+// configuration keys and the smoke harness's spawned-broker environment. Resolve
+// the repo root from this manifest's own location so a worktree checkout works,
+// and derive the package identity from its basename since SwiftPM keys a path
+// dependency by directory name (`lmd` in the primary checkout, the worktree name
+// in a linked worktree).
+let repoRootURL = URL(fileURLWithPath: #filePath)
+  .deletingLastPathComponent()
+  .deletingLastPathComponent()
+let repoRootPackageName = repoRootURL.lastPathComponent
+
 let package = Package(
   name: "lmd-dev",
   platforms: [
@@ -44,13 +56,15 @@ let package = Package(
     .executable(name: "lmd-dev", targets: ["lmd-dev"])
   ],
   dependencies: [
-    swiftMakefileDependency
+    swiftMakefileDependency,
+    .package(path: repoRootURL.path),
   ],
   targets: [
     .executableTarget(
       name: "lmd-dev",
       dependencies: [
-        .product(name: "SwiftMkCore", package: swiftMakefilePackageName)
+        .product(name: "SwiftMkCore", package: swiftMakefilePackageName),
+        .product(name: "BrokerConfigKeys", package: repoRootPackageName),
       ],
       path: "lmd-dev"
     )
