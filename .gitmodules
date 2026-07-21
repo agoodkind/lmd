@@ -1,0 +1,3 @@
+[submodule "SwiftLM"]
+	path = SwiftLM
+	url = https://github.com/agoodkind/SwiftLM.git
