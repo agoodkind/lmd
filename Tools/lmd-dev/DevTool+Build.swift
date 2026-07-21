@@ -35,6 +35,10 @@ extension DevTool {
   /// reads exclusively from that staging directory and does not need to know
   /// about either build system.
   func build(configuration: String) throws {
+    // Build the vendored SwiftLM chat binary first, as part of the build rather
+    // than a generate hook, so the lint and audit gates (which do not build) never
+    // clone or compile it.
+    try buildSwiftLM(configuration: configuration)
     // Under `make` (or any live swift-mk gate ancestor), the existing GateProof
     // guards in the SwiftPM build steps authorize the compile, so run the build
     // directly. With no such ancestor (a direct `lmd-dev build`), run swift-mk's

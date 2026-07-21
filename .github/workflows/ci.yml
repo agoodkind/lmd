@@ -33,7 +33,6 @@ jobs:
       apple-team-id: H3BMXM4W7H
       extra-cache-paths: |
         .build
-        SwiftLM/.build
         Tuist/.build
         Derived
         Products/Build
