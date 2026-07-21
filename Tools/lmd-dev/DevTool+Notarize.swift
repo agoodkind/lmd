@@ -111,5 +111,25 @@ extension DevTool {
     for bundle in resourceBundlesToSign() {
       try runPassthrough("codesign", ["--verify", "--strict", bundle.path])
     }
+    try stageSwiftLMForNotarize(into: directory)
+  }
+
+  /// Copy the staged SwiftLM subdirectory (chat binary plus its metallib) into the
+  /// notarize scratch dir and verify the signed binary, so it rides in the same
+  /// zip as lmd's CLIs. `ci-sign` signed the SwiftLM Mach-O via
+  /// `SWIFT_MK_SIGN_PRODUCTS`; the metallib ships unsigned as data covered by the
+  /// zip's notarization.
+  private func stageSwiftLMForNotarize(into directory: URL) throws {
+    Output.debug("stageSwiftLMForNotarize directory=\(directory.path)")
+    let staged = releaseBuildDirectory().appendingPathComponent("swiftlm")
+    guard fileManager.fileExists(atPath: staged.path) else {
+      throw ToolError.failure("[notarize] SwiftLM not staged at \(staged.path); run build first")
+    }
+    let binary = staged.appendingPathComponent("SwiftLM")
+    guard fileManager.fileExists(atPath: binary.path) else {
+      throw ToolError.failure("[notarize] missing \(binary.path); run sign first")
+    }
+    try runPassthrough("codesign", ["--verify", "--strict", binary.path])
+    try copyReplacingItem(at: staged, to: directory.appendingPathComponent("swiftlm"))
   }
 }

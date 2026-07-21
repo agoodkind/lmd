@@ -332,17 +332,37 @@ extension DevTool {
 
     try copyRuntimeResources(from: sourceDirectory, to: binDirectory)
 
+    // Bundle the SwiftLM chat binary and its metallib into a swiftlm/ subdirectory
+    // so its default.metallib does not collide with lmd's own beside the binaries.
+    let swiftLMBinaryPath = try installSwiftLM(from: sourceDirectory, to: binDirectory)
+
     let agentDirectory = homeDirectory().appendingPathComponent("Library/LaunchAgents")
     try fileManager.createDirectory(at: agentDirectory, withIntermediateDirectories: true)
     let templateURL = repoRoot.appendingPathComponent("deploy/io.goodkind.lmd.serve.plist.example")
     let template = try String(contentsOf: templateURL, encoding: .utf8)
-    let rendered = template.replacingOccurrences(
-      of: "{{LMD_SERVE_PATH}}",
-      with: binDirectory.appendingPathComponent("lmd-serve").path
-    )
+    let servePath = binDirectory.appendingPathComponent("lmd-serve").path
+    let rendered =
+      template
+      .replacingOccurrences(of: "{{LMD_SERVE_PATH}}", with: servePath)
+      .replacingOccurrences(of: "{{LMD_SWIFTLM_BINARY_PATH}}", with: swiftLMBinaryPath)
     try rendered.write(to: agentPlistURL(), atomically: true, encoding: .utf8)
     try writeLine("  wrote \(agentPlistURL().path)")
     try startServe()
+  }
+
+  /// Copy the staged SwiftLM binary and its metallib into `<bin>/swiftlm/` and
+  /// return the installed binary path for the plist's `LMD_SWIFTLM_BINARY`.
+  func installSwiftLM(from sourceDirectory: URL, to binDirectory: URL) throws -> String {
+    Output.debug("installSwiftLM")
+    let staged = sourceDirectory.appendingPathComponent("swiftlm")
+    guard fileManager.fileExists(atPath: staged.path) else {
+      throw ToolError.failure("SwiftLM was not staged at \(staged.path); run build first")
+    }
+    let destination = binDirectory.appendingPathComponent("swiftlm")
+    try copyReplacingItem(at: staged, to: destination)
+    let binary = destination.appendingPathComponent("SwiftLM")
+    try writeLine("  installed \(binary.path)")
+    return binary.path
   }
 
   func uninstall() throws {
@@ -355,6 +375,7 @@ extension DevTool {
     try removeIfExists(agentPlistURL())
 
     let binDirectory = prefixDirectory().appendingPathComponent("bin")
+    try removeIfExists(binDirectory.appendingPathComponent("swiftlm"))
     for binary in productBinaries + Array(compatibilityCommandLinks.keys) {
       let path = binDirectory.appendingPathComponent(binary)
       if fileManager.fileExists(atPath: path.path) {
