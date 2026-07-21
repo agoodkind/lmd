@@ -24,7 +24,7 @@ jobs:
     uses: agoodkind/swift-makefile/.github/workflows/_ci.yml@main
     with:
       runner: macos-26
-      brew-packages: ccache
+      brew-packages: ccache cmake
       setup-target: preflight
       make-args: "CONFIG=Release"
       # build signs the CLI binaries + MLX bundle via SWIFT_MK_SIGN_* (Makefile).
@@ -33,6 +33,7 @@ jobs:
       apple-team-id: H3BMXM4W7H
       extra-cache-paths: |
         .build
+        SwiftLM/.build
         Tuist/.build
         Derived
         Products/Build

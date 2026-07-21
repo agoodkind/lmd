@@ -17,7 +17,7 @@ jobs:
     uses: agoodkind/swift-makefile/.github/workflows/_release.yml@main
     with:
       runner: macos-26
-      brew-packages: ccache
+      brew-packages: ccache cmake
       make-args: "SWIFT_MK_BUILD_CACHE=ccache"
       # lmd ships bare CLI binaries: lmd-dev notarizes its own zip inside the
       # build hook (a zip of bare binaries cannot be stapled), so the shared
