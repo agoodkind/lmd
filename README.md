@@ -95,7 +95,7 @@ Data artifacts (`memory.jsonl`, bench `results/*.json`) live under `LMD_DATA_DIR
 
 ## Develop
 
-SwiftPM pulls [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) from `https://github.com/agoodkind/macos-smc-fan.git` on branch `main`. A normal clone of this repo plus `tuist` on `PATH` (`brew install tuist`) is enough for `make build`.
+The chat backend, [SwiftLM](https://github.com/agoodkind/SwiftLM), is vendored as the `SwiftLM/` git submodule, so clone with `git clone --recurse-submodules` (or run `git submodule update --init --recursive` after a plain clone; `make build` also initializes it). `make build` builds SwiftLM's chat binary and its Metal library alongside lmd's own, so you no longer build or install SwiftLM separately. SwiftPM pulls [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) from `https://github.com/agoodkind/macos-smc-fan.git` on branch `main`. A clone of this repo plus `tuist` and `cmake` on `PATH` (`brew install tuist cmake`) is enough for `make build`.
 
 ```
 make build              # hybrid SwiftPM (binaries) + xcodebuild (metallib)

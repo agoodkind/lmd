@@ -97,6 +97,8 @@ final class DevTool: @unchecked Sendable {
       try help()
     case "build":
       try build(configuration: configuration(from: rest.first, defaultValue: "Release"))
+    case "build-swiftlm":
+      try buildSwiftLM(configuration: configuration(from: rest.first, defaultValue: "Release"))
     case "debug":
       try build(configuration: "Debug")
     case "test":
@@ -217,6 +219,9 @@ final class DevTool: @unchecked Sendable {
                                 download the Metal toolchain if missing
         build [Release|Debug]   SwiftPM build of every product binary, plus
                                 an Xcode build of just the MLX shader bundle
+        build-swiftlm           build the vendored SwiftLM chat binary and its
+                                metallib against lmd's resolved MLX, staged for
+                                install and release (run by the build generate hook)
         debug                   build every product binary in Debug
         install [Release|Debug] build and copy to PREFIX/bin (default Release)
         test                    run Tuist test for LMDTests

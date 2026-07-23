@@ -21,6 +21,7 @@ When something needs to change, edit the source of truth, not this file:
 | Build / test / lint / install / sign / notarize implementation | `Tools/lmd-dev.swift` |
 | Build / test / lint / install / sign / notarize entry points | `Makefile` (thin aliases over `Tools/lmd-dev.swift`) |
 | Local-machine signing config (gitignored) | `config/signing.env` (template: `config/signing.env.example`) |
+| Vendored SwiftLM chat backend | `SwiftLM/` git submodule (pinned by gitlink); built by `lmd-dev build-swiftlm` |
 | LaunchAgent plist | `deploy/io.goodkind.lmd.serve.plist.example` |
 | CI build/test pipeline | `.github/workflows/ci.yml` |
 | CI release pipeline (sign + notarize + tag + release) | `.github/workflows/release.yml` |
@@ -49,6 +50,8 @@ Why it diverges, so nobody "fixes" it back into the broker or rewrites it in-pro
 - The OpenAI chat *response* code (streaming SSE envelopes, `chatcmpl` ids, tool-call deltas, usage, reasoning split) lives only in SwiftLM's **executable** target (`Sources/SwiftLM/Server.swift`), not in its importable `MLXInferenceCore` **library**. The library exposes request decoders and token-level generation only. An in-process chat path therefore cannot reuse SwiftLM's response code without forking SwiftLM and lifting `Server.swift` into a library product.
 - SwiftLM churns hard: `Server.swift` changed ~74 times in the repo's first ~80 days. A fork that restructures that file pays a recurring, conflict-prone merge cost on a hot file. Running the binary instead inherits upstream for free and stays byte-identical, because it is literally SwiftLM's own server.
 - Trade accepted: chat keeps a second process and an internal loopback HTTP hop in exchange for zero SwiftLM-fork maintenance and exact response fidelity. Revisit only if SwiftLM ships its OpenAI serving as a library product; then chat can collapse to a single in-process helper like embedding and video.
+
+**SwiftLM is vendored as the `SwiftLM/` submodule and built by lmd, not fetched separately.** `make build` runs the `generate` hook (`lmd-dev build-swiftlm`), which builds the chat binary and its metallib and stages them into `Products/Build/<config>/swiftlm/`. `make install` copies that into `<bin>/swiftlm/` and points `LMD_SWIFTLM_BINARY` there; releases ship it in the same zip. `build-swiftlm` checks out SwiftLM's `mlx-swift` and `mlx-swift-lm` submodules to lmd's resolved commits from `Package.resolved` before building, so the chat binary uses the same MLX as lmd's in-process embedding and video. A stamp (`Products/.swiftlm-built-sha`) keyed on the SwiftLM gitlink and the two MLX commits skips the rebuild when nothing changed. lmd does not modify the SwiftLM fork; it mirrors SwiftLM's CI build recipe. The submodule and its MLX submodules must stay above the advisory fixes the osv audit enforces (osv-scanner scans submodules), so bumping SwiftLM keeps its dependency pins patched. Bump SwiftLM with `cd SwiftLM && git checkout <ref>` then `git add SwiftLM`.
 
 ## 4. Build and toolchain
 

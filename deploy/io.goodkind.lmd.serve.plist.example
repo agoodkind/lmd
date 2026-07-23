@@ -54,7 +54,7 @@
         <key>LMD_RESERVE_GB</key>
         <string>20</string>
         <key>LMD_SWIFTLM_BINARY</key>
-        <string>/Users/agoodkind/Sites/SwiftLM/.build/arm64-apple-macosx/release/SwiftLM</string>
+        <string>{{LMD_SWIFTLM_BINARY_PATH}}</string>
         <key>LMD_CHAT_MAX_CONCURRENCY</key>
         <string>4</string>
         <key>LMD_EMBEDDING_MAX_CONCURRENCY</key>

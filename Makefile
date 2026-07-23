@@ -24,6 +24,11 @@ SWIFT_BUILD_CMD = $(LMD_DEV) build $(CONFIG)
 SWIFT_TEST_CMD = $(LMD_DEV) test
 SWIFT_CLEAN_CMD = $(LMD_DEV) clean
 SWIFT_DEPLOY_CMD = $(LMD_DEV) install $(CONFIG)
+# `lmd-dev build` builds the vendored SwiftLM chat binary and its metallib as its
+# first step (see DevTool+Build.build), staged into Products/Build/$(CONFIG)/swiftlm
+# for install and release. It is part of the build, not a generate hook, so the lint
+# and audit gates do not clone or compile SwiftLM. The subcommand's stamp guard skips
+# the rebuild when SwiftLM and the MLX pins are unchanged.
 # The dev tool is now an SPM package under Tools/, so Tools/.build holds the
 # vendored swift-makefile checkout (thousands of files). Lint owned sources by an
 # explicit file list that prunes any .build, never the bare Tools directory, so
@@ -45,7 +50,7 @@ SWIFTCHECK_EXTRA_EXCLUDE_PATHS := $(SWIFT_MK_EXCLUDE_PATHS)
 # <prefix>.<basename> through the canonical codesign channel, but only when an
 # identity is set (CI), so a local unsigned Debug build is untouched. CONFIG-scoped
 # so the paths match whichever configuration was built.
-SWIFT_MK_SIGN_PRODUCTS := Products/Build/$(CONFIG)/lmd Products/Build/$(CONFIG)/lmd-serve
+SWIFT_MK_SIGN_PRODUCTS := Products/Build/$(CONFIG)/lmd Products/Build/$(CONFIG)/lmd-serve Products/Build/$(CONFIG)/swiftlm/SwiftLM
 SWIFT_MK_SIGN_BUNDLES_DIR := Products/Build/$(CONFIG)
 SWIFT_MK_SIGN_IDENTIFIER_PREFIX := io.goodkind.lmd
 
