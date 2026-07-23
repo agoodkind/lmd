@@ -83,11 +83,36 @@ public struct ModelCatalog {
     walk(root, depth: 0, maxDepth: maxDepth) { dir in
       let config = "\(dir)/config.json"
       guard fileManager.fileExists(atPath: config) else { return .keepWalking }
+      // A `config.json` with no weight files is a metadata-only or partial
+      // download (for example an interrupted `lmd pull` that fetched the config
+      // and tokenizer but no `*.safetensors`). Listing it would advertise a
+      // model that cannot load, so skip it and keep walking in case a complete
+      // model sits deeper in the tree.
+      guard Self.hasWeightFiles(in: dir, fileManager: fileManager) else {
+        log.debug("catalog.skipped_no_weights path=\(dir, privacy: .public)")
+        return .keepWalking
+      }
       out.append(makeDescriptor(path: dir))
       // Stop descending once we found a model directory.
       return .stopDescending
     }
     return out
+  }
+
+  /// Whether a model directory contains at least one weight file. A directory
+  /// with `config.json` but no weights is a metadata-only or partial download
+  /// that cannot be loaded, so the catalog must not list it. Matches on the
+  /// file-name suffix, which also covers sharded weights
+  /// (`model-00001-of-00002.safetensors`) and HF hub symlinks.
+  static func hasWeightFiles(in dir: String, fileManager: FileManager) -> Bool {
+    guard let entries = try? fileManager.contentsOfDirectory(atPath: dir) else {
+      return false
+    }
+    let weightSuffixes = [".safetensors", ".gguf", ".npz", ".bin", ".pth"]
+    return entries.contains { entry in
+      let name = entry.lowercased()
+      return weightSuffixes.contains { suffix in name.hasSuffix(suffix) }
+    }
   }
 
   private enum WalkStep { case keepWalking, stopDescending }
