@@ -94,6 +94,7 @@ extension DevTool {
       && fileManager.fileExists(atPath: builtMetallib.path)
       && currentSwiftLMStamp() == stampInputs
 
+    let didHeavyBuild = !alreadyBuilt
     if alreadyBuilt {
       try writeLine("  swiftlm: build up to date")
     } else {
@@ -103,6 +104,8 @@ extension DevTool {
       try compileSwiftLMMetallib(in: swiftLMDirectory)
       try writeSwiftLMStamp(stampInputs)
     }
+
+    try buildSwiftLMNaxMetallibs(in: swiftLMDirectory, rebuild: didHeavyBuild)
 
     try stageSwiftLMArtifacts(
       from: swiftLMDirectory, into: swiftLMStagingDirectory(configuration: configuration))
@@ -244,6 +247,41 @@ extension DevTool {
     try runPassthrough(swiftCommand, arguments, currentDirectory: swiftLMDirectory)
   }
 
+  /// Build the AOT NAX metallibs from SwiftLM's own mlx-swift kernels into a
+  /// `nax/` directory beside the chat binary, so the SwiftLM child loads the
+  /// correctly compiled bf16 NAX GEMM kernels instead of JIT-compiling them,
+  /// which the macOS 26.5 Metal compiler miscompiles (see PR #6 and AGENTS.md
+  /// 3.1). Built from SwiftLM's own source so the kernels always match the MLX
+  /// the chat binary links, independent of lmd's in-process `Derived/nax`. Skips
+  /// when the metallibs already exist and no heavy rebuild ran.
+  private func buildSwiftLMNaxMetallibs(in swiftLMDirectory: URL, rebuild: Bool) throws {
+    Output.debug("buildSwiftLMNaxMetallibs rebuild=\(rebuild)")
+    let kernelsDirectory = swiftLMDirectory.appendingPathComponent(
+      "mlx-swift/Source/Cmlx/mlx/mlx/backend/metal/kernels")
+    let probe = kernelsDirectory.appendingPathComponent(
+      "steel/gemm/kernels/steel_gemm_fused_nax.metal")
+    guard fileManager.fileExists(atPath: probe.path) else {
+      try writeLine("  swiftlm: nax kernel source not found, chat will JIT")
+      return
+    }
+    let naxOutput = swiftLMReleaseDirectory(swiftLMDirectory).appendingPathComponent("nax")
+    if !rebuild, swiftLMNaxMetallibsPresent(in: naxOutput) {
+      try writeLine("  swiftlm: nax metallibs up to date")
+      return
+    }
+    let built = try buildNaxMetallibs(kernelsDirectory: kernelsDirectory, into: naxOutput)
+    try writeLine("  swiftlm: built \(built) nax metallib(s)")
+  }
+
+  /// Whether the SwiftLM NAX output holds at least the fused and split-K GEMM
+  /// metallibs the bf16 chat path loads.
+  private func swiftLMNaxMetallibsPresent(in naxOutput: URL) -> Bool {
+    let required = ["steel_gemm_fused_nax.metallib", "steel_gemm_splitk_nax.metallib"]
+    return required.allSatisfy { name in
+      fileManager.fileExists(atPath: naxOutput.appendingPathComponent(name).path)
+    }
+  }
+
   /// Compile SwiftLM's Metal shader library with cmake, mirroring SwiftLM's CI,
   /// then colocate it as `default.metallib` beside the binary where the mlx
   /// loader resolves it.
@@ -286,6 +324,13 @@ extension DevTool {
       }
       try copyReplacingItem(at: source, to: staging.appendingPathComponent(name))
       try writeLine("  staged swiftlm/\(name)")
+    }
+    // Stage the AOT NAX metallibs beside the binary so the chat child's
+    // `current_binary_dir/nax` lookup resolves them instead of JIT-compiling.
+    let naxSource = releaseDirectory.appendingPathComponent("nax")
+    if fileManager.fileExists(atPath: naxSource.path) {
+      try copyReplacingItem(at: naxSource, to: staging.appendingPathComponent("nax"))
+      try writeLine("  staged swiftlm/nax")
     }
   }
 
