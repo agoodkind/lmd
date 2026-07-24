@@ -275,11 +275,12 @@ private final class SessionHandler: @unchecked Sendable {
     )
 
     do {
+      // The XPC/CLI path returns only vectors; the usage count is unused here.
       let vectors = try await embedWithModelServer(
         server: server,
         inputs: inputs,
         requestID: requestID
-      )
+      ).vectors
       await state.router.embeddingRequestDone(modelID: descriptor.id)
       BackendTrace.notice(
         phase: TracePhase.Broker.requestDoneAck.rawValue,

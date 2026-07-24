@@ -19,7 +19,9 @@ private final class StubEmbeddingBackend: EmbeddingBackendProtocol, @unchecked S
 
   func shutdown() {}
 
-  func embed(inputs _: [String]) async throws -> [[Float]] { [] }
+  func embed(inputs _: [String]) -> EmbeddingForwardResult {
+    EmbeddingForwardResult(rows: [], realTokens: 0)
+  }
 }
 
 final class EmbeddingBackendTests: XCTestCase {
@@ -30,5 +32,12 @@ final class EmbeddingBackendTests: XCTestCase {
     expect(backend.countTokens(inputs: ["abcdefghi"])) == 3
     expect(backend.countTokens(inputs: [""])) == 1
     expect(backend.countTokens(inputs: ["abcdefgh", "abcdefgh"])) == 4
+  }
+
+  func testEmbeddingForwardResultCarriesRealTokens() {
+    let result = EmbeddingForwardResult(rows: [[1, 2, 3]], realTokens: 7)
+
+    expect(result.rows) == [[1, 2, 3]]
+    expect(result.realTokens) == 7
   }
 }

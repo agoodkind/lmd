@@ -229,7 +229,7 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
     )
   }
 
-  public func embed(inputs: [String]) throws -> [[Float]] {
+  public func embed(inputs: [String]) throws -> EmbeddingForwardResult {
     guard let runtime else {
       throw NVEmbeddingRuntimeError.modelNotLoaded
     }
@@ -240,7 +240,7 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
       snapshot: .current(),
       extras: ["input_count": "\(inputs.count)"]
     )
-    let encoded = encodeInputs(inputs, tokenizer: runtime.tokenizer)
+    let encoded = try encodeAndValidate(inputs, tokenizer: runtime.tokenizer)
     let forwardPlan = Self.makeForwardPlan(
       encoded: encoded,
       slotBudget: tuning.slotBudget,
@@ -286,6 +286,16 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
       context: requestContext(),
       snapshot: .current()
     )
+    recordForwardMetrics(result: result, requestStarted: requestStarted)
+    return EmbeddingForwardResult(rows: result.rows, realTokens: result.stats.totalTokens)
+  }
+
+  /// Emit the per-request embedding metrics and the pre-return trace. Split out
+  /// of `embed` to keep that method within the body-length limit.
+  private func recordForwardMetrics(
+    result: NVEmbeddingForwardResult,
+    requestStarted: DispatchTime
+  ) {
     let elapsedSeconds =
       Double(DispatchTime.now().uptimeNanoseconds - requestStarted.uptimeNanoseconds)
       / Self.nanosecondsPerSecond
@@ -301,24 +311,44 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
         "lmd_embed_tokens_per_second",
         Double(result.stats.totalTokens) / elapsedSeconds)
     }
-
     BackendTrace.debug(
       phase: TracePhase.Embedding.requestPreReturn.rawValue,
       context: requestContext(),
       snapshot: .current(),
       extras: ["row_count": "\(result.rows.count)"]
     )
-    return result.rows
   }
 
+  /// Tokenize each input in full. Over-length inputs are not truncated here; the
+  /// `embed` path rejects them so the caller sees an OpenAI-style error rather
+  /// than a silently shortened embedding.
   func encodeInputs(_ inputs: [String], tokenizer: any MLXLMCommon.Tokenizer) -> [[Int]] {
-    inputs.map { input in
-      let encoded = tokenizer.encode(text: input, addSpecialTokens: true)
-      if encoded.count > metadata.maxSequenceLength {
-        return Array(encoded.prefix(metadata.maxSequenceLength))
-      }
-      return encoded
+    inputs.map { tokenizer.encode(text: $0, addSpecialTokens: true) }
+  }
+
+  /// Tokenize and reject any input longer than the model's context window, so
+  /// the forward pass only ever runs on inputs that fit.
+  func encodeAndValidate(
+    _ inputs: [String], tokenizer: any MLXLMCommon.Tokenizer
+  ) throws -> [[Int]] {
+    let encoded = encodeInputs(inputs, tokenizer: tokenizer)
+    if let offending = Self.firstOverLength(encoded, limit: metadata.maxSequenceLength) {
+      throw EmbeddingInputTooLong(
+        index: offending.index,
+        tokenCount: offending.count,
+        limit: metadata.maxSequenceLength
+      )
     }
+    return encoded
+  }
+
+  /// The first input whose token count exceeds `limit`, or nil when every input
+  /// fits. Used to reject over-length requests before the forward pass.
+  static func firstOverLength(_ encoded: [[Int]], limit: Int) -> (index: Int, count: Int)? {
+    for (index, tokens) in encoded.enumerated() where tokens.count > limit {
+      return (index, tokens.count)
+    }
+    return nil
   }
 
   func padEncoded(_ encodedGroup: [[Int]]) -> NVEmbeddingBatch {

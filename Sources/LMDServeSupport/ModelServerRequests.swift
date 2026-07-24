@@ -20,7 +20,9 @@ public enum ModelServerChatError: Error, Equatable {
 }
 
 public enum ModelServerEmbeddingError: Error, Equatable {
+  case contextLengthExceeded(message: String)
   case hostFailed(message: String)
+  case noUsageReturned
   case noVectorsReturned
 }
 
@@ -87,11 +89,26 @@ public func completeChatWithModelServer(
   return try await bufferedChatResult(frames: server.send(backendRequest))
 }
 
+// MARK: - EmbeddingServerResult
+
+/// The vectors from one embedding request plus the real prompt token count the
+/// host reported in its `usage` frame. `promptTokens` feeds the OpenAI response
+/// `usage` fields; callers that only need vectors ignore it.
+public struct EmbeddingServerResult: Sendable {
+  public let vectors: [[Float]]
+  public let promptTokens: Int
+
+  public init(vectors: [[Float]], promptTokens: Int) {
+    self.vectors = vectors
+    self.promptTokens = promptTokens
+  }
+}
+
 public func embedWithModelServer(
   server: ModelServer,
   inputs: [String],
   requestID: UUID
-) async throws -> [[Float]] {
+) async throws -> EmbeddingServerResult {
   let body = try JSONSerialization.data(withJSONObject: ["input": inputs])
   let request = BackendRequest(
     requestID: requestID,
@@ -100,11 +117,17 @@ public func embedWithModelServer(
     stream: false
   )
   var decoded: [[Float]]?
+  var promptTokens: Int?
   for try await frame in server.send(request) {
     switch frame {
     case .vectors(_, let dims, let payload):
       decoded = try VectorBlob.decode(dims: dims, payload: payload)
+    case .usage(_, let tokens, _):
+      promptTokens = tokens
     case .failed(_, let message):
+      if EmbeddingErrorEnvelope.isContextLength(message) {
+        throw ModelServerEmbeddingError.contextLengthExceeded(message: message)
+      }
       throw ModelServerEmbeddingError.hostFailed(message: message)
     case .done:
       break
@@ -115,7 +138,13 @@ public func embedWithModelServer(
   guard let decoded else {
     throw ModelServerEmbeddingError.noVectorsReturned
   }
-  return decoded
+  // The usage frame carries the real token count the response must report, so a
+  // stream that returns vectors without it is a contract violation, not a silent
+  // zero. This can only happen if a host predates the usage frame.
+  guard let promptTokens else {
+    throw ModelServerEmbeddingError.noUsageReturned
+  }
+  return EmbeddingServerResult(vectors: decoded, promptTokens: promptTokens)
 }
 
 public func completeVideoChatWithModelServer(

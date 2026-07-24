@@ -13,6 +13,7 @@ import MLXHuggingFace
 import MLXLMCommon
 import SwiftLMBackend
 import SwiftLMCore
+import SwiftLMMetrics
 import SwiftLMTrace
 import Tokenizers
 
@@ -117,17 +118,16 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
     )
   }
 
-  public func embed(inputs: [String]) async throws -> [[Float]] {
+  public func embed(inputs: [String]) async throws -> EmbeddingForwardResult {
     guard let container else {
       throw MLXEmbeddingRuntimeError.modelNotLoaded
     }
-    BackendTrace.debug(
-      phase: TracePhase.Embedding.requestPreTokenize.rawValue,
-      context: requestContext(),
-      snapshot: .current(),
+    let traceCtx = requestContext()
+    Self.traceEmbed(
+      TracePhase.Embedding.requestPreTokenize.rawValue,
+      context: traceCtx,
       extras: ["input_count": "\(inputs.count)"]
     )
-    let traceCtx = requestContext()
     return await container.perform { context in
       let encoded = inputs.map { context.tokenizer.encode(text: $0, addSpecialTokens: true) }
       let maxLength = encoded.reduce(into: 1) { acc, elem in
@@ -144,10 +144,9 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
       let totalSlots = batchSize * maxLength
       let paddingRatio =
         totalSlots > 0 ? Double(totalSlots - totalTokens) / Double(totalSlots) : 0.0
-      BackendTrace.debug(
-        phase: TracePhase.Embedding.requestPostTokenize.rawValue,
+      Self.traceEmbed(
+        TracePhase.Embedding.requestPostTokenize.rawValue,
         context: traceCtx,
-        snapshot: .current(),
         extras: [
           "batch_size": "\(batchSize)",
           "max_seq_len": "\(maxLength)",
@@ -155,45 +154,41 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
           "padding_ratio": String(format: "%.4f", paddingRatio),
         ]
       )
+      // Record the real token count so both embedding backends emit the metric
+      // the /v1/embeddings usage field is documented against.
+      SwiftLMMetrics.observeValue("lmd_embed_batch_tokens_real", Double(totalTokens))
       let mask = (padded .!= padId)
       let tokenTypes = MLXArray.zeros(like: padded)
-      BackendTrace.debug(
-        phase: TracePhase.Embedding.requestPreForward.rawValue,
-        context: traceCtx,
-        snapshot: .current()
-      )
+      Self.traceEmbed(TracePhase.Embedding.requestPreForward.rawValue, context: traceCtx)
       let modelOutput = context.model(
         padded, positionIds: nil, tokenTypeIds: tokenTypes, attentionMask: mask)
-      BackendTrace.debug(
-        phase: TracePhase.Embedding.requestPostForward.rawValue,
-        context: traceCtx,
-        snapshot: .current()
-      )
+      Self.traceEmbed(TracePhase.Embedding.requestPostForward.rawValue, context: traceCtx)
       let result = context.pooling(modelOutput, normalize: true, applyLayerNorm: true)
-      BackendTrace.debug(
-        phase: TracePhase.Embedding.requestPostPool.rawValue,
-        context: traceCtx,
-        snapshot: .current()
-      )
+      Self.traceEmbed(TracePhase.Embedding.requestPostPool.rawValue, context: traceCtx)
       result.eval()
-      BackendTrace.debug(
-        phase: TracePhase.Embedding.requestPostEval.rawValue,
-        context: traceCtx,
-        snapshot: .current()
-      )
+      Self.traceEmbed(TracePhase.Embedding.requestPostEval.rawValue, context: traceCtx)
       let batchCount = result.shape[0]
       var rows: [[Float]] = []
       rows.reserveCapacity(batchCount)
       for i in 0..<batchCount {
         rows.append(result[i].asArray(Float.self))
       }
-      BackendTrace.debug(
-        phase: TracePhase.Embedding.requestPreReturn.rawValue,
+      Self.traceEmbed(
+        TracePhase.Embedding.requestPreReturn.rawValue,
         context: traceCtx,
-        snapshot: .current(),
         extras: ["row_count": "\(rows.count)"]
       )
-      return rows
+      return EmbeddingForwardResult(rows: rows, realTokens: totalTokens)
     }
+  }
+
+  /// Emit one embedding trace phase. Split out so `embed` stays within the
+  /// body-length limit; static so the `perform` closure need not capture `self`.
+  private static func traceEmbed(
+    _ phase: String,
+    context: TraceContext,
+    extras: [String: String] = [:]
+  ) {
+    BackendTrace.debug(phase: phase, context: context, snapshot: .current(), extras: extras)
   }
 }
