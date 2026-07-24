@@ -174,6 +174,12 @@ extension DevTool {
   /// across.
   private func stageMetallibBetweenBuildAndTest(configuration: String) -> Bool {
     do {
+      // Refresh the AOT NAX metallibs here, after `--build-tests` has resolved
+      // `.build/checkouts/mlx-swift`, so the NAX kernel source is present.
+      // Building earlier (in test()/snapshotUpdate()) would find no source on a
+      // fresh checkout or after clean and clear Derived/nax, forcing the tests
+      // onto the JIT-miscompiled bf16 NAX path.
+      try buildNaxAotLibraries(configuration: configuration)
       try stageMetallibForSwiftTest(configuration: configuration)
       return true
     } catch {
@@ -204,10 +210,6 @@ extension DevTool {
     // `--build-tests` and the `--skip-build` test run inside the chokepoint's held lock.
     let configuration = "Debug"
     try buildMetallib(configuration: configuration)
-    // Refresh the AOT NAX metallibs the same way the build path does, so a stale
-    // Derived/nax from an earlier MLX revision is not staged into the test
-    // runners (buildNaxAotLibraries clears it when the current source lacks NAX).
-    try buildNaxAotLibraries(configuration: configuration)
     let request = SwiftPM.TestRequest(
       package: swiftPackageRequest(
         configuration: configuration,
@@ -285,9 +287,6 @@ extension DevTool {
     // colocated first, the same as the regular test run.
     let configuration = "Debug"
     try buildMetallib(configuration: configuration)
-    // Refresh the AOT NAX metallibs so a stale Derived/nax is not staged into the
-    // test runners, matching the build and test() paths.
-    try buildNaxAotLibraries(configuration: configuration)
     let request = SwiftPM.TestRequest(
       package: swiftPackageRequest(
         configuration: configuration,
