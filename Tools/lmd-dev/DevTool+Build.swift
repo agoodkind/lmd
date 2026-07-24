@@ -204,6 +204,10 @@ extension DevTool {
     // `--build-tests` and the `--skip-build` test run inside the chokepoint's held lock.
     let configuration = "Debug"
     try buildMetallib(configuration: configuration)
+    // Refresh the AOT NAX metallibs the same way the build path does, so a stale
+    // Derived/nax from an earlier MLX revision is not staged into the test
+    // runners (buildNaxAotLibraries clears it when the current source lacks NAX).
+    try buildNaxAotLibraries(configuration: configuration)
     let request = SwiftPM.TestRequest(
       package: swiftPackageRequest(
         configuration: configuration,
@@ -281,6 +285,9 @@ extension DevTool {
     // colocated first, the same as the regular test run.
     let configuration = "Debug"
     try buildMetallib(configuration: configuration)
+    // Refresh the AOT NAX metallibs so a stale Derived/nax is not staged into the
+    // test runners, matching the build and test() paths.
+    try buildNaxAotLibraries(configuration: configuration)
     let request = SwiftPM.TestRequest(
       package: swiftPackageRequest(
         configuration: configuration,
