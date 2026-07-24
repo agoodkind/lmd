@@ -260,11 +260,15 @@ extension DevTool {
       "mlx-swift/Source/Cmlx/mlx/mlx/backend/metal/kernels")
     let probe = kernelsDirectory.appendingPathComponent(
       "steel/gemm/kernels/steel_gemm_fused_nax.metal")
+    let naxOutput = swiftLMReleaseDirectory(swiftLMDirectory).appendingPathComponent("nax")
     guard fileManager.fileExists(atPath: probe.path) else {
+      // Remove any nax/ from a prior SwiftLM/MLX revision so stageSwiftLMArtifacts
+      // does not stage stale kernels; without live source the chat child JITs,
+      // matching the log line.
+      try removeIfExists(naxOutput)
       try writeLine("  swiftlm: nax kernel source not found, chat will JIT")
       return
     }
-    let naxOutput = swiftLMReleaseDirectory(swiftLMDirectory).appendingPathComponent("nax")
     if !rebuild, swiftLMNaxMetallibsPresent(in: naxOutput) {
       try writeLine("  swiftlm: nax metallibs up to date")
       return
