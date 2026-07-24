@@ -69,6 +69,40 @@ final class ModelCatalogTests: XCTestCase {
     expect(catalog.allModels().isEmpty) == true
   }
 
+  // A directory with config.json but no weight files is a metadata-only or
+  // partial download (an interrupted `lmd pull` that fetched config + tokenizer
+  // but no weights). The catalog must not advertise it, because loading it
+  // fails or, worse, misbehaves silently.
+  func testConfigWithoutWeightsIsNotListed() throws {
+    let dir =
+      tempDir
+      .appendingPathComponent("LiquidAI")
+      .appendingPathComponent("LFM2.5-1.2B-Instruct")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try Data("{}".utf8).write(to: dir.appendingPathComponent("config.json"))
+    try Data("{}".utf8).write(to: dir.appendingPathComponent("tokenizer.json"))
+    try Data("template".utf8).write(to: dir.appendingPathComponent("chat_template.jinja"))
+
+    let catalog = ModelCatalog(roots: [tempDir.path])
+    expect(catalog.allModels().isEmpty) == true
+  }
+
+  // A complete model alongside a weight-less sibling still surfaces, and only
+  // the complete one is listed.
+  func testWeightlessSiblingDoesNotHideCompleteModel() throws {
+    try makeFakeModel(publisher: "mlx-community", name: "Real-4bit", sizeBytes: 2_048)
+
+    let stub =
+      tempDir
+      .appendingPathComponent("LiquidAI")
+      .appendingPathComponent("LFM2.5-1.2B-Instruct")
+    try FileManager.default.createDirectory(at: stub, withIntermediateDirectories: true)
+    try Data("{}".utf8).write(to: stub.appendingPathComponent("config.json"))
+
+    let models = ModelCatalog(roots: [tempDir.path]).allModels()
+    expect(models.map(\.displayName)) == ["Real-4bit"]
+  }
+
   func testSortedByDisplayName() throws {
     try makeFakeModel(publisher: "mlx-community", name: "Zeta", sizeBytes: 1)
     try makeFakeModel(publisher: "mlx-community", name: "Alpha", sizeBytes: 1)
