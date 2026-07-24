@@ -84,10 +84,10 @@ public struct ModelCatalog {
       let config = "\(dir)/config.json"
       guard fileManager.fileExists(atPath: config) else { return .keepWalking }
       // A `config.json` with no weight files is a metadata-only or partial
-      // download (for example an interrupted `lmd pull` that fetched the config
-      // and tokenizer but no `*.safetensors`). Listing it would advertise a
-      // model that cannot load, so skip it and keep walking in case a complete
-      // model sits deeper in the tree.
+      // download, for example an interrupted `lmd pull` that fetched the config
+      // but no `*.safetensors`. Listing it would advertise a model that cannot
+      // load, so skip it and keep walking in case a complete model sits deeper
+      // in the tree.
       guard Self.hasWeightFiles(in: dir, fileManager: fileManager) else {
         log.debug("catalog.skipped_no_weights path=\(dir, privacy: .public)")
         return .keepWalking
@@ -105,7 +105,11 @@ public struct ModelCatalog {
   /// file-name suffix, which also covers sharded weights
   /// (`model-00001-of-00002.safetensors`) and HF hub symlinks.
   static func hasWeightFiles(in dir: String, fileManager: FileManager) -> Bool {
-    guard let entries = try? fileManager.contentsOfDirectory(atPath: dir) else {
+    let entries: [String]
+    do {
+      entries = try fileManager.contentsOfDirectory(atPath: dir)
+    } catch {
+      // An unreadable directory has no listable weights, so treat it as empty.
       return false
     }
     let weightSuffixes = [".safetensors", ".gguf", ".npz", ".bin", ".pth"]
