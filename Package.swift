@@ -45,7 +45,7 @@ let package = Package(
     .package(url: "https://github.com/Quick/Nimble.git", from: "14.0.0"),
     .package(
       url: "https://github.com/agoodkind/mlx-swift-lm.git",
-      revision: "ed298f48662f265ae50ae0472a269f52661ca8ce"),
+      revision: "a8ce36ba06c3295575f7a91a2da5e60c4cadbb86"),
     .package(url: "https://github.com/agoodkind/mlx-swift.git", branch: "main"),
     .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
     .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.3.2"),
