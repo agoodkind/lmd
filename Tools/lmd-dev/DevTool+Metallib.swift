@@ -206,7 +206,7 @@ extension DevTool {
   /// same kernel source ahead-of-time from its `.metal` file is correct. This
   /// builds those kernels into `Derived/nax/<source>.metallib`, which the
   /// mlx-swift runtime loads instead of JIT-compiling (see device.cpp
-  /// get_library and docs/bf16-nax-investigation.md). Additive: if the source or
+  /// get_library and docs/nax.md). Additive: if the source or
   /// the Metal compiler is absent, the directory stays empty and the runtime
   /// JIT-compiles exactly as before.
   func buildNaxAotLibraries(configuration _: String) throws {

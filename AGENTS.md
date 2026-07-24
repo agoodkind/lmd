@@ -28,6 +28,7 @@ When something needs to change, edit the source of truth, not this file:
 | Active design notes | `plan/*.md` |
 | User-facing overview | `README.md` |
 | Using and observing a running lmd | `docs/operations.md` |
+| M5 accelerator (NAX) kernels and the 16-bit miscompile workaround | `docs/nax.md` |
 
 If you find yourself enumerating targets, categories, or filenames in prose, stop and link to the source of truth instead.
 
