@@ -214,13 +214,23 @@ extension DevTool {
       try writeLine("  nax: mlx-swift kernel source not found, runtime will JIT")
       return
     }
+    _ = try buildNaxMetallibs(kernelsDirectory: kernelsDirectory, into: naxLibraryDirectory())
+  }
+
+  /// Compile the AOT NAX metallibs from an mlx-swift kernel source directory into
+  /// `output`, replacing whatever was there. Shared by lmd's in-process build
+  /// (`Derived/nax`) and the SwiftLM chat binary staging (`swiftlm/nax`), so both
+  /// load kernels compiled with the correct flags instead of JIT-compiling the
+  /// bf16 NAX GEMM, which the macOS 26.5 Metal compiler miscompiles. Returns the
+  /// number of kernels built.
+  @discardableResult
+  func buildNaxMetallibs(kernelsDirectory: URL, into output: URL) throws -> Int {
     let includeRoot =
       kernelsDirectory
       .deletingLastPathComponent()  // metal
       .deletingLastPathComponent()  // backend
       .deletingLastPathComponent()  // mlx (inner)
       .deletingLastPathComponent()  // Source/Cmlx/mlx (outer)
-    let output = naxLibraryDirectory()
     if fileManager.fileExists(atPath: output.path) {
       try fileManager.removeItem(at: output)
     }
@@ -259,6 +269,7 @@ extension DevTool {
     if built == 0 {
       try writeLine("  nax: no kernels built, runtime will JIT")
     }
+    return built
   }
 
   /// Compile one NAX kernel `.metal` source into a `.metallib`, removing the
