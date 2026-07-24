@@ -164,6 +164,8 @@ Emitted by the embedding model host (`source_id: host:embedding:<path>`) as it b
 | `lmd_embed_queue_depth` | gauge | Embedding requests waiting for a batch slot. |
 | `lmd_embed_queue_wait_seconds` | histogram | Time an embedding request waited before admission. |
 
+The `/v1/embeddings` response reports `usage.prompt_tokens` and `usage.total_tokens` as 0. The embedding forward pass returns no token count, and filling those fields would re-tokenize every request, so real token counts live in `lmd_embed_batch_tokens_real` instead of the response body.
+
 ## Trace phases
 
 Phase strings live in `TracePhase` (`Sources/SwiftLMTrace/TracePhase.swift`),
