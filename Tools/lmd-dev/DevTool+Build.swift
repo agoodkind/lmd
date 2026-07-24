@@ -174,6 +174,12 @@ extension DevTool {
   /// across.
   private func stageMetallibBetweenBuildAndTest(configuration: String) -> Bool {
     do {
+      // Refresh the AOT NAX metallibs here, after `--build-tests` has resolved
+      // `.build/checkouts/mlx-swift`, so the NAX kernel source is present.
+      // Building earlier (in test()/snapshotUpdate()) would find no source on a
+      // fresh checkout or after clean and clear Derived/nax, forcing the tests
+      // onto the JIT-miscompiled bf16 NAX path.
+      try buildNaxAotLibraries(configuration: configuration)
       try stageMetallibForSwiftTest(configuration: configuration)
       return true
     } catch {
@@ -314,6 +320,11 @@ extension DevTool {
       "lmd.xcworkspace",
       "Tuist/.build",
       "Products/Build",
+      // Force a from-scratch SwiftLM rebuild: its build tree and the rebuild
+      // stamp live outside Products/Build, so a plain clean would otherwise
+      // leave them and skip the heavy build.
+      "SwiftLM/.build",
+      "Products/.swiftlm-built-sha",
     ] {
       try removeIfExists(repoRoot.appendingPathComponent(path))
     }
@@ -387,7 +398,7 @@ extension DevTool {
         try writeLine("  removed \(path.path)")
       }
     }
-    for resourceName in ["mlx.metallib", "default.metallib", "mlx-swift_Cmlx.bundle"] {
+    for resourceName in ["mlx.metallib", "default.metallib", "mlx-swift_Cmlx.bundle", "nax"] {
       let path = binDirectory.appendingPathComponent(resourceName)
       if fileManager.fileExists(atPath: path.path) {
         try fileManager.removeItem(at: path)
@@ -444,6 +455,10 @@ extension DevTool {
   /// via `current_binary_dir()/nax`. No-op when no NAX libraries are present.
   func stageNaxLibraries(from sourceNaxDirectory: URL, to destinationParent: URL) throws {
     Output.debug("stageNaxLibraries source=\(sourceNaxDirectory.path)")
+    // Clear the destination first so a prior build's kernels never outlive a
+    // build that produced fewer or no nax metallibs.
+    let destination = destinationParent.appendingPathComponent("nax")
+    try removeIfExists(destination)
     guard fileManager.fileExists(atPath: sourceNaxDirectory.path) else {
       return
     }
@@ -453,7 +468,6 @@ extension DevTool {
     guard !metallibs.isEmpty else {
       return
     }
-    let destination = destinationParent.appendingPathComponent("nax")
     try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
     for library in metallibs {
       try copyReplacingItem(

@@ -186,8 +186,9 @@ struct NaxBuildContext {
 }
 
 /// The M5 NAX kernel sources compiled ahead-of-time, each relative to the
-/// mlx-swift kernels directory and without the `.metal` extension.
-private let naxKernelSources = [
+/// mlx-swift kernels directory and without the `.metal` extension. Shared with
+/// the SwiftLM chat binary's nax build (DevTool+SwiftLM).
+let naxKernelSources = [
   "steel/gemm/kernels/steel_gemm_fused_nax",
   "steel/gemm/kernels/steel_gemm_splitk_nax",
   "steel/gemm/kernels/steel_gemm_gather_nax",
@@ -211,6 +212,10 @@ extension DevTool {
   func buildNaxAotLibraries(configuration _: String) throws {
     Output.debug("buildNaxAotLibraries")
     guard let kernelsDirectory = forkMlxKernelsDirectory() else {
+      // Remove any Derived/nax from a prior build so stageNaxLibraries cannot
+      // stage kernels compiled against an older MLX; without live source the
+      // runtime JITs, matching the log line.
+      try removeIfExists(naxLibraryDirectory())
       try writeLine("  nax: mlx-swift kernel source not found, runtime will JIT")
       return
     }
