@@ -6,8 +6,6 @@
 //  Copyright © 2026, all rights reserved.
 //
 
-import Foundation
-
 // MARK: - EmbeddingErrorEnvelope
 
 /// Serializes an over-length embedding rejection into the single `message`

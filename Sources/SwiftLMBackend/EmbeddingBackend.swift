@@ -10,9 +10,9 @@ import Foundation
 import SwiftLMCore
 
 /// One embedding forward pass: the pooled vectors and the real input token
-/// count the backend tokenized for this batch. The token count is what the
-/// backend actually embedded (post-truncation for backends that truncate), so
-/// it matches the `lmd_embed_batch_tokens_real` metric and feeds the OpenAI
+/// count the backend tokenized for this batch. Over-length inputs are rejected
+/// rather than truncated, so this count is exactly what the model embedded; it
+/// matches the `lmd_embed_batch_tokens_real` metric and feeds the OpenAI
 /// `usage` fields.
 public struct EmbeddingForwardResult: Sendable {
   public let rows: [[Float]]

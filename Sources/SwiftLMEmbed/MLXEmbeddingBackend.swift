@@ -128,8 +128,8 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
       context: traceCtx,
       extras: ["input_count": "\(inputs.count)"]
     )
-    return await container.perform { context in
-      let encoded = inputs.map { context.tokenizer.encode(text: $0, addSpecialTokens: true) }
+    return try await container.perform { context in
+      let encoded = try Self.encodeAndValidate(inputs, context: context)
       let maxLength = encoded.reduce(into: 1) { acc, elem in
         acc = max(acc, elem.count)
       }
@@ -167,12 +167,7 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
       Self.traceEmbed(TracePhase.Embedding.requestPostPool.rawValue, context: traceCtx)
       result.eval()
       Self.traceEmbed(TracePhase.Embedding.requestPostEval.rawValue, context: traceCtx)
-      let batchCount = result.shape[0]
-      var rows: [[Float]] = []
-      rows.reserveCapacity(batchCount)
-      for i in 0..<batchCount {
-        rows.append(result[i].asArray(Float.self))
-      }
+      let rows = Self.extractRows(result)
       Self.traceEmbed(
         TracePhase.Embedding.requestPreReturn.rawValue,
         context: traceCtx,
@@ -190,5 +185,45 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
     extras: [String: String] = [:]
   ) {
     BackendTrace.debug(phase: phase, context: context, snapshot: .current(), extras: extras)
+  }
+
+  /// Tokenize and reject any input past the model's position limit. The pinned
+  /// MLXEmbedders models truncate over-length inputs internally, so without this
+  /// the response would embed a shortened input while reporting the full token
+  /// count. A model with no fixed limit (RoPE) returns nil and embeds any length.
+  private static func encodeAndValidate(
+    _ inputs: [String], context: EmbedderModelContext
+  ) throws -> [[Int]] {
+    let encoded = inputs.map { context.tokenizer.encode(text: $0, addSpecialTokens: true) }
+    if let limit = context.model.maxPositionEmbeddings,
+      let offending = firstOverLength(encoded, limit: limit)
+    {
+      throw EmbeddingInputTooLong(
+        index: offending.index, tokenCount: offending.count, limit: limit)
+    }
+    return encoded
+  }
+
+  /// The first input whose token count exceeds `limit`, or nil when every input
+  /// fits.
+  private static func firstOverLength(
+    _ encoded: [[Int]], limit: Int
+  ) -> (index: Int, count: Int)? {
+    for (index, tokens) in encoded.enumerated() where tokens.count > limit {
+      return (index, tokens.count)
+    }
+    return nil
+  }
+
+  /// Copy each pooled row out of the MLX result into a plain Float array. Split
+  /// out so `embed` stays within the body-length limit.
+  private static func extractRows(_ result: MLXArray) -> [[Float]] {
+    let batchCount = result.shape[0]
+    var rows: [[Float]] = []
+    rows.reserveCapacity(batchCount)
+    for i in 0..<batchCount {
+      rows.append(result[i].asArray(Float.self))
+    }
+    return rows
   }
 }
