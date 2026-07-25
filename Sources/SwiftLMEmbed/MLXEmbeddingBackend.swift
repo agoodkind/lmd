@@ -13,6 +13,7 @@ import MLXHuggingFace
 import MLXLMCommon
 import SwiftLMBackend
 import SwiftLMCore
+import SwiftLMMetrics
 import SwiftLMTrace
 import Tokenizers
 
@@ -117,19 +118,18 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
     )
   }
 
-  public func embed(inputs: [String]) async throws -> [[Float]] {
+  public func embed(inputs: [String]) async throws -> EmbeddingForwardResult {
     guard let container else {
       throw MLXEmbeddingRuntimeError.modelNotLoaded
     }
-    BackendTrace.debug(
-      phase: TracePhase.Embedding.requestPreTokenize.rawValue,
-      context: requestContext(),
-      snapshot: .current(),
+    let traceCtx = requestContext()
+    Self.traceEmbed(
+      TracePhase.Embedding.requestPreTokenize.rawValue,
+      context: traceCtx,
       extras: ["input_count": "\(inputs.count)"]
     )
-    let traceCtx = requestContext()
-    return await container.perform { context in
-      let encoded = inputs.map { context.tokenizer.encode(text: $0, addSpecialTokens: true) }
+    return try await container.perform { context in
+      let encoded = try Self.encodeAndValidate(inputs, context: context)
       let maxLength = encoded.reduce(into: 1) { acc, elem in
         acc = max(acc, elem.count)
       }
@@ -144,10 +144,9 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
       let totalSlots = batchSize * maxLength
       let paddingRatio =
         totalSlots > 0 ? Double(totalSlots - totalTokens) / Double(totalSlots) : 0.0
-      BackendTrace.debug(
-        phase: TracePhase.Embedding.requestPostTokenize.rawValue,
+      Self.traceEmbed(
+        TracePhase.Embedding.requestPostTokenize.rawValue,
         context: traceCtx,
-        snapshot: .current(),
         extras: [
           "batch_size": "\(batchSize)",
           "max_seq_len": "\(maxLength)",
@@ -155,45 +154,76 @@ public final class MLXEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Sen
           "padding_ratio": String(format: "%.4f", paddingRatio),
         ]
       )
+      // Record the real token count so both embedding backends emit the metric
+      // the /v1/embeddings usage field is documented against.
+      SwiftLMMetrics.observeValue("lmd_embed_batch_tokens_real", Double(totalTokens))
       let mask = (padded .!= padId)
       let tokenTypes = MLXArray.zeros(like: padded)
-      BackendTrace.debug(
-        phase: TracePhase.Embedding.requestPreForward.rawValue,
-        context: traceCtx,
-        snapshot: .current()
-      )
+      Self.traceEmbed(TracePhase.Embedding.requestPreForward.rawValue, context: traceCtx)
       let modelOutput = context.model(
         padded, positionIds: nil, tokenTypeIds: tokenTypes, attentionMask: mask)
-      BackendTrace.debug(
-        phase: TracePhase.Embedding.requestPostForward.rawValue,
-        context: traceCtx,
-        snapshot: .current()
-      )
+      Self.traceEmbed(TracePhase.Embedding.requestPostForward.rawValue, context: traceCtx)
       let result = context.pooling(modelOutput, normalize: true, applyLayerNorm: true)
-      BackendTrace.debug(
-        phase: TracePhase.Embedding.requestPostPool.rawValue,
-        context: traceCtx,
-        snapshot: .current()
-      )
+      Self.traceEmbed(TracePhase.Embedding.requestPostPool.rawValue, context: traceCtx)
       result.eval()
-      BackendTrace.debug(
-        phase: TracePhase.Embedding.requestPostEval.rawValue,
+      Self.traceEmbed(TracePhase.Embedding.requestPostEval.rawValue, context: traceCtx)
+      let rows = Self.extractRows(result)
+      Self.traceEmbed(
+        TracePhase.Embedding.requestPreReturn.rawValue,
         context: traceCtx,
-        snapshot: .current()
-      )
-      let batchCount = result.shape[0]
-      var rows: [[Float]] = []
-      rows.reserveCapacity(batchCount)
-      for i in 0..<batchCount {
-        rows.append(result[i].asArray(Float.self))
-      }
-      BackendTrace.debug(
-        phase: TracePhase.Embedding.requestPreReturn.rawValue,
-        context: traceCtx,
-        snapshot: .current(),
         extras: ["row_count": "\(rows.count)"]
       )
-      return rows
+      return EmbeddingForwardResult(rows: rows, realTokens: totalTokens)
     }
+  }
+
+  /// Emit one embedding trace phase. Split out so `embed` stays within the
+  /// body-length limit; static so the `perform` closure need not capture `self`.
+  private static func traceEmbed(
+    _ phase: String,
+    context: TraceContext,
+    extras: [String: String] = [:]
+  ) {
+    BackendTrace.debug(phase: phase, context: context, snapshot: .current(), extras: extras)
+  }
+
+  /// Tokenize and reject any input past the model's position limit. The pinned
+  /// MLXEmbedders models truncate over-length inputs internally, so without this
+  /// the response would embed a shortened input while reporting the full token
+  /// count. A model with no fixed limit (RoPE) returns nil and embeds any length.
+  private static func encodeAndValidate(
+    _ inputs: [String], context: EmbedderModelContext
+  ) throws -> [[Int]] {
+    let encoded = inputs.map { context.tokenizer.encode(text: $0, addSpecialTokens: true) }
+    if let limit = context.model.maxPositionEmbeddings,
+      let offending = firstOverLength(encoded, limit: limit)
+    {
+      throw EmbeddingInputTooLong(
+        index: offending.index, tokenCount: offending.count, limit: limit)
+    }
+    return encoded
+  }
+
+  /// The first input whose token count exceeds `limit`, or nil when every input
+  /// fits.
+  private static func firstOverLength(
+    _ encoded: [[Int]], limit: Int
+  ) -> (index: Int, count: Int)? {
+    for (index, tokens) in encoded.enumerated() where tokens.count > limit {
+      return (index, tokens.count)
+    }
+    return nil
+  }
+
+  /// Copy each pooled row out of the MLX result into a plain Float array. Split
+  /// out so `embed` stays within the body-length limit.
+  private static func extractRows(_ result: MLXArray) -> [[Float]] {
+    let batchCount = result.shape[0]
+    var rows: [[Float]] = []
+    rows.reserveCapacity(batchCount)
+    for i in 0..<batchCount {
+      rows.append(result[i].asArray(Float.self))
+    }
+    return rows
   }
 }

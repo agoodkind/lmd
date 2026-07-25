@@ -164,6 +164,8 @@ Emitted by the embedding model host (`source_id: host:embedding:<path>`) as it b
 | `lmd_embed_queue_depth` | gauge | Embedding requests waiting for a batch slot. |
 | `lmd_embed_queue_wait_seconds` | histogram | Time an embedding request waited before admission. |
 
+The `/v1/embeddings` response reports real token usage: `usage.prompt_tokens` and `usage.total_tokens` are equal (embeddings have no completion tokens) and count the tokens the forward pass embedded, the same count each backend records as `lmd_embed_batch_tokens_real`. An input longer than the model's maximum context length is rejected with HTTP 400 and code `context_length_exceeded`, matching the OpenAI embeddings API, rather than silently truncated, so the reported usage always matches what was embedded.
+
 ## Trace phases
 
 Phase strings live in `TracePhase` (`Sources/SwiftLMTrace/TracePhase.swift`),

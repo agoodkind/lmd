@@ -443,7 +443,7 @@ func performModelLoad(
       await state.router.requestDone(modelID: descriptor.id)
     }
   } catch let error as ModelRouter.RouteError {
-    if case let .powerPaused(reason) = error {
+    if case .powerPaused(let reason) = error {
       throw brokerServicePausedError(reason: reason)
     }
     throw error
@@ -1248,9 +1248,9 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
     await state.router.embeddingRequestDone(modelID: descriptor.id)
   }
 
-  let vectors: [[Float]]
+  let embedResult: EmbeddingServerResult
   do {
-    vectors = try await embedWithModelServer(
+    embedResult = try await embedWithModelServer(
       server: server,
       inputs: inputs,
       requestID: requestID
@@ -1270,12 +1270,9 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
         "error": String(describing: error),
       ]
     )
-    return errorResponse(
-      status: .serviceUnavailable,
-      message: "embedding failed: \(error)",
-      type: "embedding_failed"
-    )
+    return embeddingFailureResponse(error)
   }
+  let vectors = embedResult.vectors
   // Battery throttle: pace before releasing the slot so consecutive embeds leave
   // a GPU-idle gap. The sleep runs in this handler task, not the router actor, so
   // chat and other routing are never blocked while a request is paced.
@@ -1320,11 +1317,16 @@ func handleEmbeddings(req: Request, state: BrokerState) async throws -> Response
   let rows = vectors.enumerated().map { i, vec in
     EmbRow(object: "embedding", embedding: vec, index: i)
   }
+  // Embeddings have no completion tokens, so total equals the real prompt count
+  // the host tokenized and reported in its usage frame.
   let out = EmbOut(
     object: "list",
     data: rows,
     model: openAIModelId(descriptor),
-    usage: .init(prompt_tokens: 0, total_tokens: 0)
+    usage: .init(
+      prompt_tokens: embedResult.promptTokens,
+      total_tokens: embedResult.promptTokens
+    )
   )
   let data = try JSONEncoder().encode(out)
   BackendTrace.notice(
@@ -2303,5 +2305,26 @@ func errorResponse(
     status: status,
     headers: [.contentType: "application/json"],
     body: .init(byteBuffer: ByteBuffer(data: data))
+  )
+}
+
+// MARK: - embeddingFailureResponse
+
+/// Map an embedding failure to its HTTP response. An over-length input is a
+/// client error, so it matches OpenAI with a 400 and the `context_length_exceeded`
+/// code; every other failure stays a 503.
+func embeddingFailureResponse(_ error: Error) -> Response {
+  if case ModelServerEmbeddingError.contextLengthExceeded(let message) = error {
+    return errorResponse(
+      status: .badRequest,
+      message: EmbeddingErrorEnvelope.clientMessage(message),
+      type: "invalid_request_error",
+      code: EmbeddingErrorEnvelope.contextLengthCode
+    )
+  }
+  return errorResponse(
+    status: .serviceUnavailable,
+    message: "embedding failed: \(error)",
+    type: "embedding_failed"
   )
 }

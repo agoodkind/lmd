@@ -115,6 +115,10 @@ final class ModelCatalogCapabilitiesTests: XCTestCase {
       directory: modelDir,
       json: qwen25VLProcessorConfig()
     )
+    // `allModels` lists only directories that carry weight files, so a config
+    // without weights is skipped as a partial download. Write a placeholder
+    // weight so the catalog surfaces this model and its detected capabilities.
+    try write(filename: "model.safetensors", directory: modelDir, json: "")
 
     let root = modelDir.deletingLastPathComponent().deletingLastPathComponent()
     let models = ModelCatalog(roots: [root.path]).allModels()

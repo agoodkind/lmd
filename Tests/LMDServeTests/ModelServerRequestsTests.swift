@@ -132,24 +132,25 @@ final class ModelServerRequestsTests: XCTestCase {
     expect(server.lastRequest?.stream ?? false) == true
   }
 
-  func testEmbeddingRequestRoundTripsVectorsThroughVectorBlob() async throws {
+  func testEmbeddingRequestRoundTripsVectorsAndUsageTokens() async throws {
     let expected: [[Float]] = [[1, 2, 3], [-1, 0.5, 4]]
     let server = FakeModelServer(modelID: "/m", sizeBytes: 42) { request in
       let (dims, payload) = VectorBlob.encode(expected)
       return [
         .vectors(requestID: request.requestID, dims: dims, payload: payload),
-        .usage(requestID: request.requestID, promptTokens: 0, completionTokens: 0),
+        .usage(requestID: request.requestID, promptTokens: 7, completionTokens: 0),
         .done(requestID: request.requestID),
       ]
     }
 
-    let vectors = try await embedWithModelServer(
+    let result = try await embedWithModelServer(
       server: server,
       inputs: ["a", "b"],
       requestID: UUID()
     )
 
-    expect(vectors) == expected
+    expect(result.vectors) == expected
+    expect(result.promptTokens) == 7
     expect(server.lastRequest?.kind) == .embedding
     expect(server.lastRequest?.stream ?? true) == false
   }
@@ -279,6 +280,18 @@ final class ModelServerRequestsTests: XCTestCase {
     } catch {
       fail("expected VideoChatBackendError, got \(error)")
     }
+  }
+
+  func testEmbeddingMapsContextLengthFailureToTypedError() async {
+    let message = EmbeddingErrorEnvelope.contextLengthMessage(
+      limit: 4_096, tokenCount: 9_000, index: 0)
+    let server = FakeModelServer(modelID: "/m", sizeBytes: 0) { request in
+      [.failed(requestID: request.requestID, message: message)]
+    }
+
+    await expect {
+      try await embedWithModelServer(server: server, inputs: ["a"], requestID: UUID())
+    }.to(throwError(ModelServerEmbeddingError.contextLengthExceeded(message: message)))
   }
 }
 

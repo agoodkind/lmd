@@ -135,13 +135,38 @@ actor EmbeddingHost {
         await queue.release()
       }
     }
-    let vectors: [[Float]]
+    let result: EmbeddingForwardResult
     do {
-      vectors = try await withTaskExecutorPreference(gpuThread) {
+      result = try await withTaskExecutorPreference(gpuThread) {
         try await TraceTaskLocal.$requestID.withValue(request.requestID) {
           try await backend.embed(inputs: inputs)
         }
       }
+    } catch let tooLong as EmbeddingInputTooLong {
+      // Over-length input is a client error, not a server failure. Carry the
+      // shared code so the broker returns an OpenAI-style 400 instead of a 503.
+      recordRequestSpan(
+        request: request,
+        startedAt: requestStartedAt,
+        startedNanoseconds: requestStartedNanoseconds,
+        outcome: "rejected",
+        attributes: [
+          "error": EmbeddingErrorEnvelope.contextLengthCode,
+          "input_index": "\(tooLong.index)",
+          "token_count": "\(tooLong.tokenCount)",
+          "limit": "\(tooLong.limit)",
+        ]
+      )
+      return [
+        .failed(
+          requestID: request.requestID,
+          message: EmbeddingErrorEnvelope.contextLengthMessage(
+            limit: tooLong.limit,
+            tokenCount: tooLong.tokenCount,
+            index: tooLong.index
+          )
+        )
+      ]
     } catch {
       recordRequestSpan(
         request: request,
@@ -155,7 +180,7 @@ actor EmbeddingHost {
       )
       return [.failed(requestID: request.requestID, message: "embed failed: \(error)")]
     }
-    let (dims, payload) = VectorBlob.encode(vectors)
+    let (dims, payload) = VectorBlob.encode(result.rows)
     recordRequestSpan(
       request: request,
       startedAt: requestStartedAt,
@@ -164,14 +189,14 @@ actor EmbeddingHost {
       attributes: [
         "dims": "\(dims)",
         "input_count": "\(inputs.count)",
-        "vector_count": "\(vectors.count)",
+        "vector_count": "\(result.rows.count)",
       ]
     )
-    // Prompt tokens are not cheaply available from the embedding forward pass
-    // without re-tokenizing, so report 0 per the Phase 2 contract.
+    // The forward pass already tokenized the inputs, so report the real token
+    // count it returned. Embeddings have no completion tokens.
     return [
       .vectors(requestID: request.requestID, dims: dims, payload: payload),
-      .usage(requestID: request.requestID, promptTokens: 0, completionTokens: 0),
+      .usage(requestID: request.requestID, promptTokens: result.realTokens, completionTokens: 0),
       .done(requestID: request.requestID),
     ]
   }

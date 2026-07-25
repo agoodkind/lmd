@@ -9,6 +9,41 @@
 import Foundation
 import SwiftLMCore
 
+/// One embedding forward pass: the pooled vectors and the real input token
+/// count the backend tokenized for this batch. Over-length inputs are rejected
+/// rather than truncated, so this count is exactly what the model embedded; it
+/// matches the `lmd_embed_batch_tokens_real` metric and feeds the OpenAI
+/// `usage` fields.
+public struct EmbeddingForwardResult: Sendable {
+  public let rows: [[Float]]
+  public let realTokens: Int
+
+  public init(rows: [[Float]], realTokens: Int) {
+    self.rows = rows
+    self.realTokens = realTokens
+  }
+}
+
+// MARK: - EmbeddingInputTooLong
+
+/// One embedding input tokenized to more tokens than the model can embed. A
+/// tokenizer-owning backend throws this instead of silently truncating, so the
+/// broker can return an OpenAI-style 400 `context_length_exceeded` error and the
+/// caller learns the input was rejected rather than quietly cut.
+public struct EmbeddingInputTooLong: Error, Sendable, Equatable {
+  public let index: Int
+  public let tokenCount: Int
+  public let limit: Int
+
+  public init(index: Int, tokenCount: Int, limit: Int) {
+    self.index = index
+    self.tokenCount = tokenCount
+    self.limit = limit
+  }
+}
+
+// MARK: - EmbeddingBackendProtocol
+
 /// In process embedding backend. No TCP port. MLXEmbedders lives in SwiftLMEmbed.
 public protocol EmbeddingBackendProtocol: AnyObject, Sendable {
   /// Same key as ``ModelDescriptor/id`` (disk path).
@@ -16,8 +51,11 @@ public protocol EmbeddingBackendProtocol: AnyObject, Sendable {
   var sizeBytes: Int64 { get }
   func launch() async throws
   func shutdown()
-  /// Run a forward pass for one batch of input strings. Vectors are L2 normalized when the pooler does so.
-  func embed(inputs: [String]) async throws -> [[Float]]
+  /// Run a forward pass for one batch of input strings, returning the pooled
+  /// vectors (L2 normalized when the pooler does so) and the real token count
+  /// the backend tokenized. The count is a byproduct of the pass, so callers get
+  /// honest usage without tokenizing a second time.
+  func embed(inputs: [String]) async throws -> EmbeddingForwardResult
   /// Total token estimate for a request, used only for priority-lane classification.
   func countTokens(inputs: [String]) -> Int
   /// Apply a battery throttle level. MLX backends shrink the allocator cache at
@@ -25,6 +63,8 @@ public protocol EmbeddingBackendProtocol: AnyObject, Sendable {
   /// not manage a GPU cache are unaffected.
   func applyPowerThrottle(_ level: PowerThrottleLevel)
 }
+
+// MARK: - EmbeddingBackendTokenEstimator
 
 public enum EmbeddingBackendTokenEstimator {
   private static let estimatedBytesPerToken = 4
@@ -50,6 +90,8 @@ public enum EmbeddingBackendTokenEstimator {
   }
 }
 
+// MARK: - EmbeddingBackendProtocol defaults
+
 extension EmbeddingBackendProtocol {
   /// Total token estimate for a request, used only for priority-lane
   /// classification. The default approximates four UTF-8 bytes per token with a
@@ -60,5 +102,7 @@ extension EmbeddingBackendProtocol {
 
   public func applyPowerThrottle(_: PowerThrottleLevel) {}
 }
+
+// MARK: - UnsupportedEmbeddingBackendError
 
 public protocol UnsupportedEmbeddingBackendError: Error, CustomStringConvertible, Sendable {}
