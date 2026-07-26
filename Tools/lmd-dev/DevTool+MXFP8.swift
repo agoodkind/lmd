@@ -7,14 +7,18 @@
 //
 
 import Foundation
+import MLX
 import SwiftLMEmbed
 import SwiftMkCore
 
 private let mxFP8GroupSize = 32
 private let mxFP8Bits = 8
 private let mxFP8Mode = "mxfp8"
-private let mxFP8DestinationSuffix = "-mxfp8"
+private let affineDefaultGroupSize = 64
 private let consolidatedWeightsName = "model.safetensors"
+
+/// An option that takes a value consumes its own name plus that value.
+private let argumentsPerValueOption = 2
 
 /// The shard map belonging to the source checkpoint. Conversion writes one
 /// consolidated weights file, so copying this map would leave the destination
@@ -93,12 +97,27 @@ enum JSONValue: Codable, Equatable, Sendable {
   }
 }
 
+// MARK: - MXFP8ParsedArguments
+
+/// Options as written on the command line, before mode defaults are applied.
+struct MXFP8ParsedArguments {
+  var sourceDirectory: URL
+  var destinationDirectory: URL?
+  var overwrite: Bool = false
+  var mode: String
+  var groupSize: Int?
+  var bits: Int?
+}
+
 // MARK: - MXFP8ConversionOptions
 
 struct MXFP8ConversionOptions: Equatable {
   let sourceDirectory: URL
   let destinationDirectory: URL
   let overwrite: Bool
+  let groupSize: Int
+  let bits: Int
+  let mode: String
 }
 
 // MARK: - DevTool
@@ -135,8 +154,9 @@ extension DevTool {
       from: options.sourceDirectory,
       to: stagingDirectory
     )
-    try writeMXFP8Configuration(
-      at: stagingDirectory.appendingPathComponent("config.json")
+    try writeQuantizationConfiguration(
+      at: stagingDirectory.appendingPathComponent("config.json"),
+      options: options
     )
 
     let destinationWeights =
@@ -144,7 +164,10 @@ extension DevTool {
       .appendingPathComponent(consolidatedWeightsName)
     try NVEmbeddingMXFP8Converter.writeQuantizedWeights(
       sourceDirectory: options.sourceDirectory,
-      destinationFile: destinationWeights
+      destinationFile: destinationWeights,
+      groupSize: options.groupSize,
+      bits: options.bits,
+      mode: try quantizationMode(options.mode)
     )
 
     if fileManager.fileExists(atPath: options.destinationDirectory.path) {
@@ -173,54 +196,119 @@ extension DevTool {
     }
   }
 
+  /// Maps a mode name from the command line onto the MLX quantization mode.
+  private func quantizationMode(_ name: String) throws -> QuantizationMode {
+    guard let mode = QuantizationMode(rawValue: name) else {
+      throw ToolError.usage("unknown quantization mode: \(name)")
+    }
+    return mode
+  }
+
   func mxFP8ConversionOptions(_ arguments: [String]) throws -> MXFP8ConversionOptions {
-    var sourceDirectory = homeDirectory()
-      .appendingPathComponent(".lmstudio/models/nvidia/NV-EmbedCode-7b-v1")
-    var destinationDirectory: URL?
-    var overwrite = false
-    var argumentIndex = 0
-
-    while argumentIndex < arguments.count {
-      let argument = arguments[argumentIndex]
-      switch argument {
-      case "--source":
-        argumentIndex += 1
-        guard argumentIndex < arguments.count else {
-          throw ToolError.usage("--source requires a path")
-        }
-        sourceDirectory = modelDirectoryURL(arguments[argumentIndex])
-      case "--destination":
-        argumentIndex += 1
-        guard argumentIndex < arguments.count else {
-          throw ToolError.usage("--destination requires a path")
-        }
-        destinationDirectory = modelDirectoryURL(arguments[argumentIndex])
-      case "--overwrite":
-        overwrite = true
-      default:
-        throw ToolError.usage(
-          "unknown quantize-nv-embed-mxfp8 option: \(argument)"
-        )
-      }
-      argumentIndex += 1
-    }
-
-    let resolvedDestination: URL
-    if let destinationDirectory {
-      resolvedDestination = destinationDirectory
-    } else {
-      resolvedDestination =
-        sourceDirectory
-        .deletingLastPathComponent()
-        .appendingPathComponent(
-          sourceDirectory.lastPathComponent + mxFP8DestinationSuffix
-        )
-    }
-    return MXFP8ConversionOptions(
-      sourceDirectory: sourceDirectory,
-      destinationDirectory: resolvedDestination,
-      overwrite: overwrite
+    var parsed = MXFP8ParsedArguments(
+      sourceDirectory: homeDirectory()
+        .appendingPathComponent(".lmstudio/models/nvidia/NV-EmbedCode-7b-v1"),
+      mode: mxFP8Mode
     )
+    var argumentIndex = 0
+    while argumentIndex < arguments.count {
+      argumentIndex = try applyArgument(
+        arguments,
+        at: argumentIndex,
+        into: &parsed
+      )
+    }
+    return resolveOptions(parsed)
+  }
+
+  /// Applies one option and returns the index of the next one.
+  ///
+  /// A flag consumes one argument, and an option that takes a value consumes
+  /// two: the option name and the value that follows it.
+  private func applyArgument(
+    _ arguments: [String],
+    at index: Int,
+    into parsed: inout MXFP8ParsedArguments
+  ) throws -> Int {
+    let argument = arguments[index]
+    switch argument {
+    case "--overwrite":
+      parsed.overwrite = true
+      return index + 1
+    case "--source":
+      parsed.sourceDirectory = modelDirectoryURL(
+        try value(arguments, after: index, describing: "--source requires a path"))
+    case "--destination":
+      parsed.destinationDirectory = modelDirectoryURL(
+        try value(arguments, after: index, describing: "--destination requires a path"))
+    case "--mode":
+      parsed.mode = try value(
+        arguments, after: index, describing: "--mode requires a quantization mode")
+    case "--group-size":
+      parsed.groupSize = try integer(
+        arguments, after: index, describing: "--group-size requires an integer")
+    case "--bits":
+      parsed.bits = try integer(
+        arguments, after: index, describing: "--bits requires an integer")
+    default:
+      throw ToolError.usage("unknown quantize-nv-embed-mxfp8 option: \(argument)")
+    }
+    return index + argumentsPerValueOption
+  }
+
+  private func value(
+    _ arguments: [String],
+    after index: Int,
+    describing message: String
+  ) throws -> String {
+    guard index + 1 < arguments.count else {
+      throw ToolError.usage(message)
+    }
+    return arguments[index + 1]
+  }
+
+  private func integer(
+    _ arguments: [String],
+    after index: Int,
+    describing message: String
+  ) throws -> Int {
+    guard let parsed = Int(try value(arguments, after: index, describing: message)) else {
+      throw ToolError.usage(message)
+    }
+    return parsed
+  }
+
+  /// Fills in the defaults each mode implies.
+  ///
+  /// The destination is named after the mode so converting one format never
+  /// overwrites another, which matters while formats are being compared.
+  private func resolveOptions(_ parsed: MXFP8ParsedArguments) -> MXFP8ConversionOptions {
+    let destination =
+      parsed.destinationDirectory
+      ?? parsed.sourceDirectory
+      .deletingLastPathComponent()
+      .appendingPathComponent(
+        parsed.sourceDirectory.lastPathComponent + "-" + parsed.mode
+      )
+    return MXFP8ConversionOptions(
+      sourceDirectory: parsed.sourceDirectory,
+      destinationDirectory: destination,
+      overwrite: parsed.overwrite,
+      groupSize: parsed.groupSize ?? defaultGroupSize(for: parsed.mode),
+      bits: parsed.bits ?? mxFP8Bits,
+      mode: parsed.mode
+    )
+  }
+
+  /// The group size each mode uses unless the caller overrides it.
+  ///
+  /// MX FP8 is fixed at 32 by the format. Affine defaults to 64, matching MLX's
+  /// own default, because a larger group amortizes the per-group scale and bias.
+  private func defaultGroupSize(for mode: String) -> Int {
+    if mode == mxFP8Mode {
+      return mxFP8GroupSize
+    }
+    return affineDefaultGroupSize
   }
 
   private func modelDirectoryURL(_ path: String) -> URL {
@@ -291,7 +379,10 @@ extension DevTool {
   }
 
   /// Records the quantization parameters in the destination model config.
-  private func writeMXFP8Configuration(at configURL: URL) throws {
+  private func writeQuantizationConfiguration(
+    at configURL: URL,
+    options: MXFP8ConversionOptions
+  ) throws {
     Output.debug("mxfp8 write configuration path=\(configURL.path)")
     let data = try Data(contentsOf: configURL)
     guard
@@ -303,9 +394,9 @@ extension DevTool {
       throw ToolError.failure("model config must contain a JSON object: \(configURL.path)")
     }
     configuration["quantization"] = .object([
-      "group_size": .number(Double(mxFP8GroupSize)),
-      "bits": .number(Double(mxFP8Bits)),
-      "mode": .string(mxFP8Mode),
+      "group_size": .number(Double(options.groupSize)),
+      "bits": .number(Double(options.bits)),
+      "mode": .string(options.mode),
     ])
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

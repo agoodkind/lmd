@@ -73,19 +73,30 @@ enum NVEmbeddingQuantization {
     module is Linear
   }
 
-  /// Quantizes a freshly constructed model tree for conversion to MX FP8.
-  static func applyForConversion(to model: Module) {
+  /// Quantizes a freshly constructed model tree for conversion.
+  ///
+  /// The mode is a parameter because the formats differ in how much precision
+  /// they keep. MX FP8 stores one shared power-of-two exponent per group, while
+  /// affine stores a scale and a bias per group, so affine reconstructs weights
+  /// more closely at the same bit width. Which format preserves search results
+  /// against an existing index is decided by measurement, not by choosing here.
+  static func applyForConversion(
+    to model: Module,
+    groupSize: Int,
+    bits: Int,
+    mode: QuantizationMode
+  ) {
     quantize(
       model: model,
-      groupSize: mxFP8GroupSize,
-      bits: mxFP8Bits,
-      mode: .mxfp8,
+      groupSize: groupSize,
+      bits: bits,
+      mode: mode,
       filter: shouldQuantize(path:module:)
     )
     log.info(
       """
-      nv_embedding.quantized_for_conversion mode=\(QuantizationMode.mxfp8.rawValue, privacy: .public) \
-      group_size=\(mxFP8GroupSize, privacy: .public) bits=\(mxFP8Bits, privacy: .public)
+      nv_embedding.quantized_for_conversion mode=\(mode.rawValue, privacy: .public) \
+      group_size=\(groupSize, privacy: .public) bits=\(bits, privacy: .public)
       """
     )
   }
@@ -118,7 +129,59 @@ public enum NVEmbeddingMXFP8Converter {
   /// The source directory is never modified.
   public static func writeQuantizedWeights(
     sourceDirectory: URL,
-    destinationFile: URL
+    destinationFile: URL,
+    groupSize: Int,
+    bits: Int,
+    mode: QuantizationMode
+  ) throws {
+    try runPinnedToOneThread {
+      try convert(
+        sourceDirectory: sourceDirectory,
+        destinationFile: destinationFile,
+        groupSize: groupSize,
+        bits: bits,
+        mode: mode
+      )
+    }
+  }
+
+  /// Runs the conversion on one dedicated OS thread.
+  ///
+  /// MLX keeps Metal command encoders in thread-local storage, so an encoder
+  /// exists only on the thread that first ran GPU work. Loading the weights and
+  /// quantizing them from different threads makes the second call fail with a
+  /// missing GPU stream. This uses a real `Thread` rather than a serial
+  /// `DispatchQueue` because the queue may run its blocks on different threads.
+  private static func runPinnedToOneThread(
+    _ body: @escaping @Sendable () throws -> Void
+  ) throws {
+    let outcome = ConversionOutcome()
+    let finished = DispatchSemaphore(value: 0)
+    let worker = Thread {
+      do {
+        try body()
+      } catch {
+        log.error(
+          "nv_embedding.mxfp8_conversion_failed error=\(String(describing: error), privacy: .public)"
+        )
+        outcome.failure = error
+      }
+      finished.signal()
+    }
+    worker.name = "io.goodkind.lmd.mxfp8"
+    worker.start()
+    finished.wait()
+    if let failure = outcome.failure {
+      throw failure
+    }
+  }
+
+  private static func convert(
+    sourceDirectory: URL,
+    destinationFile: URL,
+    groupSize: Int,
+    bits: Int,
+    mode: QuantizationMode
   ) throws {
     let configData = try Data(
       contentsOf: sourceDirectory.appendingPathComponent("config.json")
@@ -133,10 +196,22 @@ public enum NVEmbeddingMXFP8Converter {
 
     let model = NVMistralBiDirectionalModel(modelConfiguration)
     try loadWeights(modelDirectory: sourceDirectory, model: model)
-    NVEmbeddingQuantization.applyForConversion(to: model)
+    NVEmbeddingQuantization.applyForConversion(
+      to: model,
+      groupSize: groupSize,
+      bits: bits,
+      mode: mode
+    )
 
     let parameters = Dictionary(uniqueKeysWithValues: model.parameters().flattened())
     eval(parameters.values)
     try MLX.save(arrays: parameters, url: destinationFile)
   }
+}
+
+// MARK: - ConversionOutcome
+
+/// Carries a failure out of the conversion thread to the waiting caller.
+private final class ConversionOutcome: @unchecked Sendable {
+  var failure: Error?
 }

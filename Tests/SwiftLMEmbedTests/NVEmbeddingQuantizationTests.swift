@@ -89,7 +89,12 @@ final class NVEmbeddingQuantizationTests: XCTestCase {
         return nil
       }
 
-      NVEmbeddingQuantization.applyForConversion(to: model)
+      NVEmbeddingQuantization.applyForConversion(
+        to: model,
+        groupSize: expectedGroupSize,
+        bits: expectedBits,
+        mode: .mxfp8
+      )
 
       expect(Set(selectedPaths)) == Set(["projection"])
       expect(model.projection is QuantizedLinear) == true
