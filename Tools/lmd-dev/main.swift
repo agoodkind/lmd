@@ -81,6 +81,9 @@ final class DevTool: @unchecked Sendable {
     if try runDaemonCommand(command, rest: rest) {
       return
     }
+    if try runModelCommand(command, rest: rest) {
+      return
+    }
     if try await runQualityCommand(command, rest: rest) {
       return
     }
@@ -136,6 +139,17 @@ final class DevTool: @unchecked Sendable {
       try runBuiltCommand(["tui"])
     case "run-bench":
       try runBuiltCommand(["bench"])
+    default:
+      return false
+    }
+    return true
+  }
+
+  /// Model preparation commands that create local model artifacts.
+  private func runModelCommand(_ command: String, rest: [String]) throws -> Bool {
+    switch command {
+    case "quantize-nv-embed-mxfp8":
+      try quantizeNVEmbedMXFP8(rest)
     default:
       return false
     }
@@ -222,6 +236,8 @@ final class DevTool: @unchecked Sendable {
         build-swiftlm           build the vendored SwiftLM chat binary and its
                                 metallib against lmd's resolved MLX, staged for
                                 install and release (run by the build generate hook)
+        quantize-nv-embed-mxfp8 [--source PATH] [--destination PATH] [--overwrite]
+                                convert NVIDIA NV-EmbedCode weights to MX FP8
         debug                   build every product binary in Debug
         install [Release|Debug] build and copy to PREFIX/bin (default Release)
         test                    run Tuist test for LMDTests
