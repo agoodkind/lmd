@@ -65,6 +65,7 @@ let package = Package(
       dependencies: [
         .product(name: "SwiftMkCore", package: swiftMakefilePackageName),
         .product(name: "BrokerConfigKeys", package: repoRootPackageName),
+        .product(name: "SwiftLMEmbed", package: repoRootPackageName),
       ],
       path: "lmd-dev"
     )

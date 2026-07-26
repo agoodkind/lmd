@@ -146,11 +146,21 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
       context: lifecycleContext(),
       snapshot: .current()
     )
-    try loadWeights(modelDirectory: modelDirectory, model: model)
+    try NVEmbeddingQuantization.validate(configuration.quantization)
+    // loadWeights quantizes exactly the layers whose stored weights carry a
+    // `scales` entry, so the checkpoint decides which layers are quantized and
+    // the loader cannot disagree with it. An unquantized model passes nil here
+    // and loads unchanged.
+    try loadWeights(
+      modelDirectory: modelDirectory,
+      model: model,
+      quantization: configuration.quantization
+    )
     BackendTrace.notice(
       phase: TracePhase.Embedding.spawnWeightsLoaded.rawValue,
       context: lifecycleContext(),
-      snapshot: .current()
+      snapshot: .current(),
+      extras: quantizationExtras(configuration.quantization)
     )
     let tokenizer = try await #huggingFaceTokenizerLoader().load(from: modelDirectory)
     BackendTrace.notice(
@@ -171,6 +181,22 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
       context: lifecycleContext(),
       snapshot: .current()
     )
+  }
+
+  /// Reports the precision the weights were loaded at, so a trace shows whether
+  /// a run served quantized or full-precision weights. An unquantized model
+  /// contributes no extras and its trace output is unchanged.
+  private func quantizationExtras(
+    _ quantization: BaseConfiguration.Quantization?
+  ) -> [String: String] {
+    guard let quantization else {
+      return [:]
+    }
+    return [
+      "quantization_bits": String(quantization.bits),
+      "quantization_group_size": String(quantization.groupSize),
+      "quantization_mode": quantization.mode.rawValue,
+    ]
   }
 
   /// Hard cap on MLX's allocator cache. 2 GiB is large enough to retain

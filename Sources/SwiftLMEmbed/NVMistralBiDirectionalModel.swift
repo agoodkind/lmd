@@ -241,6 +241,7 @@ struct NVMistralBiDirectionalConfiguration: Decodable, Equatable, Sendable {
   let rmsNormEpsilon: Float
   let ropeTheta: Float
   let vocabularySize: Int
+  let quantization: BaseConfiguration.Quantization?
 
   enum CodingKeys: String, CodingKey {
     case hiddenSize = "hidden_size"
@@ -251,6 +252,7 @@ struct NVMistralBiDirectionalConfiguration: Decodable, Equatable, Sendable {
     case rmsNormEpsilon = "rms_norm_eps"
     case ropeTheta = "rope_theta"
     case vocabularySize = "vocab_size"
+    case quantization
   }
 
   init(
@@ -261,7 +263,8 @@ struct NVMistralBiDirectionalConfiguration: Decodable, Equatable, Sendable {
     keyValueHeads: Int,
     rmsNormEpsilon: Float = 1e-5,
     ropeTheta: Float = 10_000,
-    vocabularySize: Int
+    vocabularySize: Int,
+    quantization: BaseConfiguration.Quantization? = nil
   ) {
     self.hiddenSize = hiddenSize
     self.hiddenLayers = hiddenLayers
@@ -271,5 +274,6 @@ struct NVMistralBiDirectionalConfiguration: Decodable, Equatable, Sendable {
     self.rmsNormEpsilon = rmsNormEpsilon
     self.ropeTheta = ropeTheta
     self.vocabularySize = vocabularySize
+    self.quantization = quantization
   }
 }
