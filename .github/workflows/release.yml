@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release-track:
+        description: Release track.
+        required: false
+        default: stable
+        type: choice
+        options:
+          - stable
+          - prerelease
 
 # The caller must grant every permission the called workflow's jobs request.
 permissions:
@@ -16,6 +25,8 @@ jobs:
   release:
     uses: agoodkind/swift-makefile/.github/workflows/_release.yml@main
     with:
+      release-track: ${{ github.event_name == 'workflow_dispatch' && inputs.release-track || '' }}
+      release-on-merge: stable
       runner: macos-26
       brew-packages: ccache cmake
       make-args: "SWIFT_MK_BUILD_CACHE=ccache"
