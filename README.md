@@ -1,18 +1,12 @@
 # lmd
 
-A single-binary LM Studio replacement for Apple Silicon.
-
-`lmd` owns every part of the local-LLM workstation experience:
-
 - **broker** on `localhost:5400` exposes an OpenAI-compatible HTTP API over any MLX model on disk
 - **JIT model routing** spawns a dedicated [SwiftLM](https://github.com/SharpAI/SwiftLM) child per model, allocates ports from a pool, shuts them down under memory pressure
 - **sensor sampling** to `memory.jsonl` for thermal, battery, and power time-series
-- **fan control** is disabled in `lmd-serve` during the current moratorium; macOS owns fans while the broker runs
 - **multi-tab TUI** (monitor, library, bench, events) rendered in raw terminal mode
 - **benchmark orchestrator** for long-running model comparison jobs
 
-One subsystem for unified logs (`io.goodkind.lmd`). One daemon
-(`lmd-serve`). One interactive tool (`lmd-tui`).
+TODO add pointer for other docs including logging and metrics
 
 ## Install
 
@@ -20,11 +14,7 @@ One subsystem for unified logs (`io.goodkind.lmd`). One daemon
 make install
 ```
 
-This:
-1. Builds release binaries via SwiftPM (`swift build -c release`) and the MLX Metal shader library (`default.metallib`) via Tuist + xcodebuild. Both halves are required; see `Tools/lmd-dev.swift` for the rationale.
-2. Copies the binaries and `mlx-swift_Cmlx.bundle` to `~/Library/Application Support/io.goodkind.lmd/bin/` (override with `PREFIX=/opt/...`).
-3. Writes `~/Library/LaunchAgents/io.goodkind.lmd.serve.plist` from the template with your install path substituted in.
-4. `launchctl bootstrap`s the agent into the current GUI session.
+TODO: document install script
 
 The broker starts running immediately and at every subsequent login. Requires Xcode (for `xcodebuild` + `tuist`) and a SwiftPM toolchain matching `Package.swift`'s `swift-tools-version`.
 
@@ -37,9 +27,6 @@ The broker starts running immediately and at every subsequent login. Requires Xc
 | `lmd-tui` | Interactive dashboard (monitor / library / bench / events tabs). | Foreground while the user wants it open. |
 | `lmd-bench` | Benchmark orchestrator. Long runs that survive terminal close. | Foreground or detached via `nohup`. |
 | `lmd-qa` | TUI QA harness for CI (three drivers: tmux, pty, iTerm). | CI only. |
-
-The broker on 5400 speaks the OpenAI API. Point Cursor, humanify, or
-anything else at `http://localhost:5400` and it just works.
 
 To use and observe a running lmd from another tool or agent, see [docs/operations.md](docs/operations.md).
 
@@ -109,51 +96,7 @@ make restart-serve      # pick up a new broker binary under launchd
 make uninstall          # remove binaries + LaunchAgent
 ```
 
-Every Make target is a thin alias over `Tools/lmd-dev.swift`. To skip Make and call it directly: `swift Tools/lmd-dev.swift help`.
-
-## Layout
-
-```
-lmd/
-  Package.swift          SwiftPM package (executables + library targets)
-  Project.swift          Tuist Xcode project (used only to compile default.metallib)
-  Tuist.swift            Tuist configuration shim
-  Tuist/                 Tuist's own SwiftPM resolution for project generation
-  Tools/
-    lmd-dev.swift        Swift-script driver behind every Make target
-  Sources/
-    AppLogger/           shared os.Logger + swift-log bridge
-    SwiftLMCore/         model descriptors, shared types
-    SwiftLMBackend/      SwiftLM child-process lifecycle + MLX VLM video backend
-    SwiftLMEmbed/        embedding backend families (MLXEmbedders + native NVIDIA)
-    SwiftLMRuntime/      router, bench config + orchestrator, fan policy library, event bus
-    SwiftLMMonitor/      macmon client, sensor sampler, battery reader
-    SwiftLMControl/      XPC broker client + protocol
-    SwiftLMTUI/          tab protocol, panels, ANSI + input parsers
-    LMDServeSupport/     HTTP routing helpers shared between lmd-serve and tests
-    lmd/                 dispatcher (lmd <subcommand>)
-    lmd-serve/           broker + sampler daemon
-    lmd-tui/             interactive dashboard
-    lmd-bench/           benchmark runner
-    lmd-qa/              three-driver TUI QA harness
-  Tests/
-    SwiftLMTUITests/     tab render snapshots
-    SwiftLMRuntimeTests/ bench, router, fan logic, model catalog capabilities
-    SwiftLMBackendTests/ SwiftLM server config, MLX VLM video backend
-    SwiftLMCoreTests/    model capabilities
-    SwiftLMControlTests/ broker protocol
-    LMDServeTests/       video chat routing
-    IntegrationTests/    binary launch + SIGINT, embeddings route
-    Fixtures/            shared inputs (log categories, tuiqa coverage)
-  deploy/
-    io.goodkind.lmd.serve.plist.example   LaunchAgent template
-    homebrew/                              brew formula
-  plan/
-    VIDEO_ROUTING_FINAL_DECISION.md        boundary for video request routing
-```
-
 ## Related projects
 
-- [SwiftLM](https://github.com/SharpAI/SwiftLM) upstream MLX inference engine; `lmd-serve` spawns one child per loaded model.
 - [macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) Swift package linked by the fan policy library. `lmd-serve` does not currently take over fans.
-- [fancurveagent](https://github.com/agoodkind/macos-fan-curve) the LaunchAgent that owns fans independently of `lmd-serve` during the current moratorium.
+- [Fan Curve](https://github.com/agoodkind/macos-fan-curve) the LaunchAgent that owns fans independently of `lmd-serve` during the current moratorium.
