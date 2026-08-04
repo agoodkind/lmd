@@ -164,7 +164,7 @@ Two parallel pipelines share one identity and one team, and both run through `To
 
 **Local.** `make dist` runs `make build`, then `lmd-dev sign`, then `lmd-dev notarize`. It reads identity, team, bundle prefix, and notary keychain profile from `config/signing.env`. Create the keychain profile once with `make notary-setup`.
 
-**CI.** `.github/workflows/release.yml` runs on every push to `main`. It imports a single-identity `.p12` from secrets into a temporary keychain with `lmd-dev ci-import-cert`, signs with `lmd-dev ci-sign`, and notarizes with `lmd-dev ci-notarize` using App Store Connect API key credentials. It then tags `YYYYMMDDHHmm-<hex-run>-<sha>` and creates a GitHub Release with the notarized zip attached.
+**CI.** `.github/workflows/release.yml` runs on every push to `main` and supports manual dispatch. It imports a single-identity `.p12` from secrets into a temporary keychain with `lmd-dev ci-import-cert`, signs with `lmd-dev ci-sign`, and notarizes with `lmd-dev ci-notarize` using App Store Connect API key credentials. Main pushes publish stable releases with UTC calendar tags in `yy.m.d` form. If that day's base tag exists, the workflow appends the next `-rN` revision. Manual dispatch can instead select a prerelease, tagged `<yy.m.d>-pre.<YYYYMMDDHHmm>+<sha>`. Each release attaches the notarized zip.
 
 Bare CLI binaries cannot be `stapler staple`d, so first-launch Gatekeeper checks reach the network. Wrapping into a `.pkg` would make distribution offline-friendly, and that remains an open task.
 
