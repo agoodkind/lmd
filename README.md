@@ -7,7 +7,7 @@
 - **benchmark orchestrator** for long-running model comparison jobs
 
 TODO add pointer for other docs including logging and metrics
-
+TODO add doc for the forks of mlx-* and SwiftLM and why (gemma, etc)
 ## Install
 
 ```
@@ -16,9 +16,7 @@ make install
 
 TODO: document install script
 
-The broker starts running immediately and at every subsequent login. Requires Xcode (for `xcodebuild` + `tuist`) and a SwiftPM toolchain matching `Package.swift`'s `swift-tools-version`.
-
-## Binaries
+The broker starts running immediately and at every subsequent login. 
 
 | Binary | Role | Lifecycle |
 |---|---|---|
@@ -32,16 +30,7 @@ To use and observe a running lmd from another tool or agent, see [docs/operation
 
 ## Video
 
-`POST /v1/chat/completions` may include OpenAI-style `video_url` content parts
-for models whose catalog capabilities advertise `video: true`.
-
-`lmd` stays dumb here on purpose. It validates that `video_url.url` points to a
-local file and routes that file through to the MLX VLM backend. `lmd` does not
-decode, retime, or expand the video itself. Temporal sampling is backend-owned.
-
-With the current Swift Qwen video processors in upstream `mlx-swift-lm`, that
-backend-owned policy is `2 FPS`, so video support is honest routing support, not
-high-fidelity subtle-animation analysis.
+TODO; add doc about video 
 
 ## Environment
 
