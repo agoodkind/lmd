@@ -62,6 +62,6 @@ jobs:
       # notarize step is disabled; the pattern still drives attestation.
       notarize: false
       notarize-pattern: "*.zip"
-      signing-identity-name: "Developer ID Application: Alex Goodkind (H3BMXM4W7H)"
-      apple-team-id: H3BMXM4W7H
+      signing-identity-name: ${{ vars.APPLE_DEVELOPER_ID_IDENTITY }}
+      apple-team-id: ${{ vars.APPLE_TEAM_ID }}
     secrets: inherit
