@@ -3,6 +3,11 @@ name: Release
 on:
   push:
     branches: [main]
+  # A pull request runs the whole signed pipeline and stops before publishing, so
+  # a change that breaks signing, notarization, or packaging fails here instead of
+  # on main. Without it the first thing to exercise the release path is the merge
+  # itself, and a broken release is found only once it cannot be undone.
+  pull_request:
   workflow_dispatch:
     inputs:
       release-track:
@@ -14,6 +19,12 @@ on:
           - stable
           - prerelease
 
+# One group per ref. A new pull request push cancels its own superseded dry run,
+# while a push to main is a real release and never cancels an in-flight publish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # The caller must grant every permission the called workflow's jobs request.
 permissions:
   contents: write
@@ -23,8 +34,24 @@ permissions:
 
 jobs:
   release:
+    # A fork pull request cannot read this repository's signing secrets, so the
+    # signed run would fail for a reason the contributor cannot fix. Dependabot
+    # branches live in this repository and pass that check, but a Dependabot pull
+    # request reads its own secret store rather than the Actions one, so the shared
+    # workflow's signed dry run would exit on missing credentials every time.
+    if: >-
+      ${{ github.event_name != 'pull_request'
+      || (github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]') }}
     uses: agoodkind/swift-makefile/.github/workflows/_release.yml@main
     with:
+      ephemeral: ${{ github.event_name == 'pull_request' }}
+      # This build compiles MLX and takes about 41 minutes on its own, and it now
+      # also uploads a 2.6 GB build cache and a 287 MB compile cache in its post
+      # steps. Under the shared 45 minute default the first dry run was cancelled
+      # mid-upload at 45m6s, after the artifacts had already been produced. The
+      # uploads are what make the next build cheap, so the budget covers them.
+      timeout-minutes: 70
       release-track: ${{ github.event_name == 'workflow_dispatch' && inputs.release-track || '' }}
       release-on-merge: stable
       runner: macos-26
