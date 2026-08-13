@@ -39,6 +39,16 @@ jobs:
       # Distribution, and one shared slot for both was a defect once already.
       signing-identity-name: ${{ vars.APPLE_DEVELOPER_ID_IDENTITY }}
       apple-team-id: ${{ vars.APPLE_TEAM_ID }}
+      # Run the signed release stages inside Verify on the machine whose ccache
+      # and compilation cache the verify build just filled, so a pull request
+      # takes one macOS slot for the whole signed pipeline. notarize-pattern
+      # stays unset because the release hook notarizes its own zip (a zip of
+      # bare binaries cannot be stapled), reading the same APPLE_NOTARY_* trio
+      # the gate's release stage exports.
+      release-dry-run: true
+      # The verify build alone measured 55m50s hosted; the release half replays
+      # this machine's warm caches, and this ceiling covers both.
+      release-timeout-minutes: 90
       extra-cache-paths: |
         .build
         Tuist/.build
