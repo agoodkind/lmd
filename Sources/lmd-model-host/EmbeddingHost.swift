@@ -128,7 +128,8 @@ actor EmbeddingHost {
       )
       return [.failed(requestID: request.requestID, message: "bad embeddings input: \(error)")]
     }
-    let realTokens = backend.countTokens(inputs: inputs)
+    let tokenCounts = inputs.map { backend.countTokens(inputs: [$0]) }
+    let realTokens = tokenCounts.reduce(0, +)
     let priority =
       inputs.count <= tuning.priorityMaxInputs || realTokens < tuning.priorityMaxTokens
     let result: EmbeddingForwardResult
@@ -136,6 +137,7 @@ actor EmbeddingHost {
       result = try await embedInSlices(
         backend: backend,
         inputs: inputs,
+        tokenCounts: tokenCounts,
         priority: priority,
         requestID: request.requestID
       )
@@ -205,6 +207,7 @@ actor EmbeddingHost {
   private func embedInSlices(
     backend: EmbeddingBackendProtocol,
     inputs: [String],
+    tokenCounts: [Int],
     priority: Bool,
     requestID: UUID
   ) async throws -> EmbeddingForwardResult {
@@ -212,7 +215,6 @@ actor EmbeddingHost {
     if priority || !tuning.priorityLaneEnabled {
       ranges = [0..<inputs.count]
     } else {
-      let tokenCounts = inputs.map { backend.countTokens(inputs: [$0]) }
       ranges = EmbeddingSlicePlan.ranges(tokenCounts: tokenCounts, maxTokens: Self.sliceMaxTokens)
     }
     var rows: [[Float]] = []
