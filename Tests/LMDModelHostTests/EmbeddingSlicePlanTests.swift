@@ -1,3 +1,11 @@
+//
+//  EmbeddingSlicePlanTests.swift
+//  LMDModelHostTests
+//
+//  Created by Alexander Goodkind <alex@goodkind.io> on 2026-10-04.
+//  Copyright © 2026, all rights reserved.
+//
+
 import Nimble
 import XCTest
 
