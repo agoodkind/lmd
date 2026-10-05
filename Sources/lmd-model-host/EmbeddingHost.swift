@@ -24,6 +24,10 @@ private let log = AppLogger.logger(category: "EmbeddingHost")
 /// In-process embedding serving for `lmd-model-host`. Holds the loaded backend
 /// and turns a `BackendRequest` into the broker-facing frame sequence.
 actor EmbeddingHost {
+  /// Token limit of one slice of a batch request. A priority request waits for
+  /// at most one slice.
+  private static let sliceMaxTokens = 2_048
+
   private let modelPath: String
   let tuning: EmbeddingRuntimeTuning
   private let queue: EmbeddingJobQueue
@@ -124,24 +128,19 @@ actor EmbeddingHost {
       )
       return [.failed(requestID: request.requestID, message: "bad embeddings input: \(error)")]
     }
-    let realTokens = backend.countTokens(inputs: inputs)
+    let tokenCounts = inputs.map { backend.countTokens(inputs: [$0]) }
+    let realTokens = tokenCounts.reduce(0, +)
     let priority =
       inputs.count <= tuning.priorityMaxInputs || realTokens < tuning.priorityMaxTokens
-    await queue.acquire(priority: priority)
-    let queue = self.queue
-    defer {
-      // `defer` cannot await, so this task releases the actor-owned slot after every exit.
-      Task {
-        await queue.release()
-      }
-    }
     let result: EmbeddingForwardResult
     do {
-      result = try await withTaskExecutorPreference(gpuThread) {
-        try await TraceTaskLocal.$requestID.withValue(request.requestID) {
-          try await backend.embed(inputs: inputs)
-        }
-      }
+      result = try await embedInSlices(
+        backend: backend,
+        inputs: inputs,
+        tokenCounts: tokenCounts,
+        priority: priority,
+        requestID: request.requestID
+      )
     } catch let tooLong as EmbeddingInputTooLong {
       // Over-length input is a client error, not a server failure. Carry the
       // shared code so the broker returns an OpenAI-style 400 instead of a 503.
@@ -199,6 +198,54 @@ actor EmbeddingHost {
       .usage(requestID: request.requestID, promptTokens: result.realTokens, completionTokens: 0),
       .done(requestID: request.requestID),
     ]
+  }
+
+  /// Runs the forward passes of one request. A batch request above
+  /// `sliceMaxTokens` runs one forward per slice and releases the queue slot
+  /// after each slice. A waiting priority request acquires the slot before the
+  /// next slice, because all forwards run on one GPU thread.
+  private func embedInSlices(
+    backend: EmbeddingBackendProtocol,
+    inputs: [String],
+    tokenCounts: [Int],
+    priority: Bool,
+    requestID: UUID
+  ) async throws -> EmbeddingForwardResult {
+    let ranges: [Range<Int>]
+    if priority || !tuning.priorityLaneEnabled {
+      ranges = [0..<inputs.count]
+    } else {
+      ranges = EmbeddingSlicePlan.ranges(tokenCounts: tokenCounts, maxTokens: Self.sliceMaxTokens)
+    }
+    var rows: [[Float]] = []
+    rows.reserveCapacity(inputs.count)
+    var realTokens = 0
+    for range in ranges {
+      let slice = Array(inputs[range])
+      await queue.acquire(priority: priority)
+      let result: EmbeddingForwardResult
+      do {
+        result = try await withTaskExecutorPreference(gpuThread) {
+          try await TraceTaskLocal.$requestID.withValue(requestID) {
+            try await backend.embed(inputs: slice)
+          }
+        }
+      } catch let tooLong as EmbeddingInputTooLong {
+        await queue.release()
+        throw EmbeddingInputTooLong(
+          index: tooLong.index + range.lowerBound,
+          tokenCount: tooLong.tokenCount,
+          limit: tooLong.limit
+        )
+      } catch {
+        await queue.release()
+        throw error
+      }
+      await queue.release()
+      rows.append(contentsOf: result.rows)
+      realTokens += result.realTokens
+    }
+    return EmbeddingForwardResult(rows: rows, realTokens: realTokens)
   }
 
   private func recordRequestSpan(
