@@ -86,7 +86,7 @@ extension DevTool {
 
     let stampInputs = try swiftLMStampInputs(
       swiftLMDirectory: swiftLMDirectory, mlxCommits: mlxCommits)
-    let releaseDirectory = swiftLMReleaseDirectory(swiftLMDirectory)
+    let releaseDirectory = try swiftLMReleaseDirectory(swiftLMDirectory)
     let builtBinary = releaseDirectory.appendingPathComponent(swiftLMBinaryName)
     let builtMetallib = releaseDirectory.appendingPathComponent("default.metallib")
     let alreadyBuilt =
@@ -101,10 +101,11 @@ extension DevTool {
       try ensureCMake()
       try ensureMetalToolchainForSwiftLM()
       try compileSwiftLMBinary(in: swiftLMDirectory)
-      try compileSwiftLMMetallib(in: swiftLMDirectory)
+      try compileSwiftLMMetallib(in: swiftLMDirectory, releaseDirectory: releaseDirectory)
     }
 
-    try buildSwiftLMNaxMetallibs(in: swiftLMDirectory, rebuild: didHeavyBuild)
+    try buildSwiftLMNaxMetallibs(
+      in: swiftLMDirectory, releaseDirectory: releaseDirectory, rebuild: didHeavyBuild)
 
     // Record the stamp only after the nax metallibs also built, so a nax failure
     // does not leave a success stamp that skips the rebuild and ships a partial
@@ -114,7 +115,7 @@ extension DevTool {
     }
 
     try stageSwiftLMArtifacts(
-      from: swiftLMDirectory, into: swiftLMStagingDirectory(configuration: configuration))
+      from: releaseDirectory, into: swiftLMStagingDirectory(configuration: configuration))
   }
 }
 
@@ -128,10 +129,17 @@ extension DevTool {
     buildDirectory(configuration: configuration).appendingPathComponent("swiftlm")
   }
 
-  /// SwiftLM's SwiftPM Release product directory, where the chat binary and the
-  /// colocated metallib live.
-  private func swiftLMReleaseDirectory(_ swiftLMDirectory: URL) -> URL {
-    swiftLMDirectory.appendingPathComponent(".build/arm64-apple-macosx/release")
+  /// Ask SwiftPM for the Release directory because build systems use different output layouts.
+  private func swiftLMReleaseDirectory(_ swiftLMDirectory: URL) throws -> URL {
+    let arguments = [
+      "build", "--package-path", swiftLMDirectory.path, "-c", "release", "--show-bin-path",
+    ]
+    let path = try runCaptured(swiftCommand, arguments).output
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !path.isEmpty else {
+      throw ToolError.failure("swift build --show-bin-path returned no path for SwiftLM")
+    }
+    return URL(fileURLWithPath: path)
   }
 
   /// Initialize the SwiftLM submodule and its nested MLX submodules, so a
@@ -260,13 +268,15 @@ extension DevTool {
   /// 3.1). Built from SwiftLM's own source so the kernels always match the MLX
   /// the chat binary links, independent of lmd's in-process `Derived/nax`. Skips
   /// when the metallibs already exist and no heavy rebuild ran.
-  private func buildSwiftLMNaxMetallibs(in swiftLMDirectory: URL, rebuild: Bool) throws {
+  private func buildSwiftLMNaxMetallibs(
+    in swiftLMDirectory: URL, releaseDirectory: URL, rebuild: Bool
+  ) throws {
     Output.debug("buildSwiftLMNaxMetallibs rebuild=\(rebuild)")
     let kernelsDirectory = swiftLMDirectory.appendingPathComponent(
       "mlx-swift/Source/Cmlx/mlx/mlx/backend/metal/kernels")
     let probe = kernelsDirectory.appendingPathComponent(
       "steel/gemm/kernels/steel_gemm_fused_nax.metal")
-    let naxOutput = swiftLMReleaseDirectory(swiftLMDirectory).appendingPathComponent("nax")
+    let naxOutput = releaseDirectory.appendingPathComponent("nax")
     guard fileManager.fileExists(atPath: probe.path) else {
       // Remove any nax/ from a prior SwiftLM/MLX revision so stageSwiftLMArtifacts
       // does not stage stale kernels; without live source the chat child JITs,
@@ -306,7 +316,7 @@ extension DevTool {
   /// Compile SwiftLM's Metal shader library with cmake, mirroring SwiftLM's CI,
   /// then colocate it as `default.metallib` beside the binary where the mlx
   /// loader resolves it.
-  private func compileSwiftLMMetallib(in swiftLMDirectory: URL) throws {
+  private func compileSwiftLMMetallib(in swiftLMDirectory: URL, releaseDirectory: URL) throws {
     Output.debug("compileSwiftLMMetallib")
     let metallibBuildDirectory = swiftLMDirectory.appendingPathComponent(".build/metallib_build")
     try removeIfExists(metallibBuildDirectory)
@@ -326,7 +336,6 @@ extension DevTool {
       throw ToolError.failure(
         "metallib build produced no mlx.metallib under \(metallibBuildDirectory.path)")
     }
-    let releaseDirectory = swiftLMReleaseDirectory(swiftLMDirectory)
     try fileManager.createDirectory(at: releaseDirectory, withIntermediateDirectories: true)
     try copyReplacingItem(
       at: builtMetallib, to: releaseDirectory.appendingPathComponent("default.metallib"))
@@ -334,10 +343,9 @@ extension DevTool {
 
   /// Copy the built SwiftLM binary and its `default.metallib` into the staging
   /// subdirectory install and release read from.
-  private func stageSwiftLMArtifacts(from swiftLMDirectory: URL, into staging: URL) throws {
+  private func stageSwiftLMArtifacts(from releaseDirectory: URL, into staging: URL) throws {
     Output.debug("stageSwiftLMArtifacts staging=\(staging.path)")
     try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
-    let releaseDirectory = swiftLMReleaseDirectory(swiftLMDirectory)
     for name in [swiftLMBinaryName, "default.metallib"] {
       let source = releaseDirectory.appendingPathComponent(name)
       guard fileManager.fileExists(atPath: source.path) else {
