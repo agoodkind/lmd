@@ -36,6 +36,7 @@ If you find yourself enumerating targets, categories, or filenames in prose, lin
 ## 3. Architecture invariants
 
 - **One broker, many clients.** `lmd-serve` is a singleton LaunchAgent, registered under the `MachServices` entry `io.goodkind.lmd.control`. Every other executable is a short-lived client that reaches it over `XPCSession`. See `Sources/SwiftLMControl/BrokerClient.swift`.
+- **File headers use git config.** New Swift files stamp `Created by <name> <<email>> on YYYY-MM-DD` from `git config user.name` and `git config user.email`. Do not copy a commit `Co-authored-by` identity into a file header. Do not hardcode a person name.
 - **Clients close their session.** Every client calls `client.close()` before its process exits, which calls `session.cancel(reason:)`. Skipping this trips an `_xpc_api_misuse` SIGTRAP at deinit.
 - **`XPCListener(service:)` works only under launchd.** `Sources/lmd-serve/XPCControl.swift` guards on `XPC_SERVICE_NAME` and throws a typed skip error when the process runs outside launchd, such as in tests or a foreground `make run-serve`. Do not bypass that guard.
 - **No file logging anywhere.** Every plist sets `StandardOutPath` to `/dev/null`, and operators read logs with `log stream --subsystem io.goodkind.lmd`. `StandardErrorPath` points at a real file under `~/Library/Logs/` so Swift runtime crash banners survive long enough to diagnose, because the os.Logger pipeline does not capture stderr. Those banners include `Fatal error:`, `Precondition failed:`, and native `SIGSEGV` from MLX or NIO.

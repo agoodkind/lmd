@@ -14,6 +14,13 @@ on:
           - stable
           - prerelease
 
+# One group per ref. Every run this workflow now takes is a real release, so
+# none of them cancels an in-flight publish. The signed dry run moved into CI's
+# Verify job and is no longer triggered here.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 # The caller must grant every permission the called workflow's jobs request.
 permissions:
   contents: write
@@ -25,6 +32,12 @@ jobs:
   release:
     uses: agoodkind/swift-makefile/.github/workflows/_release.yml@main
     with:
+      # This build compiles MLX and takes about 41 minutes on its own, and it now
+      # also uploads a 2.6 GB build cache and a 287 MB compile cache in its post
+      # steps. Under the shared 45 minute default the first dry run was cancelled
+      # mid-upload at 45m6s, after the artifacts had already been produced. The
+      # uploads are what make the next build cheap, so the budget covers them.
+      timeout-minutes: 70
       release-track: ${{ github.event_name == 'workflow_dispatch' && inputs.release-track || '' }}
       release-on-merge: stable
       runner: macos-26
@@ -35,6 +48,6 @@ jobs:
       # notarize step is disabled; the pattern still drives attestation.
       notarize: false
       notarize-pattern: "*.zip"
-      signing-identity-name: "Developer ID Application: Alex Goodkind (H3BMXM4W7H)"
-      apple-team-id: H3BMXM4W7H
+      signing-identity-name: ${{ vars.APPLE_DEVELOPER_ID_IDENTITY }}
+      apple-team-id: ${{ vars.APPLE_TEAM_ID }}
     secrets: inherit
