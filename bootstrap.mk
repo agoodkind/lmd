@@ -23,17 +23,11 @@ SWIFT_MK_CODELOAD_BASE ?= https://codeload.github.com
 
 SWIFT_MK_BOOTSTRAP := .make/scripts/swift-mk-bootstrap.sh
 
-# Obtain the standalone helper script, and nothing else: swift.mk and every other
-# engine asset arrive through running it, right below. Never destructive: a helper
-# already on disk is left exactly as it is (this is what makes a warm parse free of
-# this step entirely), SWIFT_MK_DEV_DIR is checked first so a developer's checkout
-# always wins, and only a genuinely missing helper reaches the network. The one
-# fetch that can happen here pulls the pinned-ref tarball from the same
-# SWIFT_MK_CODELOAD_BASE/SWIFT_MK_API_REPO/SWIFT_MK_API_REF triple the engine
-# snapshot itself already uses elsewhere, extracting only this one file from it.
-# Deliberately not SWIFT_MK_BASE_URL, which hardcodes /main and would pin a
-# ref-pinned consumer's helper to main forever. A cold, offline start is the one
-# unavoidable hard failure.
+# The block downloads the tarball for SWIFT_MK_API_REF because
+# SWIFT_MK_BASE_URL would select main for consumers pinned to another ref.
+# The block reuses a nonempty cached helper unless SWIFT_MK_DEV_DIR supplies
+# scripts/swift-mk-bootstrap.sh.
+# Every branch ends with chmod +x on .make/scripts/swift-mk-bootstrap.sh.
 define _swift_mk_get_bootstrap
 	set -euo pipefail; \
 	if [[ -n "$(SWIFT_MK_DEV_DIR)" && -f "$(SWIFT_MK_DEV_DIR)/scripts/swift-mk-bootstrap.sh" ]]; then \
@@ -170,7 +164,7 @@ endif
 # helper a second time and cost a second network round trip on an
 # already-warm parse.
 #
-# Every SWIFT_MK_* variable THE HELPER READS is forwarded explicitly. That is
+# Every SWIFT_MK_* variable the helper reads is forwarded explicitly. That is
 # the six below, which is the complete set the helper references.
 #
 # SWIFT_MK_BASE_URL is deliberately not among them: the helper never reads it.
