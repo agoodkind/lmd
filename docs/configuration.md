@@ -29,6 +29,7 @@ registry the plist and this doc are checked against.
 | `LMD_EMBED_BATCH_MAX_ROWS` | int | >= 1 | `256` | Max input rows admitted into one embedding batch. |
 | `LMD_EMBED_PRIORITY_MAX_INPUTS` | int | >= 0 | `2` | Max input count for requests that can use the embedding priority lane. |
 | `LMD_EMBED_PRIORITY_MAX_TOKENS` | int | >= 0 | `2048` | Max token count for requests that can use the embedding priority lane. |
+| `LMD_EMBED_SLICE_MAX_TOKENS` | int | >= 1 and <= LMD_EMBED_BATCH_TOKEN_BUDGET when the batch budget is explicit. | `512` | The value limits tokens in each slice of a non-priority batch request. The host runs one forward pass per slice. A waiting priority request runs before the next slice. |
 | `LMD_EMBED_PRIORITY_LANE` | bool | as above | `true` | Whether the embedding priority lane is enabled. |
 | `LMD_BATTERY_THROTTLE_PCT` | int | 0..100 | `20` | Battery charge at or below which the hard stop engages: new chat and embedding requests are refused with HTTP 503 while in-flight requests drain. Held until `LMD_BATTERY_RESUME_PCT`. `0` disables the monitor. |
 | `LMD_BATTERY_MILD_PCT` | int | 0..100, and `> LMD_BATTERY_THROTTLE_PCT` and `< LMD_BATTERY_RESUME_PCT` | `35` | Battery charge at or below which the mild embedding slow-down engages. A plain band with no hold: it applies between this value and `LMD_BATTERY_THROTTLE_PCT`, and turns off above it. |

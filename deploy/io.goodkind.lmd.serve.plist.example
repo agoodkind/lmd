@@ -67,6 +67,8 @@
         <string>2</string>
         <key>LMD_EMBED_PRIORITY_MAX_TOKENS</key>
         <string>2048</string>
+        <key>LMD_EMBED_SLICE_MAX_TOKENS</key>
+        <string>512</string>
         <key>LMD_EMBED_PRIORITY_LANE</key>
         <string>true</string>
         <key>LMD_BATTERY_THROTTLE_PCT</key>

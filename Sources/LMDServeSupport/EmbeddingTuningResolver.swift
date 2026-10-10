@@ -22,6 +22,7 @@ public struct EmbeddingHostTuning: Equatable, Sendable {
   public let maxRows: Int
   public let priorityMaxInputs: Int
   public let priorityMaxTokens: Int
+  public let sliceMaxTokens: Int
   public let priorityLaneEnabled: Bool
   public let maxConcurrentForwards: Int
 
@@ -31,6 +32,7 @@ public struct EmbeddingHostTuning: Equatable, Sendable {
     maxRows: Int,
     priorityMaxInputs: Int,
     priorityMaxTokens: Int,
+    sliceMaxTokens: Int,
     priorityLaneEnabled: Bool,
     maxConcurrentForwards: Int
   ) {
@@ -39,6 +41,7 @@ public struct EmbeddingHostTuning: Equatable, Sendable {
     self.maxRows = maxRows
     self.priorityMaxInputs = priorityMaxInputs
     self.priorityMaxTokens = priorityMaxTokens
+    self.sliceMaxTokens = sliceMaxTokens
     self.priorityLaneEnabled = priorityLaneEnabled
     self.maxConcurrentForwards = maxConcurrentForwards
   }

@@ -93,6 +93,7 @@ public struct BrokerConfig: Sendable {
   public let embedBatchMaxRows: Int
   public let embedPriorityMaxInputs: Int
   public let embedPriorityMaxTokens: Int
+  public let embedSliceMaxTokens: Int
   public let embedPriorityLaneEnabled: Bool
   /// nil means auto: the broker sizes the cache from free memory at startup and
   /// at embedding-host spawn time. Blank LMD_MLX_CACHE_LIMIT_GB requests auto.
@@ -217,6 +218,7 @@ public struct BrokerConfig: Sendable {
     let embedMaxRowsValue = requireInt(.embedBatchMaxRows, min: 1)
     let embedPriorityInputsValue = requireInt(.embedPriorityMaxInputs, min: 0)
     let embedPriorityTokensValue = requireInt(.embedPriorityMaxTokens, min: 0)
+    let embedSliceTokensValue = requireInt(.embedSliceMaxTokens, min: 1)
     let embedPriorityLaneValue = requireBool(.embedPriorityLane)
     let throttlePct = requireInt(.batteryThrottlePct, min: 0, max: 100)
     let mildPct = requireInt(.batteryMildPct, min: 0, max: 100)
@@ -282,6 +284,14 @@ public struct BrokerConfig: Sendable {
       .embedBatchTokenBudget,
       reason: "must be a positive integer or blank for auto",
       parse: positiveInt)
+    if let embedSliceTokensValue, let budget = embedBatchTokenBudgetValue,
+      embedSliceTokensValue > budget
+    {
+      record(
+        .embedSliceMaxTokens,
+        String(embedSliceTokensValue),
+        "must not exceed the explicit LMD_EMBED_BATCH_TOKEN_BUDGET value of \(budget)")
+    }
     let promptCacheMaxTokensValue = autoOrParsed(
       .promptCacheMaxTokens,
       reason: "must be a positive integer or blank for auto",
@@ -300,6 +310,7 @@ public struct BrokerConfig: Sendable {
       let embedMaxRowsValue,
       let embedPriorityInputsValue,
       let embedPriorityTokensValue,
+      let embedSliceTokensValue,
       let embedPriorityLaneValue,
       let throttlePct,
       let mildPct,
@@ -326,6 +337,7 @@ public struct BrokerConfig: Sendable {
     self.embedBatchMaxRows = embedMaxRowsValue
     self.embedPriorityMaxInputs = embedPriorityInputsValue
     self.embedPriorityMaxTokens = embedPriorityTokensValue
+    self.embedSliceMaxTokens = embedSliceTokensValue
     self.embedPriorityLaneEnabled = embedPriorityLaneValue
     self.mlxCacheLimitGB = mlxCacheLimitGBValue
     self.batteryThrottlePct = throttlePct

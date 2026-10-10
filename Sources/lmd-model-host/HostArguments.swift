@@ -30,6 +30,7 @@ struct HostArguments: Equatable {
   let embedMaxRows: Int?
   let embedPriorityMaxInputs: Int?
   let embedPriorityMaxTokens: Int?
+  let embedSliceMaxTokens: Int?
   /// The priority-lane switch carried by `--embed-priority-lane`. A host
   /// launched without the flag runs with the fallback (lane enabled), the same
   /// value the broker sends by default, so absence and default agree.
@@ -52,6 +53,7 @@ struct HostArguments: Equatable {
     var parsedEmbedMaxRows: Int?
     var parsedEmbedPriorityMaxInputs: Int?
     var parsedEmbedPriorityMaxTokens: Int?
+    var parsedEmbedSliceMaxTokens: Int?
     var parsedEmbedPriorityLane = EmbeddingRuntimeTuning.fallback.priorityLaneEnabled
     var parsedEmbedMaxForwards: Int?
     var index = 0
@@ -69,6 +71,7 @@ struct HostArguments: Equatable {
       case "--embed-max-rows": parsedEmbedMaxRows = Int(argv[index + 1])
       case "--embed-priority-max-inputs": parsedEmbedPriorityMaxInputs = Int(argv[index + 1])
       case "--embed-priority-max-tokens": parsedEmbedPriorityMaxTokens = Int(argv[index + 1])
+      case "--embed-slice-max-tokens": parsedEmbedSliceMaxTokens = Int(argv[index + 1])
       case "--embed-priority-lane": parsedEmbedPriorityLane = argv[index + 1] == "1"
       case "--embed-max-forwards": parsedEmbedMaxForwards = Int(argv[index + 1])
       default: break
@@ -93,6 +96,7 @@ struct HostArguments: Equatable {
       embedMaxRows: parsedEmbedMaxRows,
       embedPriorityMaxInputs: parsedEmbedPriorityMaxInputs,
       embedPriorityMaxTokens: parsedEmbedPriorityMaxTokens,
+      embedSliceMaxTokens: parsedEmbedSliceMaxTokens,
       embedPriorityLane: parsedEmbedPriorityLane,
       embedMaxForwards: parsedEmbedMaxForwards
     )
@@ -108,6 +112,8 @@ struct HostArguments: Equatable {
         ?? EmbeddingRuntimeTuning.fallback.priorityMaxInputs,
       priorityMaxTokens: embedPriorityMaxTokens
         ?? EmbeddingRuntimeTuning.fallback.priorityMaxTokens,
+      sliceMaxTokens: embedSliceMaxTokens
+        ?? EmbeddingRuntimeTuning.fallback.sliceMaxTokens,
       priorityLaneEnabled: embedPriorityLane,
       maxConcurrentForwards: embedMaxForwards
         ?? EmbeddingRuntimeTuning.fallback.maxConcurrentForwards

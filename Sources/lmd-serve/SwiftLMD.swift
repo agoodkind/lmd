@@ -123,11 +123,13 @@ func resolveEmbeddingHostTuning(
     maxRows: config.embedBatchMaxRows,
     priorityMaxInputs: config.embedPriorityMaxInputs,
     priorityMaxTokens: config.embedPriorityMaxTokens,
+    sliceMaxTokens: config.embedSliceMaxTokens,
     priorityLaneEnabled: config.embedPriorityLaneEnabled,
     maxConcurrentForwards: config.embeddingMaxConcurrency
   )
+  let sliceLimit = tuning.sliceMaxTokens
   log.notice(
-    "embedding.tuning_resolved model=\(modelID, privacy: .public) cache_bytes=\(tuning.cacheLimitBytes, privacy: .public) slot_budget=\(tuning.slotBudget, privacy: .public) max_rows=\(tuning.maxRows, privacy: .public) forwards=\(tuning.maxConcurrentForwards, privacy: .public) lane=\(tuning.priorityLaneEnabled, privacy: .public)"
+    "embedding.tuning_resolved model=\(modelID, privacy: .public) cache_bytes=\(tuning.cacheLimitBytes, privacy: .public) slot_budget=\(tuning.slotBudget, privacy: .public) max_rows=\(tuning.maxRows, privacy: .public) slice_max=\(sliceLimit, privacy: .public) forwards=\(tuning.maxConcurrentForwards, privacy: .public) lane=\(tuning.priorityLaneEnabled, privacy: .public)"
   )
   SwiftLMMetrics.setGauge(
     "lmd_embed_resolved_cache_limit_bytes",
