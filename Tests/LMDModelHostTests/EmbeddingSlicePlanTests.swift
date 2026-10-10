@@ -7,6 +7,7 @@
 //
 
 import Nimble
+import SwiftLMEmbed
 import XCTest
 
 @testable import lmd_model_host
@@ -16,6 +17,15 @@ final class EmbeddingSlicePlanTests: XCTestCase {
     let counts = [600, 600, 600, 600, 600]
     let ranges = EmbeddingSlicePlan.ranges(tokenCounts: counts, maxTokens: 1_500)
     expect(ranges) == [0..<2, 2..<4, 4..<5]
+  }
+
+  func testRangesCloseBeforeTheFallbackSliceLimit() {
+    let counts = [200, 200, 200, 300, 212, 513, 1]
+    let ranges = EmbeddingSlicePlan.ranges(
+      tokenCounts: counts,
+      maxTokens: EmbeddingRuntimeTuning.fallback.sliceMaxTokens
+    )
+    expect(ranges) == [0..<2, 2..<4, 4..<5, 5..<6, 6..<7]
   }
 
   func testAnInputAboveTheLimitGetsItsOwnRange() {

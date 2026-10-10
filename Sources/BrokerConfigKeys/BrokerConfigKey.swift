@@ -44,6 +44,7 @@ public enum BrokerConfigKey: String, CaseIterable, Sendable {
   case embedPriorityLane = "LMD_EMBED_PRIORITY_LANE"
   case embedPriorityMaxInputs = "LMD_EMBED_PRIORITY_MAX_INPUTS"
   case embedPriorityMaxTokens = "LMD_EMBED_PRIORITY_MAX_TOKENS"
+  case embedSliceMaxTokens = "LMD_EMBED_SLICE_MAX_TOKENS"
   case host = "LMD_HOST"
   case idleMinutes = "LMD_IDLE_MINUTES"
   case mlxCacheLimitGB = "LMD_MLX_CACHE_LIMIT_GB"
@@ -107,6 +108,8 @@ private func defaultBrokerConfigValue(for key: BrokerConfigKey) -> String {
     return "2"
   case .embedPriorityMaxTokens:
     return "2048"
+  case .embedSliceMaxTokens:
+    return "512"
   case .embedPriorityLane:
     return "true"
   case .batteryThrottlePct:

@@ -24,10 +24,6 @@ private let log = AppLogger.logger(category: "EmbeddingHost")
 /// In-process embedding serving for `lmd-model-host`. Holds the loaded backend
 /// and turns a `BackendRequest` into the broker-facing frame sequence.
 actor EmbeddingHost {
-  /// Token limit of one slice of a batch request. A priority request waits for
-  /// at most one slice.
-  private static let sliceMaxTokens = 2_048
-
   private let modelPath: String
   let tuning: EmbeddingRuntimeTuning
   private let queue: EmbeddingJobQueue
@@ -65,8 +61,9 @@ actor EmbeddingHost {
       try await backend.launch()
     }
     self.backend = backend
+    let sliceLimit = self.tuning.sliceMaxTokens
     log.notice(
-      "embedding.host_tuning slot_budget=\(self.tuning.slotBudget, privacy: .public) max_rows=\(self.tuning.maxRows, privacy: .public) forwards=\(self.tuning.maxConcurrentForwards, privacy: .public) lane=\(self.tuning.priorityLaneEnabled, privacy: .public)"
+      "embedding.host_tuning slot_budget=\(self.tuning.slotBudget, privacy: .public) max_rows=\(self.tuning.maxRows, privacy: .public) slice_max=\(sliceLimit, privacy: .public) forwards=\(self.tuning.maxConcurrentForwards, privacy: .public) lane=\(self.tuning.priorityLaneEnabled, privacy: .public)"
     )
   }
 
@@ -201,7 +198,7 @@ actor EmbeddingHost {
   }
 
   /// Runs the forward passes of one request. A batch request above
-  /// `sliceMaxTokens` runs one forward per slice and releases the queue slot
+  /// `tuning.sliceMaxTokens` runs one forward per slice and releases the queue slot
   /// after each slice. A waiting priority request acquires the slot before the
   /// next slice, because all forwards run on one GPU thread.
   private func embedInSlices(
@@ -215,7 +212,7 @@ actor EmbeddingHost {
     if priority || !tuning.priorityLaneEnabled {
       ranges = [0..<inputs.count]
     } else {
-      ranges = EmbeddingSlicePlan.ranges(tokenCounts: tokenCounts, maxTokens: Self.sliceMaxTokens)
+      ranges = EmbeddingSlicePlan.ranges(tokenCounts: tokenCounts, maxTokens: tuning.sliceMaxTokens)
     }
     var rows: [[Float]] = []
     rows.reserveCapacity(inputs.count)

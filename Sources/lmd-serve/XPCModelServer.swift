@@ -173,6 +173,7 @@ final class XPCModelServer: ModelServer, @unchecked Sendable {
         "--embed-max-rows", String(embeddingTuning.maxRows),
         "--embed-priority-max-inputs", String(embeddingTuning.priorityMaxInputs),
         "--embed-priority-max-tokens", String(embeddingTuning.priorityMaxTokens),
+        "--embed-slice-max-tokens", String(embeddingTuning.sliceMaxTokens),
         "--embed-priority-lane", embeddingTuning.priorityLaneEnabled ? "1" : "0",
         "--embed-max-forwards", String(embeddingTuning.maxConcurrentForwards),
       ])

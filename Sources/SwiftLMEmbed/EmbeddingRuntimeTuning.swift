@@ -19,6 +19,8 @@ public struct EmbeddingRuntimeTuning: Equatable, Sendable {
   public static let fallbackPriorityMaxInputs = 2
   /// Fallback priority-lane real-token threshold when no flag arrives.
   public static let fallbackPriorityMaxTokens = 2_048
+  /// The host uses this limit when --embed-slice-max-tokens is absent.
+  public static let fallbackSliceMaxTokens = 512
   /// Fallback forward concurrency when no flag arrives.
   public static let fallbackMaxConcurrentForwards = 1
 
@@ -26,6 +28,7 @@ public struct EmbeddingRuntimeTuning: Equatable, Sendable {
   public let maxRows: Int
   public let priorityMaxInputs: Int
   public let priorityMaxTokens: Int
+  public let sliceMaxTokens: Int
   public let priorityLaneEnabled: Bool
   public let maxConcurrentForwards: Int
 
@@ -34,6 +37,7 @@ public struct EmbeddingRuntimeTuning: Equatable, Sendable {
     maxRows: fallbackMaxRows,
     priorityMaxInputs: fallbackPriorityMaxInputs,
     priorityMaxTokens: fallbackPriorityMaxTokens,
+    sliceMaxTokens: fallbackSliceMaxTokens,
     priorityLaneEnabled: true,
     maxConcurrentForwards: fallbackMaxConcurrentForwards
   )
@@ -43,6 +47,7 @@ public struct EmbeddingRuntimeTuning: Equatable, Sendable {
     maxRows: Int,
     priorityMaxInputs: Int,
     priorityMaxTokens: Int,
+    sliceMaxTokens: Int,
     priorityLaneEnabled: Bool,
     maxConcurrentForwards: Int
   ) {
@@ -50,6 +55,7 @@ public struct EmbeddingRuntimeTuning: Equatable, Sendable {
     self.maxRows = maxRows
     self.priorityMaxInputs = priorityMaxInputs
     self.priorityMaxTokens = priorityMaxTokens
+    self.sliceMaxTokens = sliceMaxTokens
     self.priorityLaneEnabled = priorityLaneEnabled
     self.maxConcurrentForwards = maxConcurrentForwards
   }

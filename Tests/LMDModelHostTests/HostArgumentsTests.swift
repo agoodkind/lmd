@@ -56,6 +56,7 @@ final class HostArgumentsTests: XCTestCase {
       "--embed-max-rows", "256",
       "--embed-priority-max-inputs", "2",
       "--embed-priority-max-tokens", "2048",
+      "--embed-slice-max-tokens", "512",
       "--embed-priority-lane", "1",
       "--embed-max-forwards", "1",
     ])
@@ -64,6 +65,7 @@ final class HostArgumentsTests: XCTestCase {
     expect(args?.embedMaxRows) == 256
     expect(args?.embedPriorityMaxInputs) == 2
     expect(args?.embedPriorityMaxTokens) == 2_048
+    expect(args?.embedSliceMaxTokens) == 512
     expect(args?.embedPriorityLane) == true
     expect(args?.embedMaxForwards) == 1
   }
@@ -76,6 +78,16 @@ final class HostArgumentsTests: XCTestCase {
     expect(args?.mlxCacheLimitBytes).to(beNil())
     expect(args?.embedSlotBudget).to(beNil())
     expect(args?.embedPriorityLane) == true
+    expect(args?.embedSliceMaxTokens) == nil
+    expect(args?.embeddingRuntimeTuning().sliceMaxTokens) == 512
+  }
+
+  func testSliceMaxTokensFlagSetsTheRuntimeTuning() {
+    let args = HostArguments.parse([
+      "--model", "/m", "--kind", "embedding", "--host-service", "svc",
+      "--embed-slice-max-tokens", "128",
+    ])
+    expect(args?.embeddingRuntimeTuning().sliceMaxTokens) == 128
   }
 
   func testRejectsUnknownKind() {

@@ -67,6 +67,7 @@ final class BrokerConfigTests: XCTestCase {
     expect(config.embedBatchMaxRows) == 256
     expect(config.embedPriorityMaxInputs) == 2
     expect(config.embedPriorityMaxTokens) == 2_048
+    expect(config.embedSliceMaxTokens) == 512
     expect(config.embedPriorityLaneEnabled) == true
     expect(config.batteryThrottlePct) == 20
     expect(config.batteryMildPct) == 35
@@ -89,6 +90,7 @@ final class BrokerConfigTests: XCTestCase {
         .embedBatchMaxRows: "128",
         .embedPriorityMaxInputs: "4",
         .embedPriorityMaxTokens: "1024",
+        .embedSliceMaxTokens: "256",
         .embedPriorityLane: "false",
         .mlxCacheLimitGB: "4",
       ]))
@@ -96,6 +98,7 @@ final class BrokerConfigTests: XCTestCase {
     expect(config.embedBatchMaxRows) == 128
     expect(config.embedPriorityMaxInputs) == 4
     expect(config.embedPriorityMaxTokens) == 1_024
+    expect(config.embedSliceMaxTokens) == 256
     expect(config.embedPriorityLaneEnabled) == false
     expect(config.mlxCacheLimitGB) == 4.0
   }
@@ -175,6 +178,53 @@ final class BrokerConfigTests: XCTestCase {
         expect(keys.contains(.embeddingMaxConcurrency)) == true
       }
     }
+  }
+
+  func testEmbedSliceMaxTokensRejectsZeroAndNegative() {
+    for badValue in ["0", "-1"] {
+      var env = completeEnvironment()
+      env[BrokerConfigKey.embedSliceMaxTokens.rawValue] = badValue
+      expectConfigError(env) { configError in
+        let keys = configError.problems.map(\.key)
+        expect(keys.contains(.embedSliceMaxTokens)) == true
+      }
+    }
+  }
+
+  func testEmbedSliceMaxTokensRejectsNonInteger() {
+    var env = completeEnvironment()
+    env[BrokerConfigKey.embedSliceMaxTokens.rawValue] = "512.5"
+    expectConfigError(env) { configError in
+      let sliceProblem = configError.problems.first { $0.key == .embedSliceMaxTokens }
+      expect(sliceProblem?.raw) == "512.5"
+    }
+  }
+
+  func testEmbedSliceMaxTokensIsRequired() {
+    var env = completeEnvironment()
+    env.removeValue(forKey: BrokerConfigKey.embedSliceMaxTokens.rawValue)
+    expectConfigError(env) { configError in
+      let keys = configError.problems.map(\.key)
+      expect(keys.contains(.embedSliceMaxTokens)) == true
+    }
+  }
+
+  func testEmbedSliceMaxTokensRejectsValueAboveExplicitBatchTokenBudget() {
+    var env = completeEnvironment()
+    env[BrokerConfigKey.embedBatchTokenBudget.rawValue] = "2048"
+    env[BrokerConfigKey.embedSliceMaxTokens.rawValue] = "2049"
+    expectConfigError(env) { configError in
+      let keys = configError.problems.map(\.key)
+      expect(keys.contains(.embedSliceMaxTokens)) == true
+    }
+  }
+
+  func testEmbedSliceMaxTokensAcceptsValueEqualToExplicitBatchTokenBudget() throws {
+    var env = completeEnvironment()
+    env[BrokerConfigKey.embedBatchTokenBudget.rawValue] = "2048"
+    env[BrokerConfigKey.embedSliceMaxTokens.rawValue] = "2048"
+    let config = try config(env)
+    expect(config.embedSliceMaxTokens) == 2_048
   }
 
   func testMildPctMustBeAboveThrottlePct() {
