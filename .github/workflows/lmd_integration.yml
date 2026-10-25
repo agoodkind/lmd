@@ -64,7 +64,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: agoodkind/lmd
-          ref: cbcfcb9e1d1dda2f0589cb28d66bdaa913004702
+          ref: be0179ee47d5767ea8da2e73897e4296b1a393b0
           path: .cohort-controls
           sparse-checkout: .github/scripts
           persist-credentials: false
