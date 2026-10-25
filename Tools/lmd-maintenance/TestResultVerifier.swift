@@ -25,9 +25,10 @@ enum TestResultVerifier {
         try results.finishSuite(
           completed, summary: lines.dropFirst(index + 1).first, pattern: patterns.summary)
       }
-      if let test = patterns.objectiveC.match(line) ?? patterns.swift.match(line) {
+      let caseRecord = patterns.caseRecord(in: line)
+      if let test = patterns.objectiveC.match(caseRecord) ?? patterns.swift.match(caseRecord) {
         try results.finishTest(test, selectedClasses: classes)
-      } else if let test = patterns.unqualifiedSwift.match(line) {
+      } else if let test = patterns.unqualifiedSwift.match(caseRecord) {
         try results.finishUnqualifiedTest(test, discovery: discovered)
       }
     }
@@ -119,6 +120,11 @@ private struct XCTestLogPatterns {
   let objectiveC: TestLogPattern
   let swift: TestLogPattern
   let unqualifiedSwift: TestLogPattern
+
+  func caseRecord(in line: String) -> String {
+    guard let marker = line.range(of: "Test Case '") else { return line }
+    return String(line[marker.lowerBound...])
+  }
 
   init() throws {
     started = try TestLogPattern(#"^Test Suite '(?<suite>[^']+)' started at "#)

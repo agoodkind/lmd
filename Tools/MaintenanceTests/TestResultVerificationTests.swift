@@ -25,6 +25,7 @@ final class TestResultVerificationTests: XCTestCase {
   private static let outcomeEnvironmentKey = "LMD_VERIFIER_OUTCOME"
   private static let releaseEnvironmentKey = "LMD_VERIFIER_RELEASE_FILE"
   private static let readinessMessage = "The real XCTest fixture is waiting for release."
+  private static let interleavedOutputPrefix = "[SwiftLM] 🗂 Prompt"
 
   func testRealXCTestPassFailureSkipAndEarlyExit() throws {
     let fixture = try makePackage()
@@ -67,6 +68,7 @@ final class TestResultVerificationTests: XCTestCase {
       expect(rejected.combined).to(contain("XCTest"))
     }
 
+    try verifyInterleavedCompletion(in: fixture, discovery: discovery.report, binary: binary)
     try verifyProgressBeforeRelease(in: fixture, binary: binary)
   }
 
@@ -169,6 +171,32 @@ extension TestResultVerificationTests {
         ])
     }
     return URL(fileURLWithPath: executable).standardizedFileURL.path
+  }
+
+  private func verifyInterleavedCompletion(in fixture: URL, discovery: URL, binary: URL) throws {
+    let report = fixture.appendingPathComponent("interleaved-\(UUID().uuidString).txt")
+    let bundle = fixture.appendingPathComponent(".build/debug/ProbePackageTests.xctest")
+    #if os(macOS)
+      let childArguments = ["/usr/bin/xcrun", "xctest", bundle.path]
+    #else
+      let childArguments = [bundle.path]
+    #endif
+    let execution = Shell.runForwardingAndCapturingStreaming(
+      binary.path,
+      ["record", "--quiet", "--log", report.path] + childArguments,
+      environment: [Self.outcomeEnvironmentKey: "interleaved"],
+      timeoutSeconds: Self.processTimeoutSeconds)
+    try requireSuccess(execution, operation: "The real interleaved XCTest run")
+    let output = try String(contentsOf: report, encoding: .utf8)
+    guard output.contains(Self.interleavedOutputPrefix + Self.outcomeCasePrefix + " passed")
+    else {
+      throw TestFixtureError(
+        description: "The real XCTest completion did not follow application output: \(output)")
+    }
+    let actual = TestFixtureRun(execution: execution, report: report, output: output)
+    let checked = verify(actual, discovery: discovery, binary: binary)
+    try requireSuccess(checked, operation: "Verification of the real interleaved XCTest completion")
+    expect(checked.combined).to(contain("\(Self.expectedTestCount) discovered cases completed"))
   }
 
   private func verifyProgressBeforeRelease(in fixture: URL, binary: URL) throws {
@@ -341,6 +369,9 @@ extension TestResultVerificationTests {
         case "abort":
           fflush(nil)
           exit(0)
+        case "interleaved":
+          print("\(Self.interleavedOutputPrefix)", terminator: "")
+          fflush(nil)
         case "progress":
           guard let release = ProcessInfo.processInfo.environment["LMD_VERIFIER_RELEASE_FILE"] else {
             XCTFail("Set LMD_VERIFIER_RELEASE_FILE for the progress case.")
