@@ -1,362 +1,3 @@
-diff --git a/.github/scripts/upstream-sync.mjs b/.github/scripts/upstream-sync.mjs
-deleted file mode 100644
-index 4f006268e7d93dc1e107ce38953ce4baa4fcbb02..0000000000000000000000000000000000000000
---- a/.github/scripts/upstream-sync.mjs
-+++ /dev/null
-@@ -1,118 +0,0 @@
--#!/usr/bin/env node
--
--import { execFileSync } from 'node:child_process';
--import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
--
--const candidateBranch = 'sync/upstream-latest';
--const stateFile = '.github/upstream-sync-state';
--
--function command(executable, arguments_) {
--  try {
--    return execFileSync(executable, arguments_, {
--      encoding: 'utf8',
--      stdio: ['ignore', 'pipe', 'inherit'],
--    }).trim();
--  } catch (error) {
--    if (error.stdout) process.stderr.write(error.stdout);
--    throw error;
--  }
--}
--
--function git(...arguments_) {
--  return command('git', arguments_);
--}
--
--function requiredEnvironment(name) {
--  const value = process.env[name];
--  if (!value) {
--    throw new Error(`Set ${name} before running upstream synchronization.`);
--  }
--  return value;
--}
--
--function readState() {
--  try {
--    return readFileSync(stateFile, 'utf8').trim();
--  } catch (error) {
--    if (error.code === 'ENOENT') {
--      return null;
--    }
--    throw error;
--  }
--}
--
--function output(name, value) {
--  console.log(`${name}=${value}`);
--  if (process.env.GITHUB_OUTPUT) {
--    appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
--  }
--}
--
--function sync() {
--  const upstreamURL = requiredEnvironment('SYNC_UPSTREAM_URL');
--  if (git('status', '--porcelain')) {
--    throw new Error('Commit or remove working tree changes before synchronizing.');
--  }
--
--  git('fetch', '--no-tags', 'origin');
--  const candidateRef = `refs/remotes/origin/${candidateBranch}`;
--  const previousCandidate = git('for-each-ref', '--format=%(objectname)', candidateRef);
--  git('fetch', '--no-tags', upstreamURL, 'main');
--  const upstreamSHA = git('rev-parse', 'FETCH_HEAD');
--  git('switch', '--detach', previousCandidate || 'origin/main');
--  git('merge', '--no-edit', '-m', 'Merge main into upstream candidate', 'origin/main');
--
--  if (readState() !== upstreamSHA) {
--    git('merge', '--no-edit', '--allow-unrelated-histories',
--      '-m', 'Merge upstream main into sync candidate', upstreamSHA);
--    mkdirSync('.github', { recursive: true });
--    writeFileSync(stateFile, `${upstreamSHA}\n`);
--    git('add', stateFile);
--    git('commit', '-m', `Record upstream main at ${upstreamSHA}`);
--  }
--
--  const headSHA = git('rev-parse', 'HEAD');
--  const hasChanges = git('rev-list', '--count', 'origin/main..HEAD') !== '0';
--  if (hasChanges && headSHA !== previousCandidate) {
--    git('push', 'origin', `HEAD:refs/heads/${candidateBranch}`);
--  }
--  output('has_changes', hasChanges);
--  output('head_sha', headSHA);
--  output('upstream_sha', upstreamSHA);
--}
--
--function updatePullRequest() {
--  requiredEnvironment('GH_TOKEN');
--  const repository = requiredEnvironment('GITHUB_REPOSITORY');
--  const pullRequests = JSON.parse(command('gh', [
--    'pr', 'list', '--repo', repository, '--base', 'main', '--head', candidateBranch,
--    '--state', 'open', '--json', 'number',
--  ]));
--  if (pullRequests.length > 1) {
--    throw new Error(`Resolve duplicate open pull requests for ${candidateBranch}.`);
--  }
--  const title = 'Sync upstream updates';
--  const body = `Merge upstream main at ${readFileSync(stateFile, 'utf8').trim()}.\n\n`
--    + 'The candidate preserves existing repair commits and merges current main before upstream. '
--    + 'Conflicts stop synchronization. Review the diff and require successful build and integration checks.';
--  if (pullRequests.length === 1) {
--    command('gh', ['pr', 'edit', String(pullRequests[0].number), '--repo', repository,
--      '--title', title, '--body', body]);
--  } else {
--    command('gh', ['pr', 'create', '--repo', repository, '--base', 'main',
--      '--head', candidateBranch, '--title', title, '--body', body]);
--  }
--}
--
--try {
--  if (process.argv[2] === 'sync') {
--    sync();
--  } else if (process.argv[2] === 'pr') {
--    updatePullRequest();
--  } else {
--    throw new Error('Run upstream-sync.mjs with sync or pr.');
--  }
--} catch (error) {
--  console.error(`Upstream synchronization failed: ${error.message}`);
--  process.exitCode = 1;
--}
-diff --git a/.github/scripts/upstream-sync.test.mjs b/.github/scripts/upstream-sync.test.mjs
-deleted file mode 100644
-index 2d13a800b535673832b54a5510e765fe4fa007ec..0000000000000000000000000000000000000000
---- a/.github/scripts/upstream-sync.test.mjs
-+++ /dev/null
-@@ -1,110 +0,0 @@
--#!/usr/bin/env node
--
--import assert from 'node:assert/strict';
--import { execFileSync, spawnSync } from 'node:child_process';
--import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
--import { tmpdir } from 'node:os';
--import { join } from 'node:path';
--import { fileURLToPath } from 'node:url';
--import test from 'node:test';
--
--const helper = fileURLToPath(new URL('./upstream-sync.mjs', import.meta.url));
--const branch = 'sync/upstream-latest';
--const state = '.github/upstream-sync-state';
--
--function git(directory, ...arguments_) {
--  return execFileSync('git', ['-C', directory, ...arguments_], {
--    encoding: 'utf8',
--    stdio: ['ignore', 'pipe', 'pipe'],
--    env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
--  }).trim();
--}
--
--function initialize(directory, bare = false) {
--  mkdirSync(directory);
--  const arguments_ = ['init', '--initial-branch=main'];
--  if (bare) arguments_.push('--bare');
--  git(directory, ...arguments_);
--  if (!bare) {
--    git(directory, 'config', 'user.name', 'Sync Test');
--    git(directory, 'config', 'user.email', 'sync-test@example.invalid');
--  }
--}
--
--function commit(directory, filename, contents) {
--  writeFileSync(join(directory, filename), contents);
--  git(directory, 'add', filename);
--  git(directory, 'commit', '-m', `Update ${filename}`);
--  return git(directory, 'rev-parse', 'HEAD');
--}
--
--test('synchronization preserves repairs and rejects conflicts before publishing', () => {
--  const root = mkdtempSync(join(tmpdir(), 'upstream-sync-'));
--  const origin = join(root, 'origin.git');
--  const upstream = join(root, 'upstream');
--  const main = join(root, 'main');
--  const worker = join(root, 'worker');
--  initialize(origin, true);
--  initialize(upstream);
--  initialize(main);
--  mkdirSync(join(main, '.github'));
--  commit(main, 'fork.txt', 'fork\n');
--  commit(main, 'shared.txt', 'original\n');
--  git(main, 'remote', 'add', 'origin', origin);
--  git(main, 'push', 'origin', 'main');
--  commit(upstream, 'upstream.txt', 'upstream\n');
--  const firstUpstream = commit(upstream, 'shared.txt', 'original\n');
--  git(root, 'clone', origin, worker);
--  git(worker, 'config', 'user.name', 'Sync Test');
--  git(worker, 'config', 'user.email', 'sync-test@example.invalid');
--
--  const run = () => spawnSync(process.execPath, [helper, 'sync'], {
--    cwd: worker,
--    encoding: 'utf8',
--    env: { ...process.env, SYNC_UPSTREAM_URL: upstream, GITHUB_OUTPUT: '',
--      GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
--  });
--  const succeed = () => {
--    const result = run();
--    assert.equal(result.status, 0, result.stderr);
--    return result;
--  };
--  const remoteHead = () => git(origin, 'rev-parse', `refs/heads/${branch}`);
--
--  succeed();
--  assert.equal(readFileSync(join(worker, state), 'utf8').trim(), firstUpstream);
--  assert.equal(git(worker, 'show', 'HEAD:fork.txt'), 'fork');
--  assert.equal(git(worker, 'show', 'HEAD:upstream.txt'), 'upstream');
--  assert.equal(remoteHead(), git(worker, 'rev-parse', 'HEAD'));
--  assert.doesNotMatch(git(worker, 'log', '--format=%B', 'origin/main..HEAD'), /\[skip ci\]/);
--
--  const repair = commit(worker, 'manual-repair.txt', 'preserve this repair\n');
--  git(worker, 'push', 'origin', `HEAD:refs/heads/${branch}`);
--  const mainUpdate = commit(main, 'main-update.txt', 'current main\n');
--  git(main, 'push', 'origin', 'main');
--  const nextUpstream = commit(upstream, 'upstream-update.txt', 'new upstream\n');
--  succeed();
--  git(worker, 'merge-base', '--is-ancestor', repair, 'HEAD');
--  git(worker, 'merge-base', '--is-ancestor', mainUpdate, 'HEAD');
--  git(worker, 'merge-base', '--is-ancestor', nextUpstream, 'HEAD');
--  assert.equal(git(worker, 'rev-parse', 'HEAD~1^2'), nextUpstream);
--  assert.equal(git(worker, 'rev-parse', 'HEAD~2^2'), mainUpdate);
--  assert.equal(git(worker, 'show', 'HEAD:manual-repair.txt'), 'preserve this repair');
--  assert.equal(readFileSync(join(worker, state), 'utf8').trim(), nextUpstream);
--
--  const unchangedHead = remoteHead();
--  succeed();
--  assert.equal(remoteHead(), unchangedHead);
--  assert.equal(git(worker, 'rev-parse', 'HEAD'), unchangedHead);
--
--  const conflictingRepair = commit(worker, 'shared.txt', 'fork repair\n');
--  git(worker, 'push', 'origin', `HEAD:refs/heads/${branch}`);
--  commit(upstream, 'shared.txt', 'conflicting upstream\n');
--  const failed = run();
--  assert.notEqual(failed.status, 0);
--  assert.match(failed.stderr, /CONFLICT/);
--  assert.match(failed.stderr, /Upstream synchronization failed/);
--  assert.equal(remoteHead(), conflictingRepair);
--  assert.equal(readFileSync(join(worker, state), 'utf8').trim(), nextUpstream);
--  assert.notEqual(git(worker, 'ls-files', '--unmerged'), '');
--});
-diff --git a/.github/scripts/verify-integration-results.mjs b/.github/scripts/verify-integration-results.mjs
-deleted file mode 100644
-index 60c5255df816f8dae2eeb32159e5a7bb59e941f9..0000000000000000000000000000000000000000
---- a/.github/scripts/verify-integration-results.mjs
-+++ /dev/null
-@@ -1,113 +0,0 @@
--#!/usr/bin/env node
--import { readFileSync } from 'node:fs';
--
--function requireCondition(condition, message) {
--  if (!condition) throw new Error(message);
--}
--
--function verifySwiftPM(logPath, discoveryPath, selectors) {
--  const discovery = readFileSync(discoveryPath, 'utf8');
--  const classes = new Map();
--  for (const line of discovery.split(/\r?\n/)) {
--    const match = /^(\w+)\.(\w+)\/(\S+)$/.exec(line.trim());
--    if (!match) continue;
--    const [, module, name, method] = match;
--    if (!selectors.some(selector => selector === module || selector === name || selector === module + '.' + name)) continue;
--    const key = module + '.' + name;
--    if (!classes.has(key)) classes.set(key, new Set());
--    classes.get(key).add(method);
--  }
--  for (const selector of selectors) {
--    requireCondition([...classes.keys()].some(key => key === selector || key.startsWith(selector + '.') || key.endsWith('.' + selector)),
--      'Discovery did not include selected XCTest class or module: ' + selector);
--  }
--
--  const log = readFileSync(logPath, 'utf8');
--  const summaries = new Map();
--  const completedMethods = new Map();
--  const activeSuites = new Set();
--  const lines = log.split(/\r?\n/);
--  for (let index = 0; index < lines.length; index += 1) {
--    const line = lines[index];
--    const started = /^Test Suite '([^']+)' started at /.exec(line);
--    if (started) activeSuites.add(started[1]);
--    const suite = /^Test Suite '([^']+)' (passed|failed) at /.exec(line);
--    if (suite) {
--      const counts = /^\s*Executed (\d+) tests?, with (?:(\d+) tests? skipped and )?(\d+) failures? \(/.exec(lines[index + 1] ?? '');
--      requireCondition(counts, 'Missing XCTest summary after suite: ' + suite[1]);
--      requireCondition(suite[2] === 'passed' && Number(counts[2] ?? 0) === 0 && Number(counts[3]) === 0,
--        'XCTest suite failed or skipped tests: ' + suite[1]);
--      activeSuites.delete(suite[1]);
--      summaries.set(suite[1], Number(counts[1]));
--    }
--    const testCase = /^Test Case '-\[(\w+\.\w+) (\S+)\]' (passed|failed|skipped)\b/.exec(line)
--      ?? /^Test Case '(\w+\.\w+)\.(\w+)' (passed|failed|skipped)\b/.exec(line);
--    if (testCase && classes.has(testCase[1])) {
--      requireCondition(testCase[3] === 'passed', 'XCTest case did not pass: ' + testCase[1] + '/' + testCase[2]);
--      if (!completedMethods.has(testCase[1])) completedMethods.set(testCase[1], new Set());
--      completedMethods.get(testCase[1]).add(testCase[2]);
--    }
--  }
--  requireCondition(activeSuites.size === 0, 'XCTest did not finish suites: ' + [...activeSuites].join(', '));
--  for (const [key, methods] of classes) {
--    const name = key.slice(key.lastIndexOf('.') + 1);
--    requireCondition(summaries.get(name) === methods.size,
--      'XCTest class did not complete every discovered case: ' + key + ' (expected ' + methods.size + ', summary ' + summaries.get(name) + ')');
--    for (const method of methods) {
--      requireCondition(completedMethods.get(key)?.has(method), 'XCTest case did not finish: ' + key + '/' + method);
--    }
--    console.log(key + ': ' + methods.size + ' discovered cases completed without failures or skips');
--  }
--}
--
--function verifyXcode(reportPath, selectors) {
--  const report = JSON.parse(readFileSync(reportPath, 'utf8'));
--  requireCondition(Array.isArray(report.testNodes), 'xcresult JSON does not contain testNodes');
--  const nodes = [];
--  function visit(node) {
--    nodes.push(node);
--    for (const child of node.children ?? []) visit(child);
--  }
--  for (const node of report.testNodes) visit(node);
--  for (const selector of selectors) {
--    const suites = nodes.filter(node => node.nodeType === 'Test Suite'
--      && node.nodeIdentifierURL?.endsWith('/' + selector));
--    requireCondition(suites.length === 1, 'xcresult must contain one selected suite: ' + selector);
--    let functions = 0;
--    let cases = 0;
--    function verify(node) {
--      if (node.nodeType === 'Runtime Warning') {
--        console.warn('Xcode runtime warning: ' + node.name);
--        return;
--      }
--      requireCondition(node.result === 'Passed', 'xcresult did not pass: ' + (node.nodeIdentifierURL ?? node.name) + ' (' + node.result + ')');
--      if (node.nodeType === 'Test Case') {
--        functions += 1;
--        if (!(node.children ?? []).some(child => child.nodeType === 'Arguments')) cases += 1;
--      }
--      if (node.nodeType === 'Arguments') cases += 1;
--      for (const child of node.children ?? []) verify(child);
--    }
--    verify(suites[0]);
--    requireCondition(functions > 0 && cases > 0, 'xcresult selected suite did not execute cases: ' + selector);
--    console.log(selector + ': ' + functions + ' functions / ' + cases + ' cases passed without skips');
--  }
--}
--
--try {
--  const [mode, inputPath, ...arguments_] = process.argv.slice(2);
--  requireCondition(inputPath, 'Usage: verify-integration-results.mjs swiftpm <log> <discovery> <class-or-module>... | xcode <test-results-json> <suite-path>...');
--  if (mode === 'swiftpm') {
--    const [discoveryPath, ...selectors] = arguments_;
--    requireCondition(discoveryPath && selectors.length > 0, 'SwiftPM validation requires discovery and selected classes or modules');
--    verifySwiftPM(inputPath, discoveryPath, selectors);
--  } else if (mode === 'xcode') {
--    requireCondition(arguments_.length > 0, 'Xcode validation requires selected suite paths');
--    verifyXcode(inputPath, arguments_);
--  } else {
--    throw new Error('Select swiftpm or xcode validation');
--  }
--} catch (error) {
--  console.error('Test result validation failed: ' + error.message);
--  process.exitCode = 1;
--}
 diff --git a/.github/workflows/auto_release.yml b/.github/workflows/auto_release.yml
 index e107b969f73d83d2cf5bf79e65ae16141fb01e77..a80ecb288056798a8e5a9f0cbeb658691282e9b9 100644
 --- a/.github/workflows/auto_release.yml
@@ -415,7 +56,7 @@ index e107b969f73d83d2cf5bf79e65ae16141fb01e77..a80ecb288056798a8e5a9f0cbeb65869
 +              console.log("Dispatch failed. Ensure SWIFTLM_PR_TOKEN is set in repository secrets with repo scoping.", error);
              }
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index e0a0ba2bb9714cdc8b263c8cde8865d41943bc9b..50d7b6da334203ee24676ca8ed36d3eee24e67c2 100644
+index 127b9a713b9f08affafe854dceaf7a9114f9b19a..50d7b6da334203ee24676ca8ed36d3eee24e67c2 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -2,36 +2,9 @@ name: CI
@@ -440,7 +81,7 @@ index e0a0ba2bb9714cdc8b263c8cde8865d41943bc9b..50d7b6da334203ee24676ca8ed36d3ee
 -        description: Exact SwiftLM commit to validate
 -        type: string
 -        required: true
--        default: dbf4eee36701d844996038b182a272f40a41f414
+-        default: 4cc594d1cc6f88116f1509cee5ba5b6a1471f0be
 -      run_speculative_eval:
 -        description: Download both models for speculative decoding evaluation (15-minute limit)
 -        type: boolean
@@ -457,7 +98,7 @@ index e0a0ba2bb9714cdc8b263c8cde8865d41943bc9b..50d7b6da334203ee24676ca8ed36d3ee
  
  concurrency:
    group: ci-${{ github.ref }}
-@@ -40,381 +13,131 @@ concurrency:
+@@ -40,367 +13,131 @@ concurrency:
  permissions:
    contents: read
  
@@ -465,7 +106,7 @@ index e0a0ba2bb9714cdc8b263c8cde8865d41943bc9b..50d7b6da334203ee24676ca8ed36d3ee
 -  DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
 -  CORE_REF: ${{ inputs.core_ref || '786724757aa480f049d3a913c59da7e0e61ad5dc' }}
 -  LIBRARY_REF: ${{ inputs.library_ref || github.event.pull_request.head.sha || github.sha }}
--  SWIFTLM_REF: ${{ inputs.swiftlm_ref || 'dbf4eee36701d844996038b182a272f40a41f414' }}
+-  SWIFTLM_REF: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}
 -
  jobs:
    build-and-test:
@@ -512,23 +153,10 @@ index e0a0ba2bb9714cdc8b263c8cde8865d41943bc9b..50d7b6da334203ee24676ca8ed36d3ee
 -          validate_ref core_ref "$CORE_REF"
 -          validate_ref library_ref "$LIBRARY_REF"
 -
--      - name: Checkout CI result validation
+-      - name: Checkout selected library source
 -        uses: actions/checkout@v4
 +      - uses: actions/checkout@v4
          with:
--          ref: ${{ github.sha }}
--          path: ci-controls
--          sparse-checkout: .github/scripts
--          persist-credentials: false
--
--      - name: Set up Node for result validation
--        uses: actions/setup-node@v4
--        with:
--          node-version: '22'
--
--      - name: Checkout selected library source
--        uses: actions/checkout@v4
--        with:
 -          ref: ${{ env.LIBRARY_REF }}
 -          path: mlx-swift-lm
            submodules: recursive
@@ -567,11 +195,16 @@ index e0a0ba2bb9714cdc8b263c8cde8865d41943bc9b..50d7b6da334203ee24676ca8ed36d3ee
 -          cat "$RUNNER_TEMP/cohort-sources.txt" >> "$GITHUB_STEP_SUMMARY"
 +          sed -i '' -E 's|\.package\(url: "https://github.com/agoodkind/mlx-swift.git", branch: "main"\),|\.package(path: "./mlx-swift"),|' Package.swift
  
--      - name: Resolve the library dependency graph
--        working-directory: mlx-swift-lm
+-      - name: Set up Swift result verification
+-        id: maintenance
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
+-        with:
+-          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
 +      - name: Resolve dependencies
 +        run: swift package resolve
-+
+ 
+-      - name: Resolve the library dependency graph
+-        working-directory: mlx-swift-lm
 +      - name: Build (Release)
 +        run: swift build -c release -Xswiftc -enable-testing --build-tests
 +
@@ -683,7 +316,7 @@ index e0a0ba2bb9714cdc8b263c8cde8865d41943bc9b..50d7b6da334203ee24676ca8ed36d3ee
 -          while IFS= read -r suite; do
 -            suites+=("$suite")
 -          done <<< "$LIBRARY_TEST_SUITES"
--          node "$GITHUB_WORKSPACE/ci-controls/.github/scripts/verify-integration-results.mjs" xcode \
+-          "${{ steps.maintenance.outputs.binary }}" verify-test-results xcode \
 -            "$RUNNER_TEMP/library-tests.json" "${suites[@]}"
 -
 -      - name: Upload library source proof and test results
@@ -734,23 +367,10 @@ index e0a0ba2bb9714cdc8b263c8cde8865d41943bc9b..50d7b6da334203ee24676ca8ed36d3ee
 -          validate_ref library_ref "$LIBRARY_REF"
 -          validate_ref swiftlm_ref "$SWIFTLM_REF"
 -
--      - name: Checkout CI result validation
+-      - name: Checkout selected library source
 +      - name: Checkout mlx-swift-lm (this repository)
          uses: actions/checkout@v4
          with:
--          ref: ${{ github.sha }}
--          path: ci-controls
--          sparse-checkout: .github/scripts
--          persist-credentials: false
--
--      - name: Set up Node for result validation
--        uses: actions/setup-node@v4
--        with:
--          node-version: '22'
--
--      - name: Checkout selected library source
--        uses: actions/checkout@v4
--        with:
 -          ref: ${{ env.LIBRARY_REF }}
            path: mlx-swift-lm
            submodules: recursive
@@ -812,6 +432,12 @@ index e0a0ba2bb9714cdc8b263c8cde8865d41943bc9b..50d7b6da334203ee24676ca8ed36d3ee
 +          cd SwiftLM
 +          swift build -c release
  
+-      - name: Set up Swift result verification
+-        id: maintenance
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
+-        with:
+-          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
+-
 -      - name: Build SwiftLM and tests in Release
 -        working-directory: SwiftLM
 +      - name: Install MLX Metal library
@@ -888,7 +514,7 @@ index e0a0ba2bb9714cdc8b263c8cde8865d41943bc9b..50d7b6da334203ee24676ca8ed36d3ee
 -            echo "::error::SwiftLM tests failed with exit status $status."
 -            exit "$status"
 -          fi
--          node "$GITHUB_WORKSPACE/ci-controls/.github/scripts/verify-integration-results.mjs" swiftpm \
+-          "${{ steps.maintenance.outputs.binary }}" verify-test-results swiftpm \
 -            "$RUNNER_TEMP/swiftlm-runtime.log" "$RUNNER_TEMP/swiftlm-tests.txt" \
 -            PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests OwnFeatureHTTPTests
 -
@@ -916,10 +542,10 @@ index e0a0ba2bb9714cdc8b263c8cde8865d41943bc9b..50d7b6da334203ee24676ca8ed36d3ee
 +          cd SwiftLM
 +          bash tests/test-speculative-eval.sh
 diff --git a/.github/workflows/downstream_integration.yml b/.github/workflows/downstream_integration.yml
-index e5928d4f3083e643d9c8dea2d1aa37882e822f14..ea247cfda7014710c89b8f243e2fc462ecbbc900 100644
+index 33ba9e94608635ac63ae4336320ccd19686c034b..ea247cfda7014710c89b8f243e2fc462ecbbc900 100644
 --- a/.github/workflows/downstream_integration.yml
 +++ b/.github/workflows/downstream_integration.yml
-@@ -2,244 +2,72 @@ name: Downstream Integration Test
+@@ -2,241 +2,72 @@ name: Downstream Integration Test
  
  on:
    pull_request:
@@ -938,7 +564,7 @@ index e5928d4f3083e643d9c8dea2d1aa37882e822f14..ea247cfda7014710c89b8f243e2fc462
 -        description: Exact SwiftLM commit to validate
 -        type: string
 -        required: true
--        default: dbf4eee36701d844996038b182a272f40a41f414
+-        default: 4cc594d1cc6f88116f1509cee5ba5b6a1471f0be
 -
 -concurrency:
 -  group: downstream-${{ github.ref }}
@@ -951,7 +577,7 @@ index e5928d4f3083e643d9c8dea2d1aa37882e822f14..ea247cfda7014710c89b8f243e2fc462
 -  DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
 -  CORE_REF: ${{ inputs.core_ref || '786724757aa480f049d3a913c59da7e0e61ad5dc' }}
 -  LIBRARY_REF: ${{ inputs.library_ref || github.event.pull_request.head.sha || github.sha }}
--  SWIFTLM_REF: ${{ inputs.swiftlm_ref || 'dbf4eee36701d844996038b182a272f40a41f414' }}
+-  SWIFTLM_REF: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}
 +    branches: [ main ]
  
  jobs:
@@ -988,29 +614,16 @@ index e5928d4f3083e643d9c8dea2d1aa37882e822f14..ea247cfda7014710c89b8f243e2fc462
 -          validate_ref library_ref "$LIBRARY_REF"
 -          validate_ref swiftlm_ref "$SWIFTLM_REF"
 -
--      - name: Checkout CI result validation
+-      - name: Checkout selected library source
 +      - name: Checkout PR branch (mlx-swift-lm)
          uses: actions/checkout@v4
          with:
--          ref: ${{ github.sha }}
--          path: ci-controls
--          sparse-checkout: .github/scripts
--          persist-credentials: false
-+          fetch-depth: 0
- 
--      - name: Set up Node for result validation
--        uses: actions/setup-node@v4
--        with:
--          node-version: '22'
--
--      - name: Checkout selected library source
--        uses: actions/checkout@v4
--        with:
 -          ref: ${{ env.LIBRARY_REF }}
 -          path: mlx-swift-lm
 -          submodules: recursive
 -          persist-credentials: false
--
++          fetch-depth: 0
+ 
 -      - name: Checkout selected core source
 -        uses: actions/checkout@v4
 -        with:
@@ -1069,15 +682,29 @@ index e5928d4f3083e643d9c8dea2d1aa37882e822f14..ea247cfda7014710c89b8f243e2fc462
 +      - name: Install Metal Toolchain
 +        run: xcodebuild -downloadComponent MetalToolchain || true
  
+-      - name: Set up Swift result verification
+-        id: maintenance
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
++      - name: Cache Swift packages
++        uses: actions/cache@v4
+         with:
+-          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
++          path: SwiftLM/.build
++          key: ${{ runner.os }}-swiftlm-spm-${{ hashFiles('SwiftLM/Package.resolved') }}
++          restore-keys: ${{ runner.os }}-swiftlm-spm-
+ 
 -      - name: Build SwiftLM and tests in Debug
--        working-directory: SwiftLM
++      - name: Resolve Dependencies
++        run: swift package resolve
+         working-directory: SwiftLM
 -        run: |
 -          swift build --build-system native --jobs 4 --build-tests
 -          BIN_DIR=$(swift build --build-system native --show-bin-path)
 -          echo "SWIFTLM_BIN_DIR=$BIN_DIR" >> "$GITHUB_ENV"
--
+ 
 -      - name: Build Metal kernels from the selected core
--        run: |
++      - name: Install MLX Metal library
+         run: |
 -          xcodebuild -downloadComponent MetalToolchain
 -          mkdir -p "$RUNNER_TEMP/mlx-metallib/lib"
 -          cmake -S mlx-swift/Source/Cmlx/mlx -B "$RUNNER_TEMP/mlx-metallib" \
@@ -1096,7 +723,13 @@ index e5928d4f3083e643d9c8dea2d1aa37882e822f14..ea247cfda7014710c89b8f243e2fc462
 -          else
 -            echo "CMake did not enable NAX kernels for this SDK and deployment target."
 -          fi
--
++          python3 -m venv /tmp/mlx_venv
++          /tmp/mlx_venv/bin/pip install --quiet mlx
++          METALLIB=$(echo /tmp/mlx_venv/lib/python*/site-packages/mlx/lib/mlx.metallib)
++          # Make it available system-wide for all subsequent steps
++          sudo cp "$METALLIB" /usr/local/lib/mlx.metallib || true
++          echo "MLX_METAL_LIB=$METALLIB" >> $GITHUB_ENV
+ 
 -      - name: Colocate source-built Metal libraries
 -        env:
 -          BINARY_DIRECTORY: ${{ env.SWIFTLM_BIN_DIR }}
@@ -1113,8 +746,12 @@ index e5928d4f3083e643d9c8dea2d1aa37882e822f14..ea247cfda7014710c89b8f243e2fc462
 -          fi
 -
 -      - name: Run tests without pretrained models
--        working-directory: SwiftLM
--        run: |
++      - name: Build SwiftLM
++        run: swift build --build-tests
+         working-directory: SwiftLM
++
++      - name: Copy Metal library to build outputs
+         run: |
 -          set -o pipefail
 -          status=0
 -          swift test --build-system native --jobs 4 --disable-swift-testing list --skip-build \
@@ -1138,16 +775,19 @@ index e5928d4f3083e643d9c8dea2d1aa37882e822f14..ea247cfda7014710c89b8f243e2fc462
 -            echo "::error::SwiftLM tests failed with exit status $status."
 -            exit "$status"
 -          fi
--          node "$GITHUB_WORKSPACE/ci-controls/.github/scripts/verify-integration-results.mjs" swiftpm \
+-          "${{ steps.maintenance.outputs.binary }}" verify-test-results swiftpm \
 -            "$RUNNER_TEMP/swiftlm-runtime.log" "$RUNNER_TEMP/swiftlm-tests.txt" \
 -            PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests OwnFeatureHTTPTests
--
++          METALLIB="$MLX_METAL_LIB"
++          # Copy to all locations the test runner and linked bundles may search
++          find SwiftLM/.build -type d \( -name "debug" -o -name "release" \) -exec cp "$METALLIB" {}/ \; 2>/dev/null || true
++          find SwiftLM/.build -name "*.xctest" -exec cp "$METALLIB" {}/Contents/MacOS/ \; 2>/dev/null || true
++          find SwiftLM/.build -name "*Tests" -type f -exec sh -c 'cp "'"$METALLIB"'" "$(dirname ${1})/"' _ {} \; 2>/dev/null || true
+ 
 -      - name: Upload selected SwiftLM dependency proof
 -        if: always()
 -        uses: actions/upload-artifact@v4
-+      - name: Cache Swift packages
-+        uses: actions/cache@v4
-         with:
+-        with:
 -          name: swiftlm-debug-sources
 -          path: |
 -            ${{ runner.temp }}/cohort-sources.txt
@@ -1156,22 +796,20 @@ index e5928d4f3083e643d9c8dea2d1aa37882e822f14..ea247cfda7014710c89b8f243e2fc462
 -            ${{ runner.temp }}/swiftlm-discovery-errors.txt
 -            ${{ runner.temp }}/swiftlm-runtime.log
 -          if-no-files-found: error
-+          path: SwiftLM/.build
-+          key: ${{ runner.os }}-swiftlm-spm-${{ hashFiles('SwiftLM/Package.resolved') }}
-+          restore-keys: ${{ runner.os }}-swiftlm-spm-
- 
+-
 -  lmd-consumer:
 -    name: LMD consumer
--    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@cdc7e518b471626a7e83d0681480ff2d2d504472
+-    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@6a1892b4a386f3c323a560abf1b464e75ab3f317
 -    with:
--      lmd_ref: cdc7e518b471626a7e83d0681480ff2d2d504472
+-      lmd_ref: 6a1892b4a386f3c323a560abf1b464e75ab3f317
 -      core_ref: ${{ inputs.core_ref || '786724757aa480f049d3a913c59da7e0e61ad5dc' }}
 -      library_ref: ${{ inputs.library_ref || github.event.pull_request.head.sha || github.sha }}
--      swiftlm_ref: ${{ inputs.swiftlm_ref || 'dbf4eee36701d844996038b182a272f40a41f414' }}
-+      - name: Resolve Dependencies
-+        run: swift package resolve
-+        working-directory: SwiftLM
- 
+-      swiftlm_ref: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}
+-      core_profile: ${{ (inputs.core_ref || '786724757aa480f049d3a913c59da7e0e61ad5dc') == '786724757aa480f049d3a913c59da7e0e61ad5dc' && 'core-runtime-7867247' || '' }}
+-      swiftlm_profile: ${{ (inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be') == 'dbf4eee36701d844996038b182a272f40a41f414' && 'swiftlm-http-diagnostics-dbf4eee' || '' }}
+-    secrets:
+-      LOCAL_POOL_CAPACITY_TOKEN: ${{ secrets.LOCAL_POOL_CAPACITY_TOKEN }}
+-
 -  lmd-integration:
 -    name: LMD Integration
 -    if: always()
@@ -1182,39 +820,19 @@ index e5928d4f3083e643d9c8dea2d1aa37882e822f14..ea247cfda7014710c89b8f243e2fc462
 -      - name: Require successful LMD consumer validation
 -        env:
 -          LMD_RESULT: ${{ needs.lmd-consumer.result }}
-+      - name: Install MLX Metal library
-         run: |
+-        run: |
 -          if [[ "$LMD_RESULT" != "success" ]]; then
 -            echo "::error::LMD consumer validation ended with $LMD_RESULT."
 -            exit 1
 -          fi
-+          python3 -m venv /tmp/mlx_venv
-+          /tmp/mlx_venv/bin/pip install --quiet mlx
-+          METALLIB=$(echo /tmp/mlx_venv/lib/python*/site-packages/mlx/lib/mlx.metallib)
-+          # Make it available system-wide for all subsequent steps
-+          sudo cp "$METALLIB" /usr/local/lib/mlx.metallib || true
-+          echo "MLX_METAL_LIB=$METALLIB" >> $GITHUB_ENV
-+
-+      - name: Build SwiftLM
-+        run: swift build --build-tests
-+        working-directory: SwiftLM
-+
-+      - name: Copy Metal library to build outputs
-+        run: |
-+          METALLIB="$MLX_METAL_LIB"
-+          # Copy to all locations the test runner and linked bundles may search
-+          find SwiftLM/.build -type d \( -name "debug" -o -name "release" \) -exec cp "$METALLIB" {}/ \; 2>/dev/null || true
-+          find SwiftLM/.build -name "*.xctest" -exec cp "$METALLIB" {}/Contents/MacOS/ \; 2>/dev/null || true
-+          find SwiftLM/.build -name "*Tests" -type f -exec sh -c 'cp "'"$METALLIB"'" "$(dirname ${1})/"' _ {} \; 2>/dev/null || true
-+
 +      - name: Run SwiftLM Integration Tests
 +        run: swift test --parallel --skip-build
 +        working-directory: SwiftLM
 diff --git a/.github/workflows/upstream-sync.yml b/.github/workflows/upstream-sync.yml
-index 2f99f114e7b8db5049ddd176fe9653696e7640c0..89813df88b6218e16777eb24aaa082ea89829f6f 100644
+index 0be1747fc18e854c83ae11d879fc939452edee3d..89813df88b6218e16777eb24aaa082ea89829f6f 100644
 --- a/.github/workflows/upstream-sync.yml
 +++ b/.github/workflows/upstream-sync.yml
-@@ -1,38 +1,17 @@
+@@ -1,92 +1,98 @@
  name: 🔄 Auto-Sync Upstream
  
  on:
@@ -1227,40 +845,75 @@ index 2f99f114e7b8db5049ddd176fe9653696e7640c0..89813df88b6218e16777eb24aaa082ea
 +  workflow_dispatch: # Enable manual triggers
  
 -permissions: {}
+-
+-defaults:
+-  run:
+-    shell: bash
 +permissions:
 +  contents: write
 +  pull-requests: write
  
  jobs:
 -  regression:
--    runs-on: ubuntu-latest
+-    runs-on: ubuntu-24.04
+-    container: swift:6.3.2-noble@sha256:c4336909a71b2e69b884f4078cdf98c0cd081911632cb349ef72abc4cbed69fc
+-    timeout-minutes: 60
 -    permissions:
 -      contents: read
 -    steps:
--      - name: Checkout Code
--        uses: actions/checkout@v4
--        with:
--          persist-credentials: false
+-      - name: Refresh Ubuntu package metadata
+-        run: apt-get update
 -
--      - name: Test upstream synchronization
--        run: node --test .github/scripts/upstream-sync.test.mjs
+-      - name: Install portable build prerequisites
+-        run: apt-get install --yes --no-install-recommends make curl
+-
+-      - name: Verify the fixed Swift upstream sync commands
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
+-        with:
+-          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
+-          test-filter: UpstreamSyncTests
 -
    sync:
 -    needs: regression
 -    if: github.event_name != 'pull_request'
-     runs-on: ubuntu-latest
+-    runs-on: ubuntu-24.04
+-    container: swift:6.3.2-noble@sha256:c4336909a71b2e69b884f4078cdf98c0cd081911632cb349ef72abc4cbed69fc
+-    timeout-minutes: 60
 -    concurrency:
 -      group: upstream-sync
 -      cancel-in-progress: false
 -    permissions:
 -      contents: write
 -      pull-requests: write
++    runs-on: ubuntu-latest
      steps:
-       - name: Checkout Code
+-      - name: Refresh Ubuntu package metadata
+-        run: apt-get update
+-
+-      - name: Install portable build and GitHub prerequisites
+-        run: apt-get install --yes --no-install-recommends make curl gh
+-
+-      - name: Checkout the candidate repository
++      - name: Checkout Code
          uses: actions/checkout@v4
-@@ -45,20 +24,75 @@ jobs:
-           git config user.name "github-actions[bot]"
-           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+         with:
+-          path: candidate
+           fetch-depth: 0
+           persist-credentials: false
+ 
+-      - name: Set up the fixed Swift upstream sync commands
+-        id: maintenance
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
+-        with:
+-          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
+-          test-filter: UpstreamSyncTests
+-
+       - name: Configure Git
+         run: |
+-          git -C candidate config user.name "github-actions[bot]"
+-          git -C candidate config user.email "41898282+github-actions[bot]@users.noreply.github.com"
++          git config user.name "github-actions[bot]"
++          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
  
 -      - name: Configure Git credentials
 -        env:
@@ -1276,9 +929,10 @@ index 2f99f114e7b8db5049ddd176fe9653696e7640c0..89813df88b6218e16777eb24aaa082ea
 +      - name: Create or Update Sync Branch
          id: sync_branch
          env:
+-          MAINTENANCE_BIN: ${{ steps.maintenance.outputs.binary }}
 -          GH_TOKEN: ${{ secrets.SWIFTLM_PR_TOKEN }}
 -          SYNC_UPSTREAM_URL: https://github.com/ml-explore/mlx-swift-lm.git
--        run: node .github/scripts/upstream-sync.mjs sync
+-        run: '"$MAINTENANCE_BIN" sync-upstream "$GITHUB_WORKSPACE/candidate"'
 +          SYNC_PUSH_TOKEN: ${{ secrets.SWIFTLM_PR_TOKEN }}
 +        run: |
 +          git checkout -B sync/upstream-latest origin/main
@@ -1321,8 +975,9 @@ index 2f99f114e7b8db5049ddd176fe9653696e7640c0..89813df88b6218e16777eb24aaa082ea
 +      - name: Create Pull Request to Main
          if: steps.sync_branch.outputs.has_changes == 'true'
          env:
+-          MAINTENANCE_BIN: ${{ steps.maintenance.outputs.binary }}
            GH_TOKEN: ${{ secrets.SWIFTLM_PR_TOKEN }}
--        run: node .github/scripts/upstream-sync.mjs pr
+-        run: '"$MAINTENANCE_BIN" create-sync-pull-request "$GITHUB_WORKSPACE/candidate"'
 +        run: |
 +          EXISTING_PR_NUMBER="$(gh api --method GET \
 +            "/repos/${GITHUB_REPOSITORY}/pulls" \

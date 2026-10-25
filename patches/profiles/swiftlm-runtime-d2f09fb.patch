@@ -1,127 +1,8 @@
-diff --git a/.github/scripts/verify-integration-results.mjs b/.github/scripts/verify-integration-results.mjs
-deleted file mode 100644
-index 60c5255df816f8dae2eeb32159e5a7bb59e941f9..0000000000000000000000000000000000000000
---- a/.github/scripts/verify-integration-results.mjs
-+++ /dev/null
-@@ -1,113 +0,0 @@
--#!/usr/bin/env node
--import { readFileSync } from 'node:fs';
--
--function requireCondition(condition, message) {
--  if (!condition) throw new Error(message);
--}
--
--function verifySwiftPM(logPath, discoveryPath, selectors) {
--  const discovery = readFileSync(discoveryPath, 'utf8');
--  const classes = new Map();
--  for (const line of discovery.split(/\r?\n/)) {
--    const match = /^(\w+)\.(\w+)\/(\S+)$/.exec(line.trim());
--    if (!match) continue;
--    const [, module, name, method] = match;
--    if (!selectors.some(selector => selector === module || selector === name || selector === module + '.' + name)) continue;
--    const key = module + '.' + name;
--    if (!classes.has(key)) classes.set(key, new Set());
--    classes.get(key).add(method);
--  }
--  for (const selector of selectors) {
--    requireCondition([...classes.keys()].some(key => key === selector || key.startsWith(selector + '.') || key.endsWith('.' + selector)),
--      'Discovery did not include selected XCTest class or module: ' + selector);
--  }
--
--  const log = readFileSync(logPath, 'utf8');
--  const summaries = new Map();
--  const completedMethods = new Map();
--  const activeSuites = new Set();
--  const lines = log.split(/\r?\n/);
--  for (let index = 0; index < lines.length; index += 1) {
--    const line = lines[index];
--    const started = /^Test Suite '([^']+)' started at /.exec(line);
--    if (started) activeSuites.add(started[1]);
--    const suite = /^Test Suite '([^']+)' (passed|failed) at /.exec(line);
--    if (suite) {
--      const counts = /^\s*Executed (\d+) tests?, with (?:(\d+) tests? skipped and )?(\d+) failures? \(/.exec(lines[index + 1] ?? '');
--      requireCondition(counts, 'Missing XCTest summary after suite: ' + suite[1]);
--      requireCondition(suite[2] === 'passed' && Number(counts[2] ?? 0) === 0 && Number(counts[3]) === 0,
--        'XCTest suite failed or skipped tests: ' + suite[1]);
--      activeSuites.delete(suite[1]);
--      summaries.set(suite[1], Number(counts[1]));
--    }
--    const testCase = /^Test Case '-\[(\w+\.\w+) (\S+)\]' (passed|failed|skipped)\b/.exec(line)
--      ?? /^Test Case '(\w+\.\w+)\.(\w+)' (passed|failed|skipped)\b/.exec(line);
--    if (testCase && classes.has(testCase[1])) {
--      requireCondition(testCase[3] === 'passed', 'XCTest case did not pass: ' + testCase[1] + '/' + testCase[2]);
--      if (!completedMethods.has(testCase[1])) completedMethods.set(testCase[1], new Set());
--      completedMethods.get(testCase[1]).add(testCase[2]);
--    }
--  }
--  requireCondition(activeSuites.size === 0, 'XCTest did not finish suites: ' + [...activeSuites].join(', '));
--  for (const [key, methods] of classes) {
--    const name = key.slice(key.lastIndexOf('.') + 1);
--    requireCondition(summaries.get(name) === methods.size,
--      'XCTest class did not complete every discovered case: ' + key + ' (expected ' + methods.size + ', summary ' + summaries.get(name) + ')');
--    for (const method of methods) {
--      requireCondition(completedMethods.get(key)?.has(method), 'XCTest case did not finish: ' + key + '/' + method);
--    }
--    console.log(key + ': ' + methods.size + ' discovered cases completed without failures or skips');
--  }
--}
--
--function verifyXcode(reportPath, selectors) {
--  const report = JSON.parse(readFileSync(reportPath, 'utf8'));
--  requireCondition(Array.isArray(report.testNodes), 'xcresult JSON does not contain testNodes');
--  const nodes = [];
--  function visit(node) {
--    nodes.push(node);
--    for (const child of node.children ?? []) visit(child);
--  }
--  for (const node of report.testNodes) visit(node);
--  for (const selector of selectors) {
--    const suites = nodes.filter(node => node.nodeType === 'Test Suite'
--      && node.nodeIdentifierURL?.endsWith('/' + selector));
--    requireCondition(suites.length === 1, 'xcresult must contain one selected suite: ' + selector);
--    let functions = 0;
--    let cases = 0;
--    function verify(node) {
--      if (node.nodeType === 'Runtime Warning') {
--        console.warn('Xcode runtime warning: ' + node.name);
--        return;
--      }
--      requireCondition(node.result === 'Passed', 'xcresult did not pass: ' + (node.nodeIdentifierURL ?? node.name) + ' (' + node.result + ')');
--      if (node.nodeType === 'Test Case') {
--        functions += 1;
--        if (!(node.children ?? []).some(child => child.nodeType === 'Arguments')) cases += 1;
--      }
--      if (node.nodeType === 'Arguments') cases += 1;
--      for (const child of node.children ?? []) verify(child);
--    }
--    verify(suites[0]);
--    requireCondition(functions > 0 && cases > 0, 'xcresult selected suite did not execute cases: ' + selector);
--    console.log(selector + ': ' + functions + ' functions / ' + cases + ' cases passed without skips');
--  }
--}
--
--try {
--  const [mode, inputPath, ...arguments_] = process.argv.slice(2);
--  requireCondition(inputPath, 'Usage: verify-integration-results.mjs swiftpm <log> <discovery> <class-or-module>... | xcode <test-results-json> <suite-path>...');
--  if (mode === 'swiftpm') {
--    const [discoveryPath, ...selectors] = arguments_;
--    requireCondition(discoveryPath && selectors.length > 0, 'SwiftPM validation requires discovery and selected classes or modules');
--    verifySwiftPM(inputPath, discoveryPath, selectors);
--  } else if (mode === 'xcode') {
--    requireCondition(arguments_.length > 0, 'Xcode validation requires selected suite paths');
--    verifyXcode(inputPath, arguments_);
--  } else {
--    throw new Error('Select swiftpm or xcode validation');
--  }
--} catch (error) {
--  console.error('Test result validation failed: ' + error.message);
--  process.exitCode = 1;
--}
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8a2731466 100644
+index 529946d53e99271adc078f82994589ae77465a0b..219b5f6e895ea8542487a2f21b6ccbd8a2731466 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
-@@ -5,387 +5,86 @@ on:
+@@ -5,393 +5,86 @@ on:
      branches: [main]
    pull_request:
      branches: [main]
@@ -209,12 +90,16 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
 -  lmd_consumer:
 -    name: LMD consumer
 -    needs: lmd_sources
--    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@cdc7e518b471626a7e83d0681480ff2d2d504472
+-    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@6a1892b4a386f3c323a560abf1b464e75ab3f317
 -    with:
--      lmd_ref: cdc7e518b471626a7e83d0681480ff2d2d504472
+-      lmd_ref: 6a1892b4a386f3c323a560abf1b464e75ab3f317
 -      core_ref: ${{ needs.lmd_sources.outputs.core_ref }}
 -      library_ref: ${{ needs.lmd_sources.outputs.library_ref }}
 -      swiftlm_ref: ${{ needs.lmd_sources.outputs.swiftlm_ref }}
+-      core_profile: ${{ needs.lmd_sources.outputs.core_ref == '786724757aa480f049d3a913c59da7e0e61ad5dc' && 'core-runtime-7867247' || '' }}
+-      library_profile: ${{ needs.lmd_sources.outputs.library_ref == '60054f77f91bc3e77c44950054dd6a9b53359352' && 'library-runtime-60054f7' || '' }}
+-    secrets:
+-      LOCAL_POOL_CAPACITY_TOKEN: ${{ secrets.LOCAL_POOL_CAPACITY_TOKEN }}
 -
 -  lmd_integration:
 -    name: LMD Integration
@@ -277,12 +162,6 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
            submodules: recursive
 -          persist-credentials: false
  
--      - uses: actions/setup-node@v4
--        with:
--          node-version: '22'
-+      - name: Select Xcode 26 (Swift 6.2)
-+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
- 
 -      - name: Verify the checked out source revisions
 -        run: |
 -          git rev-parse HEAD > "$RUNNER_TEMP/swiftlm.sha"
@@ -296,6 +175,14 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
 -          cat "$RUNNER_TEMP/cohort-sources.txt" >> "$GITHUB_STEP_SUMMARY"
 -          swift --version
 -          xcodebuild -version
++      - name: Select Xcode 26 (Swift 6.2)
++        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+ 
+-      - name: Set up Swift result verification
+-        id: maintenance
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
+-        with:
+-          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
 +      - name: Install Metal Toolchain
 +        run: xcodebuild -downloadComponent MetalToolchain || true
  
@@ -407,7 +294,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
 -          swift test --build-system native --jobs 4 -c "$CONFIGURATION" \
 -            -Xswiftc -enable-testing --disable-swift-testing --skip-build --filter SwiftLMTests \
 -            2>&1 | tee "$RUNNER_TEMP/swiftlm-runtime.log"
--          node .github/scripts/verify-integration-results.mjs swiftpm \
+-          "${{ steps.maintenance.outputs.binary }}" verify-test-results swiftpm \
 -            "$RUNNER_TEMP/swiftlm-runtime.log" "$RUNNER_TEMP/swiftlm-discovery.txt" \
 -            SwiftLMTests OwnFeatureHTTPTests
 -
@@ -426,7 +313,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
 -            -Xswiftc -enable-testing --disable-swift-testing --skip-build \
 -            --filter "SwiftBuddyTests\.($class_pattern)" \
 -            2>&1 | tee "$RUNNER_TEMP/swiftbuddy-local.log"
--          node .github/scripts/verify-integration-results.mjs swiftpm \
+-          "${{ steps.maintenance.outputs.binary }}" verify-test-results swiftpm \
 -            "$RUNNER_TEMP/swiftbuddy-local.log" "$RUNNER_TEMP/swiftlm-discovery.txt" \
 -            "${test_classes[@]}"
 -
@@ -438,7 +325,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
 -            -Xswiftc -enable-testing --disable-swift-testing --skip-build \
 -            --filter 'SwiftBuddyTests\.(AudioSTTTests|AudioTests|E2EIntegrationTests|HFModelSearchTests|VLMTests)' \
 -            2>&1 | tee "$RUNNER_TEMP/swiftbuddy-manual.log"
--          node .github/scripts/verify-integration-results.mjs swiftpm \
+-          "${{ steps.maintenance.outputs.binary }}" verify-test-results swiftpm \
 -            "$RUNNER_TEMP/swiftbuddy-manual.log" "$RUNNER_TEMP/swiftlm-discovery.txt" \
 -            AudioSTTTests AudioTests E2EIntegrationTests HFModelSearchTests VLMTests
 -
@@ -558,7 +445,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
      timeout-minutes: 30
      strategy:
        fail-fast: false
-@@ -413,6 +112,16 @@ jobs:
+@@ -419,6 +112,16 @@ jobs:
              models: mlx-community/Qwen2-VL-2B-Instruct-4bit LiquidAI/LFM2.5-VL-450M-MLX-4bit@10ce3604e42cd595497c47aaf67b7890e1e2a3b4
            - modality: audio
              models: mlx-community/gemma-4-e4b-it-4bit
@@ -575,7 +462,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
            # OpenAI-compatibility contract: what the client receives over the wire, once
            # real tokenisation decides chunk boundaries. Runs on the smallest model —
            # these assert server behaviour, not model quality (issue #128).
-@@ -436,43 +145,18 @@ jobs:
+@@ -442,43 +145,18 @@ jobs:
            - modality: opencode
              models: mlx-community/gemma-4-e4b-it-4bit
      steps:
@@ -624,7 +511,32 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
  
        # The key is per-modality and derived from the test script, so changing the model a
        # test loads rotates the key automatically. The previous static
-@@ -523,52 +207,64 @@ jobs:
+@@ -512,24 +190,11 @@ jobs:
+         env:
+           HF_HUB_DOWNLOAD_TIMEOUT: "600"
+           SWIFTLM_TEST_MODEL: ${{ matrix.test_model }}
+-          # Diagnostic: print a Swift backtrace when the server dies with a signal.
+-          SWIFT_BACKTRACE: "enable=yes,interactive=no"
+         run: |
+           chmod +x tests/test-${{ matrix.modality }}.sh
+           for attempt in 1 2 3; do
+             echo "Attempt $attempt of 3..."
+-            # Diagnostic: collect the SwiftLM crash report from every attempt, not only when the
+-            # job fails, because the job retries and a crash in attempt 1 is otherwise invisible.
+-            touch "$RUNNER_TEMP/attempt-$attempt"
+             if tests/test-${{ matrix.modality }}.sh .build/release/SwiftLM 15413; then exit 0; fi
+-            # ReportCrash writes the report a moment after the server dies, so wait before looking.
+-            sleep 10
+-            reports=$(find "$HOME/Library/Logs/DiagnosticReports" -name '*SwiftLM*' -newer "$RUNNER_TEMP/attempt-$attempt" 2>/dev/null || true)
+-            if [ -z "$reports" ]; then echo "no new SwiftLM crash report for attempt $attempt"; fi
+-            for f in $reports; do
+-              echo "===== crash report, attempt $attempt: $f"
+-              head -c 60000 "$f"
+-            done
+             if [ "$attempt" -eq 3 ]; then echo "All attempts failed"; exit 1; fi
+             sleep 10
+           done
+@@ -542,52 +207,64 @@ jobs:
            path: /tmp/SwiftLM-test-*.log
            retention-days: 7
  
@@ -723,7 +635,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
            python3 -m venv /tmp/mlx_venv
            /tmp/mlx_venv/bin/pip install --quiet huggingface_hub hf
  
-@@ -615,52 +311,61 @@ jobs:
+@@ -634,52 +311,61 @@ jobs:
            path: /tmp/SwiftLM-test-speculative.log
            retention-days: 7
  
@@ -819,7 +731,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
            python3 -m venv /tmp/mlx_venv
            /tmp/mlx_venv/bin/pip install --quiet huggingface_hub hf
  
-@@ -706,55 +411,65 @@ jobs:
+@@ -725,55 +411,65 @@ jobs:
            path: /tmp/SwiftLM-test-dflash.log
            retention-days: 7
  
@@ -919,7 +831,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
            python3 -m venv /tmp/mlx_venv
            /tmp/mlx_venv/bin/pip install --quiet huggingface_hub hf
  
-@@ -784,7 +499,7 @@ jobs:
+@@ -803,7 +499,7 @@ jobs:
              /Pages occupied by compressor:/ { v=$5; gsub(/\./, "", v); comp=v+0 }
              END { printf "%.2f", (act+wire+comp)*page_size/1073741824 }
            ')
@@ -928,7 +840,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
            echo "RAM before eval: ${RAM} GB"
        
        - name: Run speculative evaluation E2E
-@@ -819,7 +534,7 @@ jobs:
+@@ -838,7 +534,7 @@ jobs:
              /Pages occupied by compressor:/ { v=$5; gsub(/\./, "", v); comp=v+0 }
              END { printf "%.2f", (act+wire+comp)*page_size/1073741824 }
            ')
@@ -937,7 +849,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
            echo "RAM after eval: ${RAM} GB"
  
        - name: Emit memory summary
-@@ -836,7 +551,7 @@ jobs:
+@@ -855,7 +551,7 @@ jobs:
              echo "| RAM before test | ${BEFORE} GB |"
              echo "| RAM after test  | ${AFTER} GB |"
              echo "| Delta | $(echo "$AFTER $BEFORE" | awk '{printf "%.2f", $1-$2}') GB |"
@@ -946,7 +858,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
  
        - name: Upload speculative eval logs on failure
          if: failure()
-@@ -845,54 +560,47 @@ jobs:
+@@ -864,54 +560,47 @@ jobs:
            name: speculative-eval-logs
            path: /tmp/SwiftLM-test-speculative-eval.log
  
@@ -1027,7 +939,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
  
        - name: Cache MLX models (2B main + 0.8B draft)
          uses: actions/cache@v4
-@@ -922,11 +630,9 @@ jobs:
+@@ -941,11 +630,9 @@ jobs:
            ')
            TOTAL=$(sysctl -n hw.memsize | awk '{printf "%.0f", $1/1073741824}')
            LIMIT=$(echo "$TOTAL * 0.85" | bc | cut -d. -f1)
@@ -1042,7 +954,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
            echo "Baseline RAM: ${RAM} GB  |  Runner: ${TOTAL} GB  |  Limit: ${LIMIT} GB"
  
        - name: Start SSD + draft server (Issue #72 scenario)
-@@ -943,11 +649,11 @@ jobs:
+@@ -962,11 +649,11 @@ jobs:
              --max-tokens 64 \
              > /tmp/ssd_draft_guard.log 2>&1 &
            PID=$!
@@ -1056,7 +968,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
                echo "Server died early:"
                cat /tmp/ssd_draft_guard.log
                exit 1
-@@ -970,7 +676,7 @@ jobs:
+@@ -989,7 +676,7 @@ jobs:
              /Pages occupied by compressor:/ { v=$5; gsub(/\./, "", v); comp=v+0 }
              END { printf "%.2f", (act+wire+comp)*page_size/1073741824 }
            ')
@@ -1065,7 +977,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
            echo "RAM after load: ${RAM} GB"
  
        - name: "[1/3] Verify draft model loaded in server log"
-@@ -1004,7 +710,7 @@ jobs:
+@@ -1023,7 +710,7 @@ jobs:
              /Pages occupied by compressor:/ { v=$5; gsub(/\./, "", v); comp=v+0 }
              END { printf "%.2f", (act+wire+comp)*page_size/1073741824 }
            ')
@@ -1074,7 +986,7 @@ index fc9526fe551ac6f35583de3d59c977c12e4d0b7d..219b5f6e895ea8542487a2f21b6ccbd8
            echo "RAM after inference: ${RAM} GB"
  
            LIMIT="${{ steps.ram_base.outputs.ram_limit }}"
-@@ -1053,7 +759,7 @@ jobs:
+@@ -1072,7 +759,7 @@ jobs:
              echo "| RAM after inference (peak) | ${PEAK} GB | ≤ ${LIMIT} GB (85%) |"
              echo "| Load delta | $(echo "$LOADED $BASE" | awk '{printf "%.2f", $1-$2}') GB | — |"
              echo "| Inference delta | $(echo "$PEAK $LOADED" | awk '{printf "%.2f", $1-$2}') GB | — |"
@@ -1384,14 +1296,13 @@ index b8012b9bba965bafa746174cf04dc427bbfc31c0..2cd7bde6af9c59cbe80ce7a8d556fefb
            body_path: /tmp/release_notes.md
            files: |
 diff --git a/.github/workflows/update_dependencies.yml b/.github/workflows/update_dependencies.yml
-index f2cff3c478d6b325b9b91567163b33c88049f253..85a599c2efb7ad4333b1b92af694a555b90724ff 100644
+index b1af1c74c2df86765e31170f7ccc4f142e24dc3e..85a599c2efb7ad4333b1b92af694a555b90724ff 100644
 --- a/.github/workflows/update_dependencies.yml
 +++ b/.github/workflows/update_dependencies.yml
-@@ -1,7 +1,19 @@
+@@ -1,6 +1,19 @@
  name: Dependency Automation
  
 -# Prepare a bump branch for a person to review and open as a pull request.
--# GITHUB_TOKEN opened, synchronize, and reopened pull request events require approval.
 +# Prepares a submodule bump when mlx-swift or mlx-swift-lm cuts a release, and stops
 +# at a pushed branch rather than opening a pull request.
 +#
@@ -1409,45 +1320,116 @@ index f2cff3c478d6b325b9b91567163b33c88049f253..85a599c2efb7ad4333b1b92af694a555
  on:
    repository_dispatch:
      types: [dependency_bump]
-@@ -54,7 +66,7 @@ jobs:
-       - name: Move submodule to the released tag
-         run: |
-           set -euo pipefail
--          git -C "$SOURCE_REPO" fetch --tags origin
-+          git -C "$SOURCE_REPO" fetch --tags --force origin
-           if ! git -C "$SOURCE_REPO" rev-parse -q --verify "refs/tags/${NEW_TAG}^{commit}" >/dev/null; then
-             echo "::error::tag $NEW_TAG does not exist in $SOURCE_REPO"
-             exit 1
-@@ -79,41 +91,40 @@ jobs:
-             echo "\`$SOURCE_REPO\` is already at \`$NEW_TAG\` (\`${AFTER_SHA:0:7}\`)."
-           } >> "$GITHUB_STEP_SUMMARY"
+@@ -8,40 +21,110 @@ on:
+ permissions:
+   contents: write
  
--      - name: Push a new bump branch
+-defaults:
+-  run:
+-    shell: bash
+-
+ jobs:
+   bump-dependencies:
+-    runs-on: ubuntu-24.04
+-    container: swift:6.3.2-noble@sha256:c4336909a71b2e69b884f4078cdf98c0cd081911632cb349ef72abc4cbed69fc
+-    timeout-minutes: 60
++    runs-on: ubuntu-latest
+     steps:
+-      - name: Refresh Ubuntu package metadata
+-        run: apt-get update
+-
+-      - name: Install portable build prerequisites
+-        run: apt-get install --yes --no-install-recommends make curl
+-
+-      - name: Checkout the candidate repository
++      - name: Checkout Code
+         uses: actions/checkout@v4
+         with:
+-          path: candidate
+           submodules: recursive
+           fetch-depth: 0
+ 
+-      - name: Verify the fixed Swift dependency bump command
+-        id: maintenance
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
+-        with:
+-          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
+-          test-filter: DependencyBumpTests
+-
+-      - name: Prepare a dependency branch for manual review
+-        id: bump
++      # client_payload is attacker-controlled in principle — anything able to dispatch
++      # to this repository chooses these strings — and they end up in shell and in a
++      # ref name. Validate them here and pass them onward through the environment
++      # rather than interpolating ${{ }} into a run block, where a crafted tag would
++      # be executed rather than compared.
++      - name: Validate dispatch payload
+         env:
+-          MAINTENANCE_BIN: ${{ steps.maintenance.outputs.binary }}
+           PAYLOAD_SOURCE_REPO: ${{ github.event.client_payload.source_repo }}
+           PAYLOAD_NEW_TAG: ${{ github.event.client_payload.new_tag }}
+-        run: '"$MAINTENANCE_BIN" bump-dependency "$GITHUB_WORKSPACE/candidate"'
++        run: |
++          set -euo pipefail
++          case "$PAYLOAD_SOURCE_REPO" in
++            mlx-swift|mlx-swift-lm) ;;
++            *)
++              echo "::error::unexpected source_repo '$PAYLOAD_SOURCE_REPO' — expected mlx-swift or mlx-swift-lm"
++              exit 1
++              ;;
++          esac
++          if ! printf '%s' "$PAYLOAD_NEW_TAG" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'; then
++            echo "::error::refusing tag '$PAYLOAD_NEW_TAG' — not a plain tag name"
++            exit 1
++          fi
++          {
++            echo "SOURCE_REPO=$PAYLOAD_SOURCE_REPO"
++            echo "NEW_TAG=$PAYLOAD_NEW_TAG"
++          } >> "$GITHUB_ENV"
++
++      # Both dependencies are `.package(path: "./…")` in Package.swift, backed by git
++      # submodules, so bumping either one is a pointer move. `swift package update`
++      # does nothing for a path dependency — SwiftPM takes whatever is on disk — which
++      # is why the mlx-swift branch of the previous version of this workflow could only
++      # ever have produced an empty commit.
++      - name: Move submodule to the released tag
++        run: |
++          set -euo pipefail
++          git -C "$SOURCE_REPO" fetch --tags --force origin
++          if ! git -C "$SOURCE_REPO" rev-parse -q --verify "refs/tags/${NEW_TAG}^{commit}" >/dev/null; then
++            echo "::error::tag $NEW_TAG does not exist in $SOURCE_REPO"
++            exit 1
++          fi
++          before=$(git rev-parse "HEAD:$SOURCE_REPO")
++          git -C "$SOURCE_REPO" checkout --detach "refs/tags/$NEW_TAG"
++          after=$(git -C "$SOURCE_REPO" rev-parse HEAD)
++          {
++            echo "BEFORE_SHA=$before"
++            echo "AFTER_SHA=$after"
++          } >> "$GITHUB_ENV"
++          if [ "$before" = "$after" ]; then
++            echo "ALREADY_CURRENT=1" >> "$GITHUB_ENV"
++          fi
++
++      - name: Report an already-current submodule and stop
++        if: env.ALREADY_CURRENT == '1'
++        run: |
++          {
++            echo "### Nothing to bump"
++            echo
++            echo "\`$SOURCE_REPO\` is already at \`$NEW_TAG\` (\`${AFTER_SHA:0:7}\`)."
++          } >> "$GITHUB_STEP_SUMMARY"
++
 +      - name: Push the bump branch
-         if: env.ALREADY_CURRENT != '1'
-         run: |
-           set -euo pipefail
--          branch="auto-update/$SOURCE_REPO-$NEW_TAG"
--          if git ls-remote --exit-code --heads origin "refs/heads/$branch"; then
--            echo "::error::Branch $branch already exists. Review its commits before updating it manually."
--            exit 1
--          else
--            status=$?
--            if [[ "$status" -ne 2 ]]; then
--              echo "::error::Cannot inspect the existing remote branch. Git exited with status $status."
--              exit "$status"
--            fi
--            echo "The remote does not contain $branch."
--          fi
--          git checkout -b "$branch"
++        if: env.ALREADY_CURRENT != '1'
++        run: |
++          set -euo pipefail
 +          branch="auto-update/${SOURCE_REPO}-${NEW_TAG}"
 +          git checkout -B "$branch"
-           git add "$SOURCE_REPO"
-           git \
-             -c user.name='github-actions[bot]' \
-             -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
--            commit -m "Update $SOURCE_REPO submodule to $NEW_TAG"
--          git push origin "HEAD:refs/heads/$branch"
++          git add "$SOURCE_REPO"
++          git \
++            -c user.name='github-actions[bot]' \
++            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
 +            commit -m "chore(deps): bump $SOURCE_REPO to $NEW_TAG
 +
 +          Moves the $SOURCE_REPO submodule from ${BEFORE_SHA:0:7} to ${AFTER_SHA:0:7},
@@ -1457,35 +1439,148 @@ index f2cff3c478d6b325b9b91567163b33c88049f253..85a599c2efb7ad4333b1b92af694a555
 +          # The auto-update/* namespace belongs to this workflow, so replacing a branch
 +          # left by an earlier run for the same tag is safe and keeps re-runs idempotent.
 +          git push --force origin "$branch"
-           echo "BUMP_BRANCH=$branch" >> "$GITHUB_ENV"
- 
--      - name: Link to the new pull request form
++          echo "BUMP_BRANCH=$branch" >> "$GITHUB_ENV"
++
 +      - name: Summarise, with a link that opens the pull request
-         if: env.ALREADY_CURRENT != '1'
-         run: |
-           {
--            echo "### Review the dependency update"
++        if: env.ALREADY_CURRENT != '1'
++        run: |
++          {
 +            echo "### \`$SOURCE_REPO\` → \`$NEW_TAG\` is ready"
-             echo
--            echo "Branch \`$BUMP_BRANCH\` updates \`$SOURCE_REPO\` from \`$BEFORE_SHA\` to \`$AFTER_SHA\`."
++            echo
 +            echo "Branch \`$BUMP_BRANCH\` pushed, moving the submodule from"
 +            echo "\`${BEFORE_SHA:0:7}\` to \`${AFTER_SHA:0:7}\`."
-             echo
--            echo "[Open the pull request]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/main...$BUMP_BRANCH?expand=1)"
++            echo
 +            echo "**[Open the pull request](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/main...${BUMP_BRANCH}?expand=1)**"
-             echo
--            echo "This workflow does not open pull requests. A person must review and open the branch."
--            echo "Pull requests opened with GITHUB_TOKEN create workflow runs that require approval."
++            echo
 +            echo "No PR is opened here on purpose: GitHub does not start workflow runs"
 +            echo "for events raised by \`GITHUB_TOKEN\`, so a bot-opened PR would never"
 +            echo "get CI. Opening it yourself gets the checks this repository gates"
 +            echo "releases on."
-           } >> "$GITHUB_STEP_SUMMARY"
++          } >> "$GITHUB_STEP_SUMMARY"
+diff --git a/Sources/SwiftLM/Server.swift b/Sources/SwiftLM/Server.swift
+index 370565fc0f8c3965b7ffa4ff9f73194a1a30a505..4c630df8b4f3e390def0dbd41a65a0be785ec5cb 100644
+--- a/Sources/SwiftLM/Server.swift
++++ b/Sources/SwiftLM/Server.swift
+@@ -2770,8 +2770,8 @@ func handleChatCompletion(
+         // layers (RotatingKVCache under --ctx-size; this path must run before the
+         // sliding-window one, which misses on any MambaCache), and the generic path below
+         // refuses them: recurrent state cannot be
+-        // trimmed, and the onPrefillDone save runs once the producer has emitted `.info`.
+-        // Without this, every agent turn re-prefills the whole conversation. Instead:
++        // trimmed, and the onPrefillDone save runs after the first decode token has been
++        // fed. Without this, every agent turn re-prefills the whole conversation. Instead:
+         // resume from an exact cached prefix, prefill to the turn boundary, snapshot there
+         // synchronously, then generate the few tokens after it.
+         let hybridBoundary = (skipPromptCache || draftModelRef != nil || config.mtp || config.turboKV)
+@@ -3318,6 +3318,7 @@ func handleChatStreaming(
+                     let memSnap = MemoryUtils.snapshot()
+                     print("srv  slot update: id 0 | prefill done | n_tokens=\(promptTokenCount), t=\(String(format: "%.2f", prefillDur))s, \(String(format: "%.1f", prefillTokPerSec))t/s | OS_RAM=\(String(format: "%.1f", memSnap.os))GB | MEM_DEMAND=\(String(format: "%.1f", memSnap.demand))GB | GPU_MEM=\(String(format: "%.1f", memSnap.gpu))GB")
+                     print("srv  generate: id 0 | ", terminator: "")
++                    if let onPrefillDone { await onPrefillDone() }
+                     firstToken = false
+                 }
+                 if tokenEcho {
+@@ -3429,11 +3430,6 @@ func handleChatStreaming(
+                 print("[SwiftLM] Rejected tool call: reason=\(rejection.reason) tool=\(rejection.toolName ?? "?") detail=\(rejection.detail ?? "n/a")")
+ 
+             case .info(let info):
+-                // `.info` is the producer's last yield, so the cache is no longer written once
+-                // it arrives. The prompt is saved here, not on the first chunk: that raced the
+-                // decode step the producer had already started on the same KVCacheSimple. An
+-                // early exit (stop sequence, disconnect) never reaches `.info` and skips the save.
+-                if !firstToken, let onPrefillDone { await onPrefillDone() }
+                 // The chunk count undercounts: tokens the decoder buffers (tool-call
+                 // bodies, partial text) emit no chunk. `info` carries the real count.
+                 completionTokenCount = info.generationTokenCount
+@@ -3598,6 +3594,7 @@ func handleChatNonStreaming(
+                 let memSnap = MemoryUtils.snapshot()
+                 print("srv  slot update: id 0 | prefill done | n_tokens=\(promptTokenCount), t=\(String(format: "%.2f", prefillDur))s, \(String(format: "%.1f", prefillTokPerSec))t/s | OS_RAM=\(String(format: "%.1f", memSnap.os))GB | MEM_DEMAND=\(String(format: "%.1f", memSnap.demand))GB | GPU_MEM=\(String(format: "%.1f", memSnap.gpu))GB")
+                 print("srv  generate: id 0 | ", terminator: "")
++                if let onPrefillDone { await onPrefillDone() }
+                 firstToken = false
+             }
+             if tokenEcho {
+@@ -3616,9 +3613,6 @@ func handleChatNonStreaming(
+             // See the matching comment in `handleChatStreaming`: log only, no wire shape.
+             print("[SwiftLM] Rejected tool call: reason=\(rejection.reason) tool=\(rejection.toolName ?? "?") detail=\(rejection.detail ?? "n/a")")
+         case .info(let info):
+-            // The producer's last yield; see the matching comment in `handleChatStreaming`.
+-            // The stop-sequence `break` above exits before `.info`, so it skips the save.
+-            if !firstToken, let onPrefillDone { await onPrefillDone() }
+             generationStopReason = info.stopReason
+             completionTokenCount = info.generationTokenCount  // real count; see handleChatStreaming
+         }
 diff --git a/tests/SwiftLMTests/OwnFeatureHTTPTests.swift b/tests/SwiftLMTests/OwnFeatureHTTPTests.swift
-index e3e0d697a19adcae4d028cc7851742e3c5234743..77ff4bc01ed64683eea8f7eb3fa4dd8eb16c2bf3 100644
+index 78764ccd8572236f92b6d9958bc524cc5618dcc0..77ff4bc01ed64683eea8f7eb3fa4dd8eb16c2bf3 100644
 --- a/tests/SwiftLMTests/OwnFeatureHTTPTests.swift
 +++ b/tests/SwiftLMTests/OwnFeatureHTTPTests.swift
-@@ -252,36 +252,14 @@ private struct TinyServer {
+@@ -62,65 +62,6 @@ final class OwnFeatureHTTPTests: XCTestCase {
+     XCTAssertLessThan(health.memory.peakMB, 64)
+   }
+ 
+-  func testCompletedNonStreamingRequestsReusePromptCache() async throws {
+-    try await assertCompletedRequestsReusePromptCache(streaming: false)
+-  }
+-
+-  func testCompletedStreamingRequestsReusePromptCache() async throws {
+-    try await assertCompletedRequestsReusePromptCache(streaming: true)
+-  }
+-
+-  private func assertCompletedRequestsReusePromptCache(streaming: Bool) async throws {
+-    let checkpoint = try await makeCheckpoint()
+-    let logURL: URL
+-    do {
+-      let server = try await startServer(checkpoint: checkpoint.directory, memoryLimitMB: 64)
+-      defer { server.stop() }
+-      let first = try await server.chat(streaming: streaming, logprobs: false)
+-      let second = try await server.chat(streaming: streaming, logprobs: false)
+-      XCTAssertEqual(try responseText(first, streaming: streaming), "AAA")
+-      XCTAssertEqual(try responseText(second, streaming: streaming), "AAA")
+-      let health = try await server.health()
+-      XCTAssertLessThan(health.memory.peakMB, 64)
+-      logURL = server.logURL
+-    }
+-    let output = try String(contentsOf: logURL, encoding: .utf8)
+-    let pattern = try NSRegularExpression(
+-      pattern: "Prompt cache HIT: ([0-9]+)/([0-9]+) tokens reused")
+-    let matches = pattern.matches(in: output, range: NSRange(output.startIndex..., in: output))
+-    XCTAssertEqual(matches.count, 1, "The second request must reuse its completed prompt: \(output)")
+-    let match = try XCTUnwrap(matches.first)
+-    let reusedRange = try XCTUnwrap(Range(match.range(at: 1), in: output))
+-    let promptRange = try XCTUnwrap(Range(match.range(at: 2), in: output))
+-    let reused = try XCTUnwrap(Int(output[reusedRange]))
+-    let prompt = try XCTUnwrap(Int(output[promptRange]))
+-    XCTAssertGreaterThan(reused, 0)
+-    XCTAssertEqual(reused, prompt)
+-  }
+-
+-  private func responseText(_ response: Data, streaming: Bool) throws -> String {
+-    if !streaming {
+-      let reply = try JSONDecoder().decode(ChatReply.self, from: response)
+-      return try XCTUnwrap(reply.choices.first?.message?.content)
+-    }
+-    let body = String(decoding: response, as: UTF8.self)
+-    var text = ""
+-    var completed = false
+-    for raw in body.components(separatedBy: "\n") {
+-      let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+-      guard line.hasPrefix("data: ") else { continue }
+-      let payload = String(line.dropFirst(6))
+-      if payload == "[DONE]" {
+-        completed = true
+-        continue
+-      }
+-      let event = try JSONDecoder().decode(ChatReply.self, from: Data(payload.utf8))
+-      text += event.choices.compactMap { $0.delta?.content }.joined()
+-    }
+-    XCTAssertTrue(completed, "The streaming response must finish: \(body)")
+-    return text
+-  }
+-
+   func testExplicitMemoryLimitAndHTTPLogprobsUseActualCheckpoint() async throws {
+     let checkpoint = try await makeCheckpoint()
+     let server = try await startServer(checkpoint: checkpoint.directory, memoryLimitMB: 64)
+@@ -311,36 +252,14 @@ private struct TinyServer {
    let logURL: URL
  
    func stop() {
@@ -1529,7 +1624,7 @@ index e3e0d697a19adcae4d028cc7851742e3c5234743..77ff4bc01ed64683eea8f7eb3fa4dd8e
    }
  
    func health() async throws -> HealthReply {
-@@ -314,7 +292,7 @@ private struct TinyServer {
+@@ -373,7 +292,7 @@ private struct TinyServer {
      } catch {
        guard body != nil else { throw error }
        throw ServerTestError.request(

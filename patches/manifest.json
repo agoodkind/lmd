@@ -5,8 +5,8 @@
       "repository": "agoodkind/mlx-swift",
       "upstream_repository": "ml-explore/mlx-swift",
       "upstream_commit": "5f8f4d11779cf403a690373cea4965a1178c96a2",
-      "fork_commit": "f3b3a41449f94e6715b4b3b313ba112b6b101a3a",
-      "expected_tree": "2cf9906c3ebc84b60fa5bb9106333d2c1fbbc7a3",
+      "fork_commit": "a795473611f173dca7be091c31c82a264b424833",
+      "expected_tree": "386c3ae4c2636380a99306e9cff5c028a908c053",
       "patches": [
         {
           "path": "mlx-swift/0001-preserve-fork-integration.patch",
@@ -32,6 +32,11 @@
           "path": "mlx-swift/0005-lmd-consumer-validation.patch",
           "sha256": "cddc25d8abe601a84af2ccf95fd0f3f55e5e8a6b71c3af9cc002b90e732754cf",
           "expected_tree": "2cf9906c3ebc84b60fa5bb9106333d2c1fbbc7a3"
+        },
+        {
+          "path": "mlx-swift/0006-swift-ci-maintenance.patch",
+          "sha256": "bf3932c7ddaab7ff2aea2062b0ca07c4587da0c1a89fe8b8744da414b304fd68",
+          "expected_tree": "386c3ae4c2636380a99306e9cff5c028a908c053"
         }
       ],
       "profiles": [
@@ -40,7 +45,7 @@
           "commit": "786724757aa480f049d3a913c59da7e0e61ad5dc",
           "patch": {
             "path": "profiles/core-runtime-7867247.patch",
-            "sha256": "548c868570b3e7fd20e995f729aa9dfaeddb2b84136caf179382bb460db5cc3b",
+            "sha256": "68a6cf4827ee30eb9d77c6944018c04c3724ab2d67ba001d9c4e6528e3901e32",
             "expected_tree": "087e483d95efc7625c45b5fa6b92d90d57bc47e2"
           }
         }
@@ -50,8 +55,8 @@
       "repository": "agoodkind/mlx-swift-lm",
       "upstream_repository": "ml-explore/mlx-swift-lm",
       "upstream_commit": "991266ad300f47a3b9f21e62ff5bdb679215e758",
-      "fork_commit": "dfb109e25b9fb73ae55490efebdf14c8b9b4d733",
-      "expected_tree": "130fb0dfb76eb4d98e38433914365daa2633c190",
+      "fork_commit": "be77ac49d1c9caf56633dec2ec2c4b242e3091e9",
+      "expected_tree": "90e2653d4319b8d0ad12bb7585cebee19fa094d0",
       "patches": [
         {
           "path": "mlx-swift-lm/0001-preserve-fork-integration.patch",
@@ -77,6 +82,11 @@
           "path": "mlx-swift-lm/0005-lmd-consumer-validation.patch",
           "sha256": "c1fd65fe0fb83494be458a72a1a976de35d0ba4b0e68431e0159cb77d99b2100",
           "expected_tree": "130fb0dfb76eb4d98e38433914365daa2633c190"
+        },
+        {
+          "path": "mlx-swift-lm/0006-swift-ci-maintenance.patch",
+          "sha256": "b2b03a2df3505c78b03e87f446115aee98fa4216fe8c65bacf170fcf5e90abca",
+          "expected_tree": "90e2653d4319b8d0ad12bb7585cebee19fa094d0"
         }
       ],
       "profiles": [
@@ -85,7 +95,7 @@
           "commit": "60054f77f91bc3e77c44950054dd6a9b53359352",
           "patch": {
             "path": "profiles/library-runtime-60054f7.patch",
-            "sha256": "b3cb62942d97597055529d881b1638b6c7b88bef4806f335b7b5c3509eaf3604",
+            "sha256": "fa2dfc1f659defdd4c52848fb93152531206d284779868357ab93fd8d5d2038b",
             "expected_tree": "56d2d7687857f71d2f3004be18337aacc243d867"
           }
         }
@@ -95,8 +105,8 @@
       "repository": "agoodkind/SwiftLM",
       "upstream_repository": "SharpAI/SwiftLM",
       "upstream_commit": "80e487287b8c9932c01783110da3de99544a5037",
-      "fork_commit": "b68fb63ef1dbbb2694c973ae2b2f864c6f771c01",
-      "expected_tree": "4a8056e80562b96d39509079f2582a738d10a3db",
+      "fork_commit": "4cc594d1cc6f88116f1509cee5ba5b6a1471f0be",
+      "expected_tree": "f29a222d8d284a1897733a8996a8aff025e1a515",
       "patches": [
         {
           "path": "SwiftLM/0001-preserve-fork-integration.patch",
@@ -117,6 +127,11 @@
           "path": "SwiftLM/0004-lmd-consumer-validation.patch",
           "sha256": "8afa8789d684c605422019d1199e9d77ca58cb3f70e342f043e145d03d360473",
           "expected_tree": "4a8056e80562b96d39509079f2582a738d10a3db"
+        },
+        {
+          "path": "SwiftLM/0005-upstream-cache-and-swift-ci.patch",
+          "sha256": "62e7f61eebe33bfb1c6f807c64e56a14b003d6e74eb02b934426ee635ecaaf3a",
+          "expected_tree": "f29a222d8d284a1897733a8996a8aff025e1a515"
         }
       ],
       "profiles": [
@@ -125,7 +140,7 @@
           "commit": "dbf4eee36701d844996038b182a272f40a41f414",
           "patch": {
             "path": "profiles/swiftlm-http-diagnostics-dbf4eee.patch",
-            "sha256": "ad5370b6d93ef1c1955c84a434d26b7f8921fa5820b713a10880dab08b153fd8",
+            "sha256": "a5a8ed23773234a97efb32c6dcdc41d6e99b1992175a6de4e5bb505aef44d290",
             "expected_tree": "91463efa40ad46290e12f2c7122812f616f8a5fe"
           }
         },
@@ -134,7 +149,7 @@
           "commit": "d2f09fb66097739de05c63397e18bd259edeadd0",
           "patch": {
             "path": "profiles/swiftlm-runtime-d2f09fb.patch",
-            "sha256": "9af9a82d5e84a1f8a7296a22024be83ecca8d95057efdfef9c857644876437b9",
+            "sha256": "88a6efd10b27a1a69b4c242c7934c4fd5c2d14b20b8130bb3ba87bdceebe9fcc",
             "expected_tree": "c78714cca25aca04e5bf3a9b86ad6b078470fc48"
           }
         }
@@ -229,6 +244,13 @@
     },
     {
       "feature": "CPU and GPU layer selection",
+      "repository": "agoodkind/SwiftLM",
+      "selectors": [
+        "SwiftLMTests.OwnFeatureHTTPTests"
+      ]
+    },
+    {
+      "feature": "Prompt cache reuse",
       "repository": "agoodkind/SwiftLM",
       "selectors": [
         "SwiftLMTests.OwnFeatureHTTPTests"
