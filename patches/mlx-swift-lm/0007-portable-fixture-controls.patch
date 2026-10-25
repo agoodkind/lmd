@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 127b9a713b9f08affafe854dceaf7a9114f9b19a..bca996b4c7c48168de7448dbcfdf78a7bf763853 100644
+index 127b9a713b9f08affafe854dceaf7a9114f9b19a..b567a63ee5987847b40dd7c4e6b6924e8d8879a9 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -47,9 +47,25 @@ env:
@@ -53,10 +53,10 @@ index 127b9a713b9f08affafe854dceaf7a9114f9b19a..bca996b4c7c48168de7448dbcfdf78a7
        - name: Set up Swift result verification
          id: maintenance
 -        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
-+        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
++        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
          with:
 -          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
-+          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
++          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
  
        - name: Resolve the library dependency graph
          working-directory: mlx-swift-lm
@@ -92,15 +92,15 @@ index 127b9a713b9f08affafe854dceaf7a9114f9b19a..bca996b4c7c48168de7448dbcfdf78a7
        - name: Set up Swift result verification
          id: maintenance
 -        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
-+        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
++        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
          with:
 -          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
-+          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
++          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
  
        - name: Build SwiftLM and tests in Release
          working-directory: SwiftLM
 diff --git a/.github/workflows/downstream_integration.yml b/.github/workflows/downstream_integration.yml
-index 33ba9e94608635ac63ae4336320ccd19686c034b..fb4e7ae4960287b00c5f30107b6a5343ffcdb60d 100644
+index 33ba9e94608635ac63ae4336320ccd19686c034b..26f793dde323b600c44f2585f7a106806a4c60f9 100644
 --- a/.github/workflows/downstream_integration.yml
 +++ b/.github/workflows/downstream_integration.yml
 @@ -33,13 +33,41 @@ env:
@@ -151,10 +151,10 @@ index 33ba9e94608635ac63ae4336320ccd19686c034b..fb4e7ae4960287b00c5f30107b6a5343
        - name: Set up Swift result verification
          id: maintenance
 -        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
-+        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
++        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
          with:
 -          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
-+          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
++          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
  
        - name: Build SwiftLM and tests in Debug
          working-directory: SwiftLM
@@ -163,10 +163,10 @@ index 33ba9e94608635ac63ae4336320ccd19686c034b..fb4e7ae4960287b00c5f30107b6a5343
    lmd-consumer:
      name: LMD consumer
 -    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@6a1892b4a386f3c323a560abf1b464e75ab3f317
-+    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@a3c7b2ac4096fd36b483e54b8eda0115dfc09c94
++    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@98e2d161b4bb35aac1a1e02ef4f1b7c38fa2e623
      with:
 -      lmd_ref: 6a1892b4a386f3c323a560abf1b464e75ab3f317
-+      lmd_ref: a3c7b2ac4096fd36b483e54b8eda0115dfc09c94
++      lmd_ref: 98e2d161b4bb35aac1a1e02ef4f1b7c38fa2e623
        core_ref: ${{ inputs.core_ref || '786724757aa480f049d3a913c59da7e0e61ad5dc' }}
        library_ref: ${{ inputs.library_ref || github.event.pull_request.head.sha || github.sha }}
        swiftlm_ref: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}
@@ -177,7 +177,7 @@ index 33ba9e94608635ac63ae4336320ccd19686c034b..fb4e7ae4960287b00c5f30107b6a5343
        LOCAL_POOL_CAPACITY_TOKEN: ${{ secrets.LOCAL_POOL_CAPACITY_TOKEN }}
  
 diff --git a/.github/workflows/upstream-sync.yml b/.github/workflows/upstream-sync.yml
-index 0be1747fc18e854c83ae11d879fc939452edee3d..ecd488105b93909b7770f1c586639f805a3b4db3 100644
+index 0be1747fc18e854c83ae11d879fc939452edee3d..897c2a84c2e90eda5b758c6d8ea5f344cd93993c 100644
 --- a/.github/workflows/upstream-sync.yml
 +++ b/.github/workflows/upstream-sync.yml
 @@ -28,9 +28,9 @@ jobs:
@@ -185,10 +185,10 @@ index 0be1747fc18e854c83ae11d879fc939452edee3d..ecd488105b93909b7770f1c586639f80
  
        - name: Verify the fixed Swift upstream sync commands
 -        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
-+        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
++        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
          with:
 -          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
-+          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
++          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
            test-filter: UpstreamSyncTests
  
    sync:
@@ -197,10 +197,10 @@ index 0be1747fc18e854c83ae11d879fc939452edee3d..ecd488105b93909b7770f1c586639f80
        - name: Set up the fixed Swift upstream sync commands
          id: maintenance
 -        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
-+        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
++        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
          with:
 -          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
-+          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
++          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
            test-filter: UpstreamSyncTests
  
        - name: Configure Git

@@ -5,8 +5,8 @@
       "repository": "agoodkind/mlx-swift",
       "upstream_repository": "ml-explore/mlx-swift",
       "upstream_commit": "5f8f4d11779cf403a690373cea4965a1178c96a2",
-      "fork_commit": "6a7db14b29dcd068a3b73cc23bba5b3b2f7e2b28",
-      "expected_tree": "8cebf6f6a34d2e093eac01bad353dca10f80efe9",
+      "fork_commit": "5548ee306f14d46a17379cba4e9bb9c215340cf5",
+      "expected_tree": "974947029e594563078e41731b4c48a2e9611229",
       "patches": [
         {
           "path": "mlx-swift/0001-preserve-fork-integration.patch",
@@ -40,8 +40,8 @@
         },
         {
           "path": "mlx-swift/0007-portable-fixture-controls.patch",
-          "sha256": "7bbf54295274e536af19fc81bcc70543d75f2a9f93b1cff489a432a5d21137c1",
-          "expected_tree": "8cebf6f6a34d2e093eac01bad353dca10f80efe9"
+          "sha256": "31d25f7534b9a9d1a9f632a9ee10ddcb1372daa01acee0c3ff5f4c501fe88437",
+          "expected_tree": "974947029e594563078e41731b4c48a2e9611229"
         }
       ],
       "profiles": [
@@ -50,7 +50,7 @@
           "commit": "786724757aa480f049d3a913c59da7e0e61ad5dc",
           "patch": {
             "path": "profiles/core-runtime-7867247.patch",
-            "sha256": "bb2dc3b3cb30e7e11746bc61ef0fcfa3bebb6f5f51181fc5f64fd3486ca2e862",
+            "sha256": "dec4e5e5fb5dbaffb55bf30c4ef43f42e12a7de4f032a2861993af67a0c157c4",
             "expected_tree": "087e483d95efc7625c45b5fa6b92d90d57bc47e2"
           }
         }
@@ -60,8 +60,8 @@
       "repository": "agoodkind/mlx-swift-lm",
       "upstream_repository": "ml-explore/mlx-swift-lm",
       "upstream_commit": "991266ad300f47a3b9f21e62ff5bdb679215e758",
-      "fork_commit": "1c4d6e24e5fa359d5d43d62b36c0493f0535a695",
-      "expected_tree": "115093c7c302bf8503525729fec4a9363e1b6ae5",
+      "fork_commit": "601fd99d97f44514716ed812d2bedcd7f8dc9fce",
+      "expected_tree": "768b851af4561c27565ae5d2e173ecdfd7b029f5",
       "patches": [
         {
           "path": "mlx-swift-lm/0001-preserve-fork-integration.patch",
@@ -95,8 +95,8 @@
         },
         {
           "path": "mlx-swift-lm/0007-portable-fixture-controls.patch",
-          "sha256": "6e5bceb743e543efb6309d404d352144c486a032c2bab9bdd063668e1b828a41",
-          "expected_tree": "115093c7c302bf8503525729fec4a9363e1b6ae5"
+          "sha256": "c0f0062fadd2c1058b9fd2119c6b6c7e5492e77f2b2353f6b2f79e43e21eaa85",
+          "expected_tree": "768b851af4561c27565ae5d2e173ecdfd7b029f5"
         }
       ],
       "profiles": [
@@ -105,7 +105,7 @@
           "commit": "60054f77f91bc3e77c44950054dd6a9b53359352",
           "patch": {
             "path": "profiles/library-runtime-60054f7.patch",
-            "sha256": "b4c031f2fd9dcfcd325e0579d1c653bf36f2214f6f1f1861cda1d4a6ee9ba275",
+            "sha256": "c71e98bb1f914a454b30676426b083a348f2b131df0483f2b87c0dcc85cba49b",
             "expected_tree": "56d2d7687857f71d2f3004be18337aacc243d867"
           }
         }
@@ -115,8 +115,8 @@
       "repository": "agoodkind/SwiftLM",
       "upstream_repository": "SharpAI/SwiftLM",
       "upstream_commit": "80e487287b8c9932c01783110da3de99544a5037",
-      "fork_commit": "ea4714aebec0d49bfda54555480ac1762a1920ab",
-      "expected_tree": "c3de94262df5d967d30cc5ff1791ba7b3459f8ff",
+      "fork_commit": "adcc197622ab8287d87099fbd4dda95ffc713ccb",
+      "expected_tree": "8eec464aa56658c1281752320f7f1855cbc38458",
       "patches": [
         {
           "path": "SwiftLM/0001-preserve-fork-integration.patch",
@@ -145,8 +145,8 @@
         },
         {
           "path": "SwiftLM/0006-portable-fixture-controls.patch",
-          "sha256": "7168a5a913811b52d717bdffc8b31a8f5262574efbc91745cc599168266f5a3f",
-          "expected_tree": "c3de94262df5d967d30cc5ff1791ba7b3459f8ff"
+          "sha256": "0b4ed44e93e92ad93e65c59602615e26d9ed02fb6dcb75bef180419ddf40b658",
+          "expected_tree": "8eec464aa56658c1281752320f7f1855cbc38458"
         }
       ],
       "profiles": [
@@ -155,7 +155,7 @@
           "commit": "dbf4eee36701d844996038b182a272f40a41f414",
           "patch": {
             "path": "profiles/swiftlm-http-diagnostics-dbf4eee.patch",
-            "sha256": "abe2fb7eb35b84a9dcce0de2bdea3e7eb02f7330660ca833f66e0b844eda693b",
+            "sha256": "4d9c008af0acf22eaff2e701af7aecc01f0b9cf679aa75c324ed41babb0c6050",
             "expected_tree": "91463efa40ad46290e12f2c7122812f616f8a5fe"
           }
         },
@@ -164,7 +164,7 @@
           "commit": "d2f09fb66097739de05c63397e18bd259edeadd0",
           "patch": {
             "path": "profiles/swiftlm-runtime-d2f09fb.patch",
-            "sha256": "b7a3d81ca4b643523a592e8bbc0d6f4c9b633fbb578f4ae2cbeb97f30a2068ef",
+            "sha256": "692e9af1f4df543c59bd1524c5d2602c9db1406957dda383632a13563139b643",
             "expected_tree": "c78714cca25aca04e5bf3a9b86ad6b078470fc48"
           }
         },
@@ -173,7 +173,7 @@
           "commit": "4cc594d1cc6f88116f1509cee5ba5b6a1471f0be",
           "patch": {
             "path": "profiles/swiftlm-runtime-4cc594d.patch",
-            "sha256": "251be47cabe5e0070fc391d8cfacc853cf36c76c255b6f88988ec38bc85447a5",
+            "sha256": "41507fb15744636606fb52a07db3bd99b7217fe99f1a5e6524cc1d9dd0958e58",
             "expected_tree": "f29a222d8d284a1897733a8996a8aff025e1a515"
           }
         }

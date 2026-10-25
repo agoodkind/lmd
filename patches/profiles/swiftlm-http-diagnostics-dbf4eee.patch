@@ -118,7 +118,7 @@ index 0000000000000000000000000000000000000000..60c5255df816f8dae2eeb32159e5a7bb
 +  process.exitCode = 1;
 +}
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 53e6f38eb4f895de7af34de225af1c3fa7bf69b8..9cfad12228ab0ed4e807c610253404e886f57200 100644
+index 132ec4d213127cd7de192dce9a9a72868c653034..9cfad12228ab0ed4e807c610253404e886f57200 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -32,7 +32,6 @@ permissions:
@@ -188,9 +188,9 @@ index 53e6f38eb4f895de7af34de225af1c3fa7bf69b8..9cfad12228ab0ed4e807c610253404e8
 -  lmd_consumer:
 -    name: LMD consumer
 -    needs: lmd_sources
--    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@a3c7b2ac4096fd36b483e54b8eda0115dfc09c94
+-    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@98e2d161b4bb35aac1a1e02ef4f1b7c38fa2e623
 -    with:
--      lmd_ref: a3c7b2ac4096fd36b483e54b8eda0115dfc09c94
+-      lmd_ref: 98e2d161b4bb35aac1a1e02ef4f1b7c38fa2e623
 -      core_ref: ${{ needs.lmd_sources.outputs.core_ref }}
 -      library_ref: ${{ needs.lmd_sources.outputs.library_ref }}
 -      swiftlm_ref: ${{ needs.lmd_sources.outputs.swiftlm_ref }}
@@ -269,9 +269,9 @@ index 53e6f38eb4f895de7af34de225af1c3fa7bf69b8..9cfad12228ab0ed4e807c610253404e8
  
 -      - name: Set up Swift result verification
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
 -        with:
--          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
+-          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
 -
        - name: Cache dependency source
          uses: actions/cache@v4
@@ -470,7 +470,7 @@ index 53e6f38eb4f895de7af34de225af1c3fa7bf69b8..9cfad12228ab0ed4e807c610253404e8
  
        - name: Download the tested Release executable and shaders
 diff --git a/.github/workflows/update_dependencies.yml b/.github/workflows/update_dependencies.yml
-index 16bdb89641a1badeb4267b2caf9052ef983d85cd..f2cff3c478d6b325b9b91567163b33c88049f253 100644
+index e4129c695ab7c03e610a633b9dcb8f8ce64fb08b..f2cff3c478d6b325b9b91567163b33c88049f253 100644
 --- a/.github/workflows/update_dependencies.yml
 +++ b/.github/workflows/update_dependencies.yml
 @@ -1,6 +1,7 @@
@@ -512,9 +512,9 @@ index 16bdb89641a1badeb4267b2caf9052ef983d85cd..f2cff3c478d6b325b9b91567163b33c8
  
 -      - name: Verify the fixed Swift dependency bump command
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
 -        with:
--          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
+-          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
 -          test-filter: DependencyBumpTests
 -
 -      - name: Prepare a dependency branch for manual review

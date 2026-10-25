@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 529946d53e99271adc078f82994589ae77465a0b..53e6f38eb4f895de7af34de225af1c3fa7bf69b8 100644
+index 529946d53e99271adc078f82994589ae77465a0b..132ec4d213127cd7de192dce9a9a72868c653034 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -41,6 +41,20 @@ defaults:
@@ -28,10 +28,10 @@ index 529946d53e99271adc078f82994589ae77465a0b..53e6f38eb4f895de7af34de225af1c3f
      name: LMD consumer
      needs: lmd_sources
 -    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@6a1892b4a386f3c323a560abf1b464e75ab3f317
-+    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@a3c7b2ac4096fd36b483e54b8eda0115dfc09c94
++    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@98e2d161b4bb35aac1a1e02ef4f1b7c38fa2e623
      with:
 -      lmd_ref: 6a1892b4a386f3c323a560abf1b464e75ab3f317
-+      lmd_ref: a3c7b2ac4096fd36b483e54b8eda0115dfc09c94
++      lmd_ref: 98e2d161b4bb35aac1a1e02ef4f1b7c38fa2e623
        core_ref: ${{ needs.lmd_sources.outputs.core_ref }}
        library_ref: ${{ needs.lmd_sources.outputs.library_ref }}
        swiftlm_ref: ${{ needs.lmd_sources.outputs.swiftlm_ref }}
@@ -70,10 +70,10 @@ index 529946d53e99271adc078f82994589ae77465a0b..53e6f38eb4f895de7af34de225af1c3f
        - name: Set up Swift result verification
          id: maintenance
 -        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
-+        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
++        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
          with:
 -          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
-+          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
++          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
  
        - name: Cache dependency source
          uses: actions/cache@v4
@@ -171,7 +171,7 @@ index 529946d53e99271adc078f82994589ae77465a0b..53e6f38eb4f895de7af34de225af1c3f
        - name: Align Xcode and the runtime CPU compiler
          run: |
 diff --git a/.github/workflows/update_dependencies.yml b/.github/workflows/update_dependencies.yml
-index b1af1c74c2df86765e31170f7ccc4f142e24dc3e..16bdb89641a1badeb4267b2caf9052ef983d85cd 100644
+index b1af1c74c2df86765e31170f7ccc4f142e24dc3e..e4129c695ab7c03e610a633b9dcb8f8ce64fb08b 100644
 --- a/.github/workflows/update_dependencies.yml
 +++ b/.github/workflows/update_dependencies.yml
 @@ -33,9 +33,9 @@ jobs:
@@ -179,10 +179,10 @@ index b1af1c74c2df86765e31170f7ccc4f142e24dc3e..16bdb89641a1badeb4267b2caf9052ef
        - name: Verify the fixed Swift dependency bump command
          id: maintenance
 -        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
-+        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
++        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
          with:
 -          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
-+          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
++          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
            test-filter: DependencyBumpTests
  
        - name: Prepare a dependency branch for manual review
