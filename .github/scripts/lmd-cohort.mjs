@@ -5,6 +5,7 @@ import { appendFileSync, copyFileSync, mkdirSync, readFileSync, statSync, writeF
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { requireCondition } from './validation.mjs';
 
 const [mode, rootArgument, coreArgument, libraryArgument, proofArgument, configuration] = process.argv.slice(2);
 const root = resolve(rootArgument ?? '.');
@@ -14,14 +15,13 @@ const proof = resolve(proofArgument ?? '.');
 const statePath = join(proof, 'cohort.json');
 const packagePaths = ['', 'Tools', 'Tuist'];
 const identities = ['mlx-swift', 'mlx-swift-lm'];
+const otherPins = lock => new Map(lock.pins.filter(pin => !identities.includes(pin.identity)).map(pin => [pin.identity, pin]));
 const refs = Object.fromEntries(['LMD_REF', 'CORE_REF', 'LIBRARY_REF', 'SWIFTLM_REF'].map(key => [key, process.env[key]]));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+const commitHash = bytes => createHash('sha1').update('commit ' + bytes.length + String.fromCharCode(0)).update(bytes).digest('hex');
 const readJSON = path => JSON.parse(readFileSync(path, 'utf8'));
 const writeJSON = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n');
 
-function requireCondition(condition, message) {
-  if (!condition) throw new Error(message);
-}
 function command(directory, executable, args, stream = false) {
   return execFileSync(executable, args, { cwd: directory, encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024, stdio: stream ? 'inherit' : ['ignore', 'pipe', 'pipe'] })?.trim() ?? '';
@@ -86,7 +86,10 @@ function prepare() {
   }
   git(library, 'diff', '--exit-code', refs.LIBRARY_REF, effectiveLibrary, '--', '.', ':!Package.swift');
   writeFileSync(join(proof, 'library-overlay.patch'), libraryDiff);
-  const state = { requested: refs, effective_library: effectiveLibrary, library_base: refs.LIBRARY_REF,
+  const commitBytes = execFileSync('git', ['cat-file', 'commit', effectiveLibrary], { cwd: library });
+  requireCondition(commitHash(commitBytes) === effectiveLibrary, 'Archived commit bytes do not match the effective library revision');
+  writeFileSync(join(proof, 'library-commit-object.txt'), commitBytes);
+  const state = { library_commit_sha256: hash(commitBytes), requested: refs, effective_library: effectiveLibrary, library_base: refs.LIBRARY_REF,
     old_core_requirement: oldCoreRequirement, new_core_requirement: refs.CORE_REF,
     library_overlay_sha256: hash(readFileSync(join(proof, 'library-overlay.patch'))),
     library_overlay_tree: git(library, 'rev-parse', effectiveLibrary + '^{tree}'),
@@ -99,6 +102,8 @@ function prepare() {
     const name = packagePath ? packagePath.toLowerCase() + '-Package.resolved' : 'Package.resolved';
     writeFileSync(join(proof, 'baseline-' + name), original + '\n');
   }
+  writeFileSync(join(proof, 'baseline-swiftlm-Package.resolved'),
+    git(join(root, 'SwiftLM'), 'show', refs.SWIFTLM_REF + ':Package.resolved') + '\n');
   writeJSON(statePath, state);
   for (const packagePath of ['', 'Tuist']) {
     pinManifest(join(root, packagePath, 'Package.swift'), 'mlx-swift', refs.CORE_REF);
@@ -121,9 +126,13 @@ function prepare() {
 
 function verify() {
   const state = readJSON(statePath);
+  const commitBytes = readFileSync(join(proof, 'library-commit-object.txt'));
+  requireCondition(commitHash(commitBytes) === state.effective_library && hash(commitBytes) === state.library_commit_sha256,
+    'Archived library commit object changed');
   for (const [key, value] of Object.entries(refs)) requireCondition(state.requested[key] === value, 'Cohort input changed: ' + key);
   requireCondition(git(root, 'rev-parse', 'HEAD') === refs.LMD_REF, 'LMD source commit changed');
   requireCondition(git(core, 'rev-parse', 'HEAD') === refs.CORE_REF, 'Dedicated core checkout changed');
+  requireCondition(git(core, 'status', '--porcelain') === '', 'The dedicated core checkout must remain clean');
   requireCondition(git(library, 'rev-parse', 'HEAD') === state.effective_library, 'Dedicated library overlay changed');
   git(library, 'diff', '--exit-code', refs.LIBRARY_REF, state.effective_library, '--', '.', ':!Package.swift');
   requireCondition(git(library, 'status', '--porcelain') === '', 'The effective library checkout must be clean');
@@ -134,7 +143,6 @@ function verify() {
     const lock = readJSON(path);
     const name = packagePath ? packagePath.toLowerCase() + '-Package.resolved' : 'Package.resolved';
     const baseline = readJSON(join(proof, 'baseline-' + name));
-    const otherPins = value => new Map(value.pins.filter(pin => !identities.includes(pin.identity)).map(pin => [pin.identity, pin]));
     requireCondition(isDeepStrictEqual(otherPins(lock), otherPins(baseline)),
       'Resolver changed dependencies outside the requested MLX cohort: ' + path);
     for (const identity of identities) {
@@ -149,10 +157,22 @@ function verify() {
     copyFileSync(path, join(proof, artifact));
     resolved.push({ package: packagePath || '.', sha256: hash(readFileSync(path)), revisions: expected });
   }
-  requireCondition(git(join(root, 'SwiftLM'), 'rev-parse', 'HEAD') === refs.SWIFTLM_REF, 'SwiftLM source commit changed');
+  const swiftLMDirectory = join(root, 'SwiftLM');
+  requireCondition(git(swiftLMDirectory, 'rev-parse', 'HEAD') === refs.SWIFTLM_REF, 'SwiftLM source commit changed');
+  for (const path of git(swiftLMDirectory, 'diff', '--name-only', 'HEAD').split('\n').filter(Boolean)) {
+    requireCondition([...identities, 'Package.resolved'].includes(path), 'Unexpected tracked SwiftLM source change: ' + path);
+  }
+  const swiftLMLock = join(swiftLMDirectory, 'Package.resolved');
+  requireCondition(isDeepStrictEqual(otherPins(readJSON(swiftLMLock)), otherPins(readJSON(join(proof, 'baseline-swiftlm-Package.resolved')))),
+    'SwiftLM resolver changed dependencies outside the requested MLX cohort');
+  copyFileSync(swiftLMLock, join(proof, 'swiftlm-Package.resolved'));
+  state.swiftlm_lock_sha256 = hash(readFileSync(swiftLMLock));
+  writeFileSync(join(proof, 'swiftlm-cohort.patch'), diff(swiftLMDirectory, '--binary', '--full-index', 'HEAD'));
   for (const identity of identities) {
     requireCondition(git(join(root, 'SwiftLM', identity), 'rev-parse', 'HEAD') === expected[identity],
       'Nested SwiftLM checkout mismatch: ' + identity);
+    requireCondition(git(join(swiftLMDirectory, identity), 'status', '--porcelain', '--untracked-files=no') === '',
+      'Tracked nested SwiftLM source changed: ' + identity);
   }
   const allowed = new Set(['Package.swift', 'Tuist/Package.swift', 'Package.resolved', 'Tools/Package.resolved', 'Tuist/Package.resolved', 'SwiftLM']);
   for (const path of git(root, 'diff', '--name-only', 'HEAD').split('\n').filter(Boolean)) {

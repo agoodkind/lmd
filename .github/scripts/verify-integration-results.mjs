@@ -1,9 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
-
-function requireCondition(condition, message) {
-  if (!condition) throw new Error(message);
-}
+import { requireCondition } from './validation.mjs';
 
 function verifySwiftPM(logPath, discoveryPath, selectors) {
   const discovery = readFileSync(discoveryPath, 'utf8');
