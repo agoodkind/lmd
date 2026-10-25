@@ -51,7 +51,8 @@ let package = Package(
       revision: "786724757aa480f049d3a913c59da7e0e61ad5dc"),
     .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
     .package(
-      url: "https://github.com/mattt/EventSource.git", exact: "1.4.1",
+      url: "https://github.com/mattt/EventSource.git",
+      exact: "1.4.1",
       traits: ["AsyncHTTPClient"]),
     .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.3.2"),
     .package(url: "https://github.com/agoodkind/macos-smc-fan.git", branch: "main"),
