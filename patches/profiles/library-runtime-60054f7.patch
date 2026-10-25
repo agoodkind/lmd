@@ -56,7 +56,7 @@ index e107b969f73d83d2cf5bf79e65ae16141fb01e77..a80ecb288056798a8e5a9f0cbeb65869
 +              console.log("Dispatch failed. Ensure SWIFTLM_PR_TOKEN is set in repository secrets with repo scoping.", error);
              }
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 2ba2137806d86fdd6d70c81ec39584692875ce06..50d7b6da334203ee24676ca8ed36d3eee24e67c2 100644
+index d3eb6c0abea6c9aa4c8ba3f576b72f465a752bcc..50d7b6da334203ee24676ca8ed36d3eee24e67c2 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -2,36 +2,9 @@ name: CI
@@ -126,7 +126,7 @@ index 2ba2137806d86fdd6d70c81ec39584692875ce06..50d7b6da334203ee24676ca8ed36d3ee
    build-and-test:
      name: Build and Test (macOS 26)
 -    needs: select_macos_runner
--    if: ${{ always() }}
+-    if: ${{ !cancelled() }}
 -    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 +    runs-on: macos-26
      timeout-minutes: 40
@@ -366,7 +366,7 @@ index 2ba2137806d86fdd6d70c81ec39584692875ce06..50d7b6da334203ee24676ca8ed36d3ee
    integration-test:
      name: Build & Test SwiftLM Integration
 -    needs: select_macos_runner
--    if: ${{ always() }}
+-    if: ${{ !cancelled() }}
 -    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 -    timeout-minutes: 45
 -    env:
@@ -586,7 +586,7 @@ index 2ba2137806d86fdd6d70c81ec39584692875ce06..50d7b6da334203ee24676ca8ed36d3ee
 +          cd SwiftLM
 +          bash tests/test-speculative-eval.sh
 diff --git a/.github/workflows/downstream_integration.yml b/.github/workflows/downstream_integration.yml
-index 57a572c4a95e47e00d5132f91c649475fe9686a5..ea247cfda7014710c89b8f243e2fc462ecbbc900 100644
+index 679800f5b13135d1447c60565a13c0c84cb1cd55..ea247cfda7014710c89b8f243e2fc462ecbbc900 100644
 --- a/.github/workflows/downstream_integration.yml
 +++ b/.github/workflows/downstream_integration.yml
 @@ -2,269 +2,72 @@ name: Downstream Integration Test
@@ -642,7 +642,7 @@ index 57a572c4a95e47e00d5132f91c649475fe9686a5..ea247cfda7014710c89b8f243e2fc462
    test-swiftlm-umbrella:
      name: Test with SwiftLM (Umbrella Repo)
 -    needs: select_macos_runner
--    if: ${{ always() }}
+-    if: ${{ !cancelled() }}
 -    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 +    runs-on: macos-26
      timeout-minutes: 40
@@ -872,9 +872,9 @@ index 57a572c4a95e47e00d5132f91c649475fe9686a5..ea247cfda7014710c89b8f243e2fc462
 -
 -  lmd-consumer:
 -    name: LMD consumer
--    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@c94f02841b230a17b612e4c6bf6e7e8b35360d96
+-    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@3552b79fe58d9dab2a1ff307af55a0de78be2145
 -    with:
--      lmd_ref: c94f02841b230a17b612e4c6bf6e7e8b35360d96
+-      lmd_ref: 3552b79fe58d9dab2a1ff307af55a0de78be2145
 -      core_ref: ${{ inputs.core_ref || '786724757aa480f049d3a913c59da7e0e61ad5dc' }}
 -      library_ref: ${{ inputs.library_ref || github.event.pull_request.head.sha || github.sha }}
 -      swiftlm_ref: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}

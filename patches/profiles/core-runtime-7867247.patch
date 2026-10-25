@@ -296,7 +296,7 @@ index 502559195165b3557d0aee13de76caa6dcf2fb7b..a80ecb288056798a8e5a9f0cbeb65869
 +              console.log("Dispatch failed. Ensure SWIFTLM_PR_TOKEN is set in repository secrets with repo scoping.", error);
              }
 diff --git a/.github/workflows/downstream_integration.yml b/.github/workflows/downstream_integration.yml
-index 57b64630d9a2bd49e156ea119fbabbdc3f6d449d..6089e827829be93b323eea6066fd024b3f513608 100644
+index 5ffc53a5aa577aac7ac3d8fe57390212846acb06..6089e827829be93b323eea6066fd024b3f513608 100644
 --- a/.github/workflows/downstream_integration.yml
 +++ b/.github/workflows/downstream_integration.yml
 @@ -9,12 +9,12 @@ on:
@@ -334,9 +334,9 @@ index 57b64630d9a2bd49e156ea119fbabbdc3f6d449d..6089e827829be93b323eea6066fd024b
 -
 -  lmd_consumer:
 -    name: LMD consumer
--    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@c94f02841b230a17b612e4c6bf6e7e8b35360d96
+-    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@3552b79fe58d9dab2a1ff307af55a0de78be2145
 -    with:
--      lmd_ref: c94f02841b230a17b612e4c6bf6e7e8b35360d96
+-      lmd_ref: 3552b79fe58d9dab2a1ff307af55a0de78be2145
 -      core_ref: ${{ github.event.pull_request.head.sha || github.sha }}
 -      library_ref: ${{ inputs.mlx_swift_lm_ref || '60054f77f91bc3e77c44950054dd6a9b53359352' }}
 -      swiftlm_ref: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}
@@ -363,7 +363,7 @@ index 57b64630d9a2bd49e156ea119fbabbdc3f6d449d..6089e827829be93b323eea6066fd024b
    test-swiftlm-umbrella:
      name: Test with SwiftLM (Umbrella Repo)
 -    needs: select_macos_runner
--    if: ${{ always() }}
+-    if: ${{ !cancelled() }}
 -    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 +    runs-on: macos-26
      timeout-minutes: 40
@@ -474,7 +474,7 @@ index 57b64630d9a2bd49e156ea119fbabbdc3f6d449d..6089e827829be93b323eea6066fd024b
 -          if-no-files-found: error
 +          swift test --build-system native --jobs 4 --skip-build --filter "$SWIFTLM_TEST_FILTER"
 diff --git a/.github/workflows/pull_request.yml b/.github/workflows/pull_request.yml
-index a8bc9b461b07e69e25d5c355a06d45462214e8b4..ee014b11f69e0da870cfb463979dc41eaaef0175 100644
+index 11935cffa4b6803d43712454f2e38243d331415d..ee014b11f69e0da870cfb463979dc41eaaef0175 100644
 --- a/.github/workflows/pull_request.yml
 +++ b/.github/workflows/pull_request.yml
 @@ -7,95 +7,18 @@ on:
@@ -544,7 +544,7 @@ index a8bc9b461b07e69e25d5c355a06d45462214e8b4..ee014b11f69e0da870cfb463979dc41e
 -
    fork_regression_tests:
      name: Fork Regression Tests
--    if: ${{ always() && (github.repository == 'agoodkind/mlx-swift') }}
+-    if: ${{ !cancelled() && (github.repository == 'agoodkind/mlx-swift') }}
 -    needs: select_macos_runner
 -    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 +    if: github.repository == 'agoodkind/mlx-swift'
@@ -636,7 +636,7 @@ index a8bc9b461b07e69e25d5c355a06d45462214e8b4..ee014b11f69e0da870cfb463979dc41e
  
    lint:
 diff --git a/.github/workflows/swiftlm_integration.yml b/.github/workflows/swiftlm_integration.yml
-index e2990802b535b2bbbc8129d779307629f15d48af..3e2c771a38e0d38c5a275755c0520dbc79df654c 100644
+index 5ecf92df72da99421dac87702c453c020e8c53b2..3e2c771a38e0d38c5a275755c0520dbc79df654c 100644
 --- a/.github/workflows/swiftlm_integration.yml
 +++ b/.github/workflows/swiftlm_integration.yml
 @@ -10,12 +10,12 @@ on:
@@ -675,7 +675,7 @@ index e2990802b535b2bbbc8129d779307629f15d48af..3e2c771a38e0d38c5a275755c0520dbc
    integration-test:
      name: Build & Test SwiftLM
 -    needs: select_macos_runner
--    if: ${{ always() }}
+-    if: ${{ !cancelled() }}
 -    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 +    runs-on: macos-26
      timeout-minutes: 45

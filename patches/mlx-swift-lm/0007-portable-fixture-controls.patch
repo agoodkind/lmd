@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 127b9a713b9f08affafe854dceaf7a9114f9b19a..2ba2137806d86fdd6d70c81ec39584692875ce06 100644
+index 127b9a713b9f08affafe854dceaf7a9114f9b19a..d3eb6c0abea6c9aa4c8ba3f576b72f465a752bcc 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -47,9 +47,25 @@ env:
@@ -24,7 +24,7 @@ index 127b9a713b9f08affafe854dceaf7a9114f9b19a..2ba2137806d86fdd6d70c81ec3958469
      name: Build and Test (macOS 26)
 -    runs-on: macos-26
 +    needs: select_macos_runner
-+    if: ${{ always() }}
++    if: ${{ !cancelled() }}
 +    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
      timeout-minutes: 40
      env:
@@ -66,7 +66,7 @@ index 127b9a713b9f08affafe854dceaf7a9114f9b19a..2ba2137806d86fdd6d70c81ec3958469
      name: Build & Test SwiftLM Integration
 -    runs-on: macos-26
 +    needs: select_macos_runner
-+    if: ${{ always() }}
++    if: ${{ !cancelled() }}
 +    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
      timeout-minutes: 45
      env:
@@ -100,7 +100,7 @@ index 127b9a713b9f08affafe854dceaf7a9114f9b19a..2ba2137806d86fdd6d70c81ec3958469
        - name: Build SwiftLM and tests in Release
          working-directory: SwiftLM
 diff --git a/.github/workflows/downstream_integration.yml b/.github/workflows/downstream_integration.yml
-index 33ba9e94608635ac63ae4336320ccd19686c034b..57a572c4a95e47e00d5132f91c649475fe9686a5 100644
+index 33ba9e94608635ac63ae4336320ccd19686c034b..679800f5b13135d1447c60565a13c0c84cb1cd55 100644
 --- a/.github/workflows/downstream_integration.yml
 +++ b/.github/workflows/downstream_integration.yml
 @@ -33,13 +33,41 @@ env:
@@ -125,7 +125,7 @@ index 33ba9e94608635ac63ae4336320ccd19686c034b..57a572c4a95e47e00d5132f91c649475
      name: Test with SwiftLM (Umbrella Repo)
 -    runs-on: macos-26
 +    needs: select_macos_runner
-+    if: ${{ always() }}
++    if: ${{ !cancelled() }}
 +    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
      timeout-minutes: 40
      env:
@@ -163,10 +163,10 @@ index 33ba9e94608635ac63ae4336320ccd19686c034b..57a572c4a95e47e00d5132f91c649475
    lmd-consumer:
      name: LMD consumer
 -    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@6a1892b4a386f3c323a560abf1b464e75ab3f317
-+    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@c94f02841b230a17b612e4c6bf6e7e8b35360d96
++    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@3552b79fe58d9dab2a1ff307af55a0de78be2145
      with:
 -      lmd_ref: 6a1892b4a386f3c323a560abf1b464e75ab3f317
-+      lmd_ref: c94f02841b230a17b612e4c6bf6e7e8b35360d96
++      lmd_ref: 3552b79fe58d9dab2a1ff307af55a0de78be2145
        core_ref: ${{ inputs.core_ref || '786724757aa480f049d3a913c59da7e0e61ad5dc' }}
        library_ref: ${{ inputs.library_ref || github.event.pull_request.head.sha || github.sha }}
        swiftlm_ref: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}
