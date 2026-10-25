@@ -1,0 +1,57 @@
+diff --git a/.github/workflows/auto_release.yml b/.github/workflows/auto_release.yml
+index a80ecb288056798a8e5a9f0cbeb658691282e9b9..e107b969f73d83d2cf5bf79e65ae16141fb01e77 100644
+--- a/.github/workflows/auto_release.yml
++++ b/.github/workflows/auto_release.yml
+@@ -11,6 +11,7 @@ permissions:
+ jobs:
+   tag-and-release:
+     name: Create SemVer Tag and Release
++    if: github.repository == 'agoodkind/mlx-swift-lm'
+     runs-on: ubuntu-latest
+     steps:
+       - name: Checkout Code
+@@ -24,11 +25,11 @@ jobs:
+           COMMIT_COUNT=$(git rev-list --count HEAD)
+           TAG_NAME="b${COMMIT_COUNT}"
+           echo "Calculated tag: $TAG_NAME"
+-          echo "new_tag=$TAG_NAME" >> $GITHUB_OUTPUT
++          echo "new_tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+           
+           # Create and push the tag manually
+-          git tag $TAG_NAME
+-          git push origin $TAG_NAME
++          git tag "$TAG_NAME"
++          git push origin "$TAG_NAME"
+ 
+       - name: Create GitHub Release
+         uses: softprops/action-gh-release@v2
+@@ -39,15 +40,15 @@ jobs:
+           generate_release_notes: true
+ 
+       - name: Trigger SwiftLM Dependency Bump
+-        uses: actions/github-script@v6
++        uses: actions/github-script@v9
+         env:
+-          PR_TOKEN: ${{ secrets.SWIFTLM_PR_TOKEN || secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
++          PR_TOKEN: ${{ secrets.SWIFTLM_PR_TOKEN }}
+         with:
+           github-token: ${{ env.PR_TOKEN }}
+           script: |
+             try {
+               await github.rest.repos.createDispatchEvent({
+-                owner: 'SharpAI',
++                owner: 'agoodkind',
+                 repo: 'SwiftLM',
+                 event_type: 'dependency_bump',
+                 client_payload: {
+@@ -55,7 +56,8 @@ jobs:
+                   new_tag: '${{ steps.tag_version.outputs.new_tag }}'
+                 }
+               });
+-              console.log("Successfully dispatched dependency_bump event to SharpAI/SwiftLM");
++              console.log("Dispatched dependency_bump to agoodkind/SwiftLM.");
+             } catch (error) {
+-              console.log("Dispatch failed. Ensure SWIFTLM_PR_TOKEN is set in repository secrets with repo scoping.", error);
++              console.error("Cannot dispatch dependency_bump. Check SWIFTLM_PR_TOKEN access to agoodkind/SwiftLM.", error);
++              throw error;
+             }

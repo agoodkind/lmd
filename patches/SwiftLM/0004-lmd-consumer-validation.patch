@@ -1,0 +1,144 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 9cfad12228ab0ed4e807c610253404e886f57200..fc9526fe551ac6f35583de3d59c977c12e4d0b7d 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -32,6 +32,7 @@ permissions:
+   contents: read
+ 
+ env:
++  SWIFTLM_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+   DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+   MACOSX_DEPLOYMENT_TARGET: '14.0'
+ 
+@@ -40,6 +41,75 @@ defaults:
+     shell: bash
+ 
+ jobs:
++  lmd_sources:
++    name: Select LMD consumer sources
++    runs-on: ubuntu-latest
++    timeout-minutes: 5
++    outputs:
++      swiftlm_ref: ${{ steps.refs.outputs.swiftlm_ref }}
++      core_ref: ${{ steps.refs.outputs.core_ref }}
++      library_ref: ${{ steps.refs.outputs.library_ref }}
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          ref: ${{ env.SWIFTLM_REF }}
++          persist-credentials: false
++
++      - name: Extract the selected source and gitlinks
++        id: refs
++        run: |
++          git rev-parse HEAD > "$RUNNER_TEMP/lmd-swiftlm.sha"
++          printf '%s\n' "$SWIFTLM_REF" > "$RUNNER_TEMP/lmd-expected-swiftlm.sha"
++          cmp "$RUNNER_TEMP/lmd-expected-swiftlm.sha" "$RUNNER_TEMP/lmd-swiftlm.sha"
++          git rev-parse HEAD:mlx-swift > "$RUNNER_TEMP/lmd-core.sha"
++          git rev-parse HEAD:mlx-swift-lm > "$RUNNER_TEMP/lmd-library.sha"
++          read -r swiftlm_ref < "$RUNNER_TEMP/lmd-swiftlm.sha"
++          read -r core_ref < "$RUNNER_TEMP/lmd-core.sha"
++          read -r library_ref < "$RUNNER_TEMP/lmd-library.sha"
++          for ref in "$swiftlm_ref" "$core_ref" "$library_ref"; do
++            if [[ ! "$ref" =~ ^[0-9a-f]{40}$ ]]; then
++              echo "::error::The selected SwiftLM source and gitlinks must use full commit SHAs."
++              exit 1
++            fi
++          done
++          {
++            echo "swiftlm_ref=$swiftlm_ref"
++            echo "core_ref=$core_ref"
++            echo "library_ref=$library_ref"
++          } >> "$GITHUB_OUTPUT"
++          git ls-tree HEAD -- mlx-swift mlx-swift-lm
++
++  lmd_consumer:
++    name: LMD consumer
++    needs: lmd_sources
++    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@cdc7e518b471626a7e83d0681480ff2d2d504472
++    with:
++      lmd_ref: cdc7e518b471626a7e83d0681480ff2d2d504472
++      core_ref: ${{ needs.lmd_sources.outputs.core_ref }}
++      library_ref: ${{ needs.lmd_sources.outputs.library_ref }}
++      swiftlm_ref: ${{ needs.lmd_sources.outputs.swiftlm_ref }}
++
++  lmd_integration:
++    name: LMD Integration
++    if: ${{ always() }}
++    needs: [lmd_sources, lmd_consumer]
++    runs-on: ubuntu-latest
++    timeout-minutes: 5
++    steps:
++      - name: Require successful LMD validation
++        env:
++          SOURCES_RESULT: ${{ needs.lmd_sources.result }}
++          CONSUMER_RESULT: ${{ needs.lmd_consumer.result }}
++        run: |
++          if [[ "$SOURCES_RESULT" != success ]]; then
++            echo "::error::LMD source selection did not succeed: $SOURCES_RESULT"
++            exit 1
++          fi
++          if [[ "$CONSUMER_RESULT" != success ]]; then
++            echo "::error::LMD consumer validation did not succeed: $CONSUMER_RESULT"
++            exit 1
++          fi
++
+   build_and_unit_test:
+     name: Native ${{ matrix.configuration }} build and tests
+     runs-on: macos-26
+@@ -74,6 +144,7 @@ jobs:
+ 
+       - uses: actions/checkout@v4
+         with:
++          ref: ${{ env.SWIFTLM_REF }}
+           submodules: recursive
+           persist-credentials: false
+ 
+@@ -271,6 +342,7 @@ jobs:
+ 
+       - uses: actions/checkout@v4
+         with:
++          ref: ${{ env.SWIFTLM_REF }}
+           submodules: recursive
+           persist-credentials: false
+ 
+@@ -381,6 +453,7 @@ jobs:
+ 
+       - uses: actions/checkout@v4
+         with:
++          ref: ${{ env.SWIFTLM_REF }}
+           submodules: recursive
+       
+       - name: Download the tested Release executable and shaders
+@@ -473,6 +546,7 @@ jobs:
+ 
+       - uses: actions/checkout@v4
+         with:
++          ref: ${{ env.SWIFTLM_REF }}
+           submodules: recursive
+ 
+       - name: Download the tested Release executable and shaders
+@@ -564,6 +638,7 @@ jobs:
+ 
+       - uses: actions/checkout@v4
+         with:
++          ref: ${{ env.SWIFTLM_REF }}
+           submodules: recursive
+ 
+       - name: Download the tested Release executable and shaders
+@@ -657,6 +732,7 @@ jobs:
+ 
+       - uses: actions/checkout@v4
+         with:
++          ref: ${{ env.SWIFTLM_REF }}
+           submodules: recursive
+ 
+       - name: Download the tested Release executable and shaders
+@@ -792,6 +868,7 @@ jobs:
+ 
+       - uses: actions/checkout@v4
+         with:
++          ref: ${{ env.SWIFTLM_REF }}
+           submodules: recursive
+ 
+       - name: Download the tested Release executable and shaders

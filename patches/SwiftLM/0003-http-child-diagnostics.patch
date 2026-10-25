@@ -1,0 +1,57 @@
+diff --git a/tests/SwiftLMTests/OwnFeatureHTTPTests.swift b/tests/SwiftLMTests/OwnFeatureHTTPTests.swift
+index 77ff4bc01ed64683eea8f7eb3fa4dd8eb16c2bf3..e3e0d697a19adcae4d028cc7851742e3c5234743 100644
+--- a/tests/SwiftLMTests/OwnFeatureHTTPTests.swift
++++ b/tests/SwiftLMTests/OwnFeatureHTTPTests.swift
+@@ -252,14 +252,36 @@ private struct TinyServer {
+   let logURL: URL
+ 
+   func stop() {
+-    guard process.isRunning else { return }
+-    process.terminate()
+-    let deadline = Date().addingTimeInterval(2)
+-    while process.isRunning, Date() < deadline {
+-      Thread.sleep(forTimeInterval: 0.01)
++    print("SwiftLM child before cleanup: \(processState)")
++    if process.isRunning {
++      process.terminate()
++      let deadline = Date().addingTimeInterval(2)
++      while process.isRunning, Date() < deadline {
++        Thread.sleep(forTimeInterval: 0.01)
++      }
++      if process.isRunning { kill(process.processIdentifier, SIGKILL) }
++      process.waitUntilExit()
+     }
+-    if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+-    process.waitUntilExit()
++    print("SwiftLM child after cleanup: \(processState)")
++    do {
++      let output = try String(contentsOf: logURL, encoding: .utf8)
++      print("Final SwiftLM child output (\(logURL.path)):\n\(output)")
++    } catch {
++      print("Cannot read final SwiftLM child output at \(logURL.path): \(error)")
++    }
++  }
++
++  private var processState: String {
++    if process.isRunning {
++      return "pid=\(process.processIdentifier), running=true"
++    }
++    let reason: String
++    switch process.terminationReason {
++    case .exit: reason = "exit"
++    case .uncaughtSignal: reason = "signal"
++    @unknown default: reason = "unknown"
++    }
++    return "pid=\(process.processIdentifier), running=false, reason=\(reason), status=\(process.terminationStatus)"
+   }
+ 
+   func health() async throws -> HealthReply {
+@@ -292,7 +314,7 @@ private struct TinyServer {
+     } catch {
+       guard body != nil else { throw error }
+       throw ServerTestError.request(
+-        "\(error)\n\(try String(contentsOf: logURL, encoding: .utf8))")
++        "\(error)\nSwiftLM child at request failure: \(processState)\n\(try String(contentsOf: logURL, encoding: .utf8))")
+     }
+   }
+ }

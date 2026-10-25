@@ -1,0 +1,94 @@
+diff --git a/Libraries/MLXLMCommon/Tool/Parsers/Qwen35ToolCallParser.swift b/Libraries/MLXLMCommon/Tool/Parsers/Qwen35ToolCallParser.swift
+index 90c3057..ae9f39c 100644
+--- a/Libraries/MLXLMCommon/Tool/Parsers/Qwen35ToolCallParser.swift
++++ b/Libraries/MLXLMCommon/Tool/Parsers/Qwen35ToolCallParser.swift
+@@ -39,10 +39,20 @@ public struct Qwen35ToolCallParser: ToolCallParser, Sendable {
+         return call
+     }
+ 
++    public func parseEOS(_ toolCallBuffer: String, tools: [[String: any Sendable]]?) -> [ToolCall] {
++        guard let startTag else { return [] }
++        return toolCallBuffer.components(separatedBy: startTag).dropFirst().compactMap {
++            parse(content: startTag + $0, tools: tools)
++        }
++    }
++
+     /// Returns the body used only to select a parser. The concrete parser remains
+     /// responsible for validating the entire payload.
+     private func payloadBody(in content: String) -> String? {
+-        QwenXMLPayloadScanner.framedPayload(
++        guard let startTag,
++            content.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix(startTag)
++        else { return nil }
++        return QwenXMLPayloadScanner.framedPayload(
+             in: content, startTag: startTag, endTag: endTag)
+     }
+ 
+diff --git a/Tests/MLXLMTests/Qwen35FramingTests.swift b/Tests/MLXLMTests/Qwen35FramingTests.swift
+new file mode 100644
+index 0000000..4c2a0aa
+--- /dev/null
++++ b/Tests/MLXLMTests/Qwen35FramingTests.swift
+@@ -0,0 +1,62 @@
++import MLXLMCommon
++import Testing
++
++extension MLXTestingSuite {
++    @Suite
++    struct Qwen35FramingTests {
++        static let payloads = [
++            #"{"name":"lookup","arguments":{"city":"Paris"}}"#,
++            "<function=lookup><parameter=city>Paris</parameter></function>",
++        ]
++
++        static let tools: [[String: any Sendable]] = [
++            [
++                "type": "function",
++                "function": [
++                    "name": "lookup",
++                    "parameters": ["type": "object"],
++                ] as [String: any Sendable],
++            ]
++        ]
++
++        @Test(arguments: payloads)
++        func rejectsPayloadWithoutOpeningFrame(_ payload: String) {
++            let parser = Qwen35ToolCallParser(
++                startTag: "<tool_call>", endTag: "</tool_call>")
++            #expect(parser.parse(content: payload, tools: Self.tools) == nil)
++            #expect(parser.parseEOS(payload, tools: Self.tools).isEmpty)
++
++            let processor = ToolCallProcessor(
++                format: .qwen35, tools: Self.tools,
++                toolCallPolicy: .init(recovery: .disabled))
++            _ = processor.processChunk(payload)
++            processor.processEOS()
++            #expect(processor.toolCalls.isEmpty)
++        }
++
++        @Test(arguments: payloads)
++        func acceptsOpeningFrameWithOptionalClosingFrame(_ payload: String) throws {
++            for closingFrame in ["</tool_call>", ""] {
++                let processor = ToolCallProcessor(
++                    format: .qwen35, tools: Self.tools,
++                    toolCallPolicy: .init(recovery: .disabled))
++                _ = processor.processChunk("<tool_call>\(payload)\(closingFrame)")
++                processor.processEOS()
++
++                #expect(processor.toolCalls.count == 1)
++                let call = try #require(processor.toolCalls.first)
++                #expect(call.function.name == "lookup")
++                #expect(call.function.arguments["city"] == .string("Paris"))
++            }
++        }
++
++        @Test func parsesMultipleFramedCallsAtEndOfStream() {
++            let parser = Qwen35ToolCallParser(
++                startTag: "<tool_call>", endTag: "</tool_call>")
++            let content = Self.payloads.map { "<tool_call>\($0)</tool_call>" }.joined()
++            let calls = parser.parseEOS(content, tools: Self.tools)
++            #expect(calls.count == 2)
++            #expect(calls.allSatisfy { $0.function.arguments["city"] == .string("Paris") })
++        }
++    }
++}

@@ -1,0 +1,91 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 6a954991fd2461a745ffe34f14441c79c1146286..e0a0ba2bb9714cdc8b263c8cde8865d41943bc9b 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -13,13 +13,13 @@ on:
+         required: true
+         default: 786724757aa480f049d3a913c59da7e0e61ad5dc
+       library_ref:
+-        description: Exact library commit; an empty value selects the triggering commit
++        description: Exact library commit; an empty value selects the PR head or triggering commit
+         type: string
+       swiftlm_ref:
+         description: Exact SwiftLM commit to validate
+         type: string
+         required: true
+-        default: d2f09fb66097739de05c63397e18bd259edeadd0
++        default: dbf4eee36701d844996038b182a272f40a41f414
+       run_speculative_eval:
+         description: Download both models for speculative decoding evaluation (15-minute limit)
+         type: boolean
+@@ -43,8 +43,8 @@ permissions:
+ env:
+   DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+   CORE_REF: ${{ inputs.core_ref || '786724757aa480f049d3a913c59da7e0e61ad5dc' }}
+-  LIBRARY_REF: ${{ inputs.library_ref || github.sha }}
+-  SWIFTLM_REF: ${{ inputs.swiftlm_ref || 'd2f09fb66097739de05c63397e18bd259edeadd0' }}
++  LIBRARY_REF: ${{ inputs.library_ref || github.event.pull_request.head.sha || github.sha }}
++  SWIFTLM_REF: ${{ inputs.swiftlm_ref || 'dbf4eee36701d844996038b182a272f40a41f414' }}
+ 
+ jobs:
+   build-and-test:
+diff --git a/.github/workflows/downstream_integration.yml b/.github/workflows/downstream_integration.yml
+index a376ae1ee2c097d7a147037b0a2bff51caf254af..e5928d4f3083e643d9c8dea2d1aa37882e822f14 100644
+--- a/.github/workflows/downstream_integration.yml
++++ b/.github/workflows/downstream_integration.yml
+@@ -11,13 +11,13 @@ on:
+         required: true
+         default: 786724757aa480f049d3a913c59da7e0e61ad5dc
+       library_ref:
+-        description: Exact library commit; an empty value selects the triggering commit
++        description: Exact library commit; an empty value selects the PR head or triggering commit
+         type: string
+       swiftlm_ref:
+         description: Exact SwiftLM commit to validate
+         type: string
+         required: true
+-        default: d2f09fb66097739de05c63397e18bd259edeadd0
++        default: dbf4eee36701d844996038b182a272f40a41f414
+ 
+ concurrency:
+   group: downstream-${{ github.ref }}
+@@ -29,8 +29,8 @@ permissions:
+ env:
+   DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+   CORE_REF: ${{ inputs.core_ref || '786724757aa480f049d3a913c59da7e0e61ad5dc' }}
+-  LIBRARY_REF: ${{ inputs.library_ref || github.sha }}
+-  SWIFTLM_REF: ${{ inputs.swiftlm_ref || 'd2f09fb66097739de05c63397e18bd259edeadd0' }}
++  LIBRARY_REF: ${{ inputs.library_ref || github.event.pull_request.head.sha || github.sha }}
++  SWIFTLM_REF: ${{ inputs.swiftlm_ref || 'dbf4eee36701d844996038b182a272f40a41f414' }}
+ 
+ jobs:
+   test-swiftlm-umbrella:
+@@ -218,3 +218,28 @@ jobs:
+             ${{ runner.temp }}/swiftlm-discovery-errors.txt
+             ${{ runner.temp }}/swiftlm-runtime.log
+           if-no-files-found: error
++
++  lmd-consumer:
++    name: LMD consumer
++    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@cdc7e518b471626a7e83d0681480ff2d2d504472
++    with:
++      lmd_ref: cdc7e518b471626a7e83d0681480ff2d2d504472
++      core_ref: ${{ inputs.core_ref || '786724757aa480f049d3a913c59da7e0e61ad5dc' }}
++      library_ref: ${{ inputs.library_ref || github.event.pull_request.head.sha || github.sha }}
++      swiftlm_ref: ${{ inputs.swiftlm_ref || 'dbf4eee36701d844996038b182a272f40a41f414' }}
++
++  lmd-integration:
++    name: LMD Integration
++    if: always()
++    needs: [lmd-consumer]
++    runs-on: ubuntu-latest
++    timeout-minutes: 5
++    steps:
++      - name: Require successful LMD consumer validation
++        env:
++          LMD_RESULT: ${{ needs.lmd-consumer.result }}
++        run: |
++          if [[ "$LMD_RESULT" != "success" ]]; then
++            echo "::error::LMD consumer validation ended with $LMD_RESULT."
++            exit 1
++          fi

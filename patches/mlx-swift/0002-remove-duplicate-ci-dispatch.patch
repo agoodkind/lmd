@@ -1,0 +1,136 @@
+diff --git a/.github/workflows/upstream-sync.yml b/.github/workflows/upstream-sync.yml
+index 8549157..ed8d28e 100644
+--- a/.github/workflows/upstream-sync.yml
++++ b/.github/workflows/upstream-sync.yml
+@@ -33,10 +33,8 @@ jobs:
+       group: upstream-sync
+       cancel-in-progress: false
+     permissions:
+-      actions: write
+       contents: write
+       pull-requests: write
+-      statuses: write
+     steps:
+       - name: Checkout Code
+         uses: actions/checkout@v4
+@@ -66,120 +64,3 @@ jobs:
+         env:
+           GH_TOKEN: ${{ secrets.SWIFTLM_PR_TOKEN }}
+         run: node .github/scripts/upstream-sync.mjs pr
+-
+-      - name: Dispatch Sync Branch Validation
+-        if: steps.sync_branch.outputs.has_changes == 'true'
+-        env:
+-          GH_TOKEN: ${{ github.token }}
+-          SYNC_HEAD_SHA: ${{ steps.sync_branch.outputs.head_sha }}
+-        run: |
+-          post_status() {
+-            local workflow_name="$1"
+-            local state="$2"
+-            local description="$3"
+-            local target_url="$4"
+-
+-            gh api \
+-              --method POST \
+-              "/repos/${GITHUB_REPOSITORY}/statuses/${SYNC_HEAD_SHA}" \
+-              -f state="$state" \
+-              -f context="sync-dispatch/${workflow_name}" \
+-              -f target_url="$target_url" \
+-              -f description="$description" >/dev/null
+-          }
+-
+-          dispatch_workflow() {
+-            local workflow_file="$1"
+-            local workflow_name="$2"
+-
+-            post_status "$workflow_name" "pending" "${workflow_name} is queued" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}"
+-            gh workflow run "$workflow_file" --repo "$GITHUB_REPOSITORY" --ref sync/upstream-latest
+-          }
+-
+-          find_run_id() {
+-            local workflow_file="$1"
+-
+-            gh api \
+-              --method GET \
+-              "/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs" \
+-              -f branch=sync/upstream-latest \
+-              -f event=workflow_dispatch \
+-              -f per_page=20 \
+-              --jq 'first(.workflow_runs[] | select(.head_sha == env.SYNC_HEAD_SHA) | .id) // ""'
+-          }
+-
+-          wait_for_run_id() {
+-            local workflow_file="$1"
+-            local workflow_name="$2"
+-            local attempt_count
+-            local run_id
+-
+-            for attempt_count in {1..30}; do
+-              run_id=$(find_run_id "$workflow_file")
+-              if [[ -n "$run_id" ]]; then
+-                echo "$run_id"
+-                return 0
+-              fi
+-
+-              echo "Waiting for ${workflow_name} run to be created (${attempt_count}/30)." >&2
+-              sleep 5
+-            done
+-
+-            echo "Timed out waiting for ${workflow_name} run to be created." >&2
+-            return 1
+-          }
+-
+-          wait_for_run_completion() {
+-            local run_id="$1"
+-            local workflow_name="$2"
+-            local attempt_count
+-            local -a run_fields
+-            local run_status
+-            local run_conclusion
+-            local run_url
+-
+-            for attempt_count in {1..180}; do
+-              mapfile -t run_fields < <(gh run view "$run_id" \
+-                --repo "$GITHUB_REPOSITORY" \
+-                --json status,conclusion,url \
+-                --jq '.status, (.conclusion // ""), .url')
+-              run_status="${run_fields[0]}"
+-              run_conclusion="${run_fields[1]}"
+-              run_url="${run_fields[2]}"
+-
+-              if [[ "$run_status" == "completed" ]]; then
+-                if [[ "$run_conclusion" == "success" ]]; then
+-                  post_status "$workflow_name" "success" "${workflow_name} passed" "$run_url"
+-                  return 0
+-                fi
+-
+-                post_status "$workflow_name" "failure" "${workflow_name} completed with ${run_conclusion:-unknown}" "$run_url"
+-                return 1
+-              fi
+-
+-              post_status "$workflow_name" "pending" "${workflow_name} is ${run_status}" "$run_url"
+-              echo "Waiting for ${workflow_name} run ${run_id} to complete: ${run_status} (${attempt_count}/180)."
+-              sleep 30
+-            done
+-
+-            run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${run_id}"
+-            post_status "$workflow_name" "failure" "${workflow_name} timed out" "$run_url"
+-            echo "Timed out waiting for ${workflow_name} run ${run_id}." >&2
+-            return 1
+-          }
+-
+-          dispatch_workflow swiftlm_integration.yml "SwiftLM Integration Tests"
+-          dispatch_workflow downstream_integration.yml "Downstream Integration Test"
+-
+-          SWIFTLM_RUN_ID=$(wait_for_run_id swiftlm_integration.yml "SwiftLM Integration Tests")
+-          DOWNSTREAM_RUN_ID=$(wait_for_run_id downstream_integration.yml "Downstream Integration Test")
+-
+-          SWIFTLM_RESULT=0
+-          DOWNSTREAM_RESULT=0
+-
+-          wait_for_run_completion "$SWIFTLM_RUN_ID" "SwiftLM Integration Tests" || SWIFTLM_RESULT=$?
+-          wait_for_run_completion "$DOWNSTREAM_RUN_ID" "Downstream Integration Test" || DOWNSTREAM_RESULT=$?
+-
+-          if [[ "$SWIFTLM_RESULT" -ne 0 || "$DOWNSTREAM_RESULT" -ne 0 ]]; then
+-            exit 1
+-          fi
