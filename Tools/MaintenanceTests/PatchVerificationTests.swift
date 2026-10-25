@@ -8,7 +8,6 @@
 
 import Foundation
 import Nimble
-import SwiftMkCore
 import XCTest
 
 @testable import lmd_maintenance
@@ -18,7 +17,7 @@ final class PatchVerificationTests: XCTestCase {
     let fixture = try Fixture()
     defer { fixture.remove() }
     let before = try fixture.snapshots()
-    try MaintenanceCommand.run(["verify-patches"] + fixture.arguments())
+    try fixture.verify(fixture.arguments())
     let report = try JSONDecoder().decode(
       PatchVerifier.Report.self,
       from: Data(contentsOf: fixture.report))
@@ -34,7 +33,7 @@ final class PatchVerificationTests: XCTestCase {
     let patch = fixture.catalogDirectory.appendingPathComponent(fixture.sources[0].patches[0].path)
     try FileManager.default.removeItem(at: patch)
     try fixture.commitCatalog()
-    expect { try MaintenanceCommand.run(["verify-patches"] + fixture.arguments()) }.to(throwError())
+    expect { try fixture.verify(fixture.arguments()) }.to(throwError())
   }
 
   func testReorderedPatchSeriesFails() throws {
@@ -45,7 +44,7 @@ final class PatchVerificationTests: XCTestCase {
       source,
       patches: Array(source.patches.reversed()))
     try fixture.saveCatalog()
-    expect { try MaintenanceCommand.run(["verify-patches"] + fixture.arguments()) }.to(throwError())
+    expect { try fixture.verify(fixture.arguments()) }.to(throwError())
   }
 
   func testCommittedPatchTamperingFailsChecksumValidation() throws {
@@ -56,7 +55,7 @@ final class PatchVerificationTests: XCTestCase {
     data.append(Data("\nchanged patch\n".utf8))
     try data.write(to: patch)
     try fixture.commitCatalog()
-    expect { try MaintenanceCommand.run(["verify-patches"] + fixture.arguments()) }.to(
+    expect { try fixture.verify(fixture.arguments()) }.to(
       throwError { error in
         expect(String(describing: error).contains("checksum mismatch")) == true
       })
@@ -69,7 +68,7 @@ final class PatchVerificationTests: XCTestCase {
     try Data("upstream\n".utf8).write(to: repository.appendingPathComponent("Feature.swift"))
     let candidate = try fixture.commit(repository)
     expect {
-      try MaintenanceCommand.run(["verify-patches"] + fixture.arguments(coreRef: candidate))
+      try fixture.verify(fixture.arguments(coreRef: candidate))
     }.to(throwError())
   }
 
@@ -86,7 +85,7 @@ final class PatchVerificationTests: XCTestCase {
       with: fixture.catalogRef)
     try Data(repinned.utf8).write(to: workflow)
     let candidate = try fixture.commit(repository)
-    try MaintenanceCommand.run(["verify-patches"] + fixture.arguments(coreRef: candidate))
+    try fixture.verify(fixture.arguments(coreRef: candidate))
     let report = try JSONDecoder().decode(
       PatchVerifier.Report.self,
       from: Data(contentsOf: fixture.report))
@@ -94,7 +93,7 @@ final class PatchVerificationTests: XCTestCase {
     try Data((repinned + "# unexpected workflow edit\n").utf8).write(to: workflow)
     let changedCandidate = try fixture.commit(repository)
     expect {
-      try MaintenanceCommand.run(["verify-patches"] + fixture.arguments(coreRef: changedCandidate))
+      try fixture.verify(fixture.arguments(coreRef: changedCandidate))
     }.to(throwError())
     let half = original.replacingOccurrences(
       of: "@\(fixture.oldWorkflowRef)",
@@ -102,7 +101,7 @@ final class PatchVerificationTests: XCTestCase {
     try Data(half.utf8).write(to: workflow)
     let halfCandidate = try fixture.commit(repository)
     expect {
-      try MaintenanceCommand.run(["verify-patches"] + fixture.arguments(coreRef: halfCandidate))
+      try fixture.verify(fixture.arguments(coreRef: halfCandidate))
     }.to(throwError())
   }
 
@@ -111,25 +110,23 @@ final class PatchVerificationTests: XCTestCase {
     defer { fixture.remove() }
     let source = fixture.sources[0]
     let profile = try XCTUnwrap(source.profiles.first)
-    try MaintenanceCommand.run(
-      ["verify-patches"]
-        + fixture.arguments(
-          coreRef: profile.commit,
-          coreProfile: profile.name))
+    try fixture.verify(
+      fixture.arguments(
+        coreRef: profile.commit,
+        coreProfile: profile.name))
     let report = try JSONDecoder().decode(
       PatchVerifier.Report.self,
       from: Data(contentsOf: fixture.report))
     expect(report.sources[0].replayedTree) == source.expectedTree
     expect(report.sources[0].profilePatch?.tree) == profile.patch.expectedTree
     expect {
-      try MaintenanceCommand.run(["verify-patches"] + fixture.arguments(coreRef: profile.commit))
+      try fixture.verify(fixture.arguments(coreRef: profile.commit))
     }.to(throwError())
     expect {
-      try MaintenanceCommand.run(["verify-patches"] + fixture.arguments(coreProfile: profile.name))
+      try fixture.verify(fixture.arguments(coreProfile: profile.name))
     }.to(throwError())
     expect {
-      try MaintenanceCommand.run(
-        ["verify-patches"] + fixture.arguments(coreProfile: "unlisted-profile"))
+      try fixture.verify(fixture.arguments(coreProfile: "unlisted-profile"))
     }.to(throwError())
     let patch = fixture.catalogDirectory.appendingPathComponent(profile.patch.path)
     var data = try Data(contentsOf: patch)
@@ -137,11 +134,10 @@ final class PatchVerificationTests: XCTestCase {
     try data.write(to: patch)
     try fixture.commitCatalog()
     expect {
-      try MaintenanceCommand.run(
-        ["verify-patches"]
-          + fixture.arguments(
-            coreRef: profile.commit,
-            coreProfile: profile.name))
+      try fixture.verify(
+        fixture.arguments(
+          coreRef: profile.commit,
+          coreProfile: profile.name))
     }.to(
       throwError { error in
         expect(String(describing: error).contains("checksum mismatch")) == true
@@ -154,7 +150,7 @@ final class PatchVerificationTests: XCTestCase {
     var data = try Data(contentsOf: fixture.catalog)
     data.append(Data("\n".utf8))
     try data.write(to: fixture.catalog)
-    expect { try MaintenanceCommand.run(["verify-patches"] + fixture.arguments()) }.to(
+    expect { try fixture.verify(fixture.arguments()) }.to(
       throwError { error in
         expect(String(describing: error).contains("differs from --catalog-ref")) == true
       })
@@ -167,16 +163,15 @@ final class PatchVerificationTests: XCTestCase {
       fixture.arguments() + [
         "--core-profile", "", "--library-profile", "", "--swiftlm-profile", "",
       ]
-    try MaintenanceCommand.run(["verify-patches"] + arguments)
+    try fixture.verify(arguments)
     expect {
-      try MaintenanceCommand.run(["verify-patches"] + fixture.arguments(coreProfile: " "))
+      try fixture.verify(fixture.arguments(coreProfile: " "))
     }.to(throwError())
   }
 
   func testPermitsOnlyReviewedGitHubAuthenticationOverrides() throws {
     let fixture = try Fixture()
     defer { fixture.remove() }
-    let binary = try MaintenanceTestExecutable.locate(for: Self.self)
     var environment = [
       "GIT_CONFIG_COUNT": "3",
       "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
@@ -186,16 +181,14 @@ final class PatchVerificationTests: XCTestCase {
       "GIT_CONFIG_KEY_2": "credential.https://github.com.helper",
       "GIT_CONFIG_VALUE_2": "",
     ]
-    let accepted = Shell.run(
-      binary.path,
-      ["verify-patches"] + fixture.arguments(),
+    let accepted = try fixture.verificationResult(
+      fixture.arguments(),
       environment: environment)
     expect(accepted.status) == 0
     environment["GIT_CONFIG_KEY_1"] = "url.https://example.invalid/.insteadOf"
     environment["GIT_CONFIG_VALUE_1"] = "https://github.com/"
-    let rejected = Shell.run(
-      binary.path,
-      ["verify-patches"] + fixture.arguments(),
+    let rejected = try fixture.verificationResult(
+      fixture.arguments(),
       environment: environment)
     expect(rejected.status) != 0
     expect(rejected.stderr).to(contain("Only the reviewed GitHub authentication overrides"))

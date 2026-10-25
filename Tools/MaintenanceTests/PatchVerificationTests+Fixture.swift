@@ -92,6 +92,23 @@ extension PatchVerificationTests {
       return result
     }
 
+    func verify(_ arguments: [String]) throws {
+      let result = try verificationResult(arguments)
+      try requireMaintenanceCondition(
+        result.status == 0, "Patch verification failed (\(result.status)): \(result.stderr)")
+    }
+
+    func verificationResult(
+      _ arguments: [String],
+      environment: [String: String] = [:]
+    ) throws -> Shell.Result {
+      let binary = try MaintenanceTestExecutable.locate(for: PatchVerificationTests.self)
+      return isolatedRun(
+        binary.path,
+        ["verify-patches"] + arguments,
+        environment: environment)
+    }
+
     func replacing(
       _ source: PatchCatalog.Source,
       patches: [PatchCatalog.Patch]
@@ -282,7 +299,7 @@ extension PatchVerificationTests {
 
     private func git(_ repository: URL, _ arguments: [String]) throws -> String {
       Output.debug("patches.fixture_git_command_started")
-      let result = Shell.run(
+      let result = isolatedRun(
         "git",
         ["-C", repository.path] + arguments,
         environment: [
@@ -294,6 +311,23 @@ extension PatchVerificationTests {
       try requireMaintenanceCondition(
         result.status == 0, "Git fixture command failed: \(result.stderr)")
       return result.stdout
+    }
+
+    private func isolatedRun(
+      _ executable: String,
+      _ arguments: [String],
+      environment: [String: String]
+    ) -> Shell.Result {
+      Output.debug("patches.fixture_subprocess_started")
+      let inheritedGitKeys = ProcessInfo.processInfo.environment.keys.filter { key in
+        key.hasPrefix("GIT_") && environment[key] == nil
+      }
+      var isolatedArguments: [String] = []
+      for key in inheritedGitKeys.sorted() {
+        isolatedArguments += ["-u", key]
+      }
+      isolatedArguments += [executable] + arguments
+      return Shell.run("/usr/bin/env", isolatedArguments, environment: environment)
     }
   }
 }
