@@ -38,7 +38,7 @@ let package = Package(
     .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
     .package(
       url: "https://github.com/agoodkind/mlx-swift-lm.git",
-      revision: "1f90e36b8b87826352f310ec49f53c2019c260fa"),
+      revision: "74ebe55d0d68de121f730334412da01a539eba50"),
     .package(
       url: "https://github.com/agoodkind/mlx-swift.git",
       revision: "756e599cc4ee7b900a77b6186d2947b9686e98a2"),

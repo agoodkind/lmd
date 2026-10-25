@@ -95,7 +95,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/agoodkind/mlx-swift-lm.git",
       "state" : {
-        "revision" : "1f90e36b8b87826352f310ec49f53c2019c260fa"
+        "revision" : "74ebe55d0d68de121f730334412da01a539eba50"
       }
     },
     {

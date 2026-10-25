@@ -15,6 +15,7 @@ import MLXVLM
 
 private let log = AppLogger.logger(category: "VideoFrameSampling")
 private let signposter = AppLogger.signposter(category: "Performance")
+private let samplingBoundaryToleranceFraction = 1e-6
 
 public enum VideoFrameSamplingError: Error, Equatable, CustomStringConvertible {
   case noVideoTrack(URL)
@@ -191,9 +192,11 @@ private struct VideoFrameSelection {
     if coversClip {
       lastSourceSample = sample
     }
-    guard time.seconds >= nextSampleTime else { return }
+    // Allow rounding at sampling boundaries.
+    let selectionTime = time.seconds + sampleInterval * samplingBoundaryToleranceFraction
+    guard selectionTime >= nextSampleTime else { return }
     frames.append(try frame(from: sample, transform: transform))
-    nextSampleTime = (floor(time.seconds / sampleInterval) + 1) * sampleInterval
+    nextSampleTime = (floor(selectionTime / sampleInterval) + 1) * sampleInterval
   }
 
   mutating func finish(reader: AVAssetReader, transform: CGAffineTransform) throws -> [VideoFrame] {
@@ -223,8 +226,20 @@ private struct VideoFrameSelection {
         total: frames.count,
         reason: "Video decoder did not produce an image.")
     }
-    let image = CIImage(cvPixelBuffer: buffer, options: [.colorSpace: colorSpace])
-      .transformed(by: transform)
+    // Convert AVFoundation's top-left coordinates to Core Image's bottom-left coordinates.
+    let imageTransform = CGAffineTransform(
+      a: transform.a,
+      b: -transform.b,
+      c: -transform.c,
+      d: transform.d,
+      tx: transform.tx,
+      ty: -transform.ty)
+    let transformedImage = CIImage(cvPixelBuffer: buffer, options: [.colorSpace: colorSpace])
+      .transformed(by: imageTransform)
+    let image = transformedImage.transformed(
+      by: CGAffineTransform(
+        translationX: -transformedImage.extent.origin.x,
+        y: -transformedImage.extent.origin.y))
     return VideoFrame(frame: image, timeStamp: time)
   }
 }
