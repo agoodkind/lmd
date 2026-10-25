@@ -231,11 +231,11 @@ extension TestResultVerificationTests {
 
 extension TestResultVerificationTests {
   private func removePackage(_ fixture: URL) throws {
-    let manager = FileManager()
-    let diagnostics = FixtureRemovalDelegate()
-    manager.delegate = diagnostics
-    try withExtendedLifetime(diagnostics) {
-      try manager.removeItem(at: fixture)
+    do {
+      try FileManager.default.removeItem(at: fixture)
+    } catch {
+      Output.logError("Fixture cleanup failed at \(fixture.path): \(error)")
+      throw error
     }
   }
 
@@ -370,17 +370,6 @@ extension TestResultVerificationTests {
       }
     }
     """
-  }
-}
-
-// MARK: - FixtureRemovalDelegate
-
-private final class FixtureRemovalDelegate: NSObject, FileManagerDelegate {
-  func fileManager(
-    _: FileManager, shouldProceedAfterError error: any Error, removingItemAt url: URL
-  ) -> Bool {
-    Output.logError("Fixture cleanup failed at \(url.path): \(error)")
-    return false
   }
 }
 
