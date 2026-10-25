@@ -26,6 +26,7 @@ permissions:
 defaults:
   run:
     shell: bash
+    working-directory: lmd
 
 jobs:
   validate:
@@ -44,6 +45,7 @@ jobs:
       SWIFT_MK_SWIFTPM_CACHE_ARGS: '--build-system native --jobs 4 -Xswiftc -explicit-module-build'
     steps:
       - name: Validate immutable cohort inputs
+        working-directory: .
         run: |
           for name in LMD_REF CORE_REF LIBRARY_REF SWIFTLM_REF; do
             value="${!name}"
@@ -58,14 +60,15 @@ jobs:
         with:
           repository: agoodkind/lmd
           ref: ${{ inputs.lmd_ref }}
+          path: lmd
           persist-credentials: false
 
       - name: Checkout fixed validation controls
         uses: actions/checkout@v4
         with:
           repository: agoodkind/lmd
-          ref: be0179ee47d5767ea8da2e73897e4296b1a393b0
-          path: .cohort-controls
+          ref: fac41471cba9c223ff424ecd51c39dc2594d689e
+          path: lmd/.cohort-controls
           sparse-checkout: .github/scripts
           persist-credentials: false
 
@@ -74,7 +77,7 @@ jobs:
         with:
           repository: agoodkind/mlx-swift
           ref: ${{ inputs.core_ref }}
-          path: .cohort/mlx-swift
+          path: lmd/.cohort/mlx-swift
           fetch-depth: 0
           submodules: recursive
           persist-credentials: false
@@ -84,7 +87,7 @@ jobs:
         with:
           repository: agoodkind/mlx-swift-lm
           ref: ${{ inputs.library_ref }}
-          path: .cohort/mlx-swift-lm
+          path: lmd/.cohort/mlx-swift-lm
           fetch-depth: 0
           submodules: recursive
           persist-credentials: false
@@ -94,7 +97,7 @@ jobs:
         with:
           repository: agoodkind/SwiftLM
           ref: ${{ inputs.swiftlm_ref }}
-          path: SwiftLM
+          path: lmd/SwiftLM
           persist-credentials: false
 
       - uses: actions/setup-node@v4
