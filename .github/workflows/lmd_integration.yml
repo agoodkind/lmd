@@ -1,0 +1,180 @@
+name: LMD Integration
+
+on:
+  workflow_call:
+    inputs:
+      lmd_ref:
+        description: Exact LMD source commit
+        type: string
+        required: true
+      core_ref:
+        description: Exact mlx-swift source commit
+        type: string
+        required: true
+      library_ref:
+        description: Exact mlx-swift-lm base commit
+        type: string
+        required: true
+      swiftlm_ref:
+        description: Exact SwiftLM source commit
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    name: LMD Integration
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
+      LMD_REF: ${{ inputs.lmd_ref }}
+      CORE_REF: ${{ inputs.core_ref }}
+      LIBRARY_REF: ${{ inputs.library_ref }}
+      SWIFTLM_REF: ${{ inputs.swiftlm_ref }}
+      GH_TOKEN: ${{ github.token }}
+      HOMEBREW_NO_REQUIRE_TAP_TRUST: '1'
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+      SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED: 'NO'
+      SWIFT_MK_SWIFTPM_CACHE_ARGS: '--build-system native --jobs 4 -Xswiftc -explicit-module-build'
+    steps:
+      - name: Validate immutable cohort inputs
+        run: |
+          for name in LMD_REF CORE_REF LIBRARY_REF SWIFTLM_REF; do
+            value="${!name}"
+            if [[ ! "$value" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Set $name to a full immutable commit SHA."
+              exit 1
+            fi
+          done
+
+      - name: Checkout exact LMD source
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/lmd
+          ref: ${{ inputs.lmd_ref }}
+          persist-credentials: false
+
+      - name: Checkout fixed validation controls
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/lmd
+          ref: cbcfcb9e1d1dda2f0589cb28d66bdaa913004702
+          path: .cohort-controls
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Checkout exact core source
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/mlx-swift
+          ref: ${{ inputs.core_ref }}
+          path: .cohort/mlx-swift
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Checkout exact library base
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/mlx-swift-lm
+          ref: ${{ inputs.library_ref }}
+          path: .cohort/mlx-swift-lm
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Checkout exact SwiftLM source
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/SwiftLM
+          ref: ${{ inputs.swiftlm_ref }}
+          path: SwiftLM
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install build prerequisites on the ephemeral runner
+        run: brew install ccache cmake
+
+      - name: Set up the canonical Swift build tools
+        uses: agoodkind/swift-makefile/.github/actions/setup-build-env@main
+        with:
+          xcode-version: '26.5'
+          github-token: ${{ github.token }}
+          install-tuist: 'true'
+          install-xcodegen: 'true'
+          cache-profile: 'off'
+          gate: build
+
+      - name: Align Xcode and the runtime CPU compiler
+        run: |
+          sudo xcode-select --switch "$DEVELOPER_DIR"
+          test "$(env -u DEVELOPER_DIR xcode-select --print-path)" = "$DEVELOPER_DIR"
+          xcrun --kill-cache
+          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          echo "SDKROOT=$SDKROOT" >> "$GITHUB_ENV"
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-path
+          xcrun --sdk macosx --find clang++
+          g++ --version
+
+      - name: Prepare and verify the exact proposed cohort
+        run: |
+          node .cohort-controls/.github/scripts/lmd-cohort.mjs prepare \
+            "$PWD" "$PWD/.cohort/mlx-swift" "$PWD/.cohort/mlx-swift-lm" "$RUNNER_TEMP/lmd-proof"
+
+      - name: Build canonical Release products
+        run: |
+          set -o pipefail
+          make build CONFIG=Release LINT_CONCURRENCY=4 SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED=NO \
+            SWIFT_MK_SWIFTPM_CACHE_ARGS='--build-system native --jobs 4 -Xswiftc -explicit-module-build' \
+            2>&1 | tee "$RUNNER_TEMP/lmd-proof/build.log"
+
+      - name: Verify Release source and shader artifacts
+        run: |
+          node .cohort-controls/.github/scripts/lmd-cohort.mjs artifacts \
+            "$PWD" "$PWD/.cohort/mlx-swift" "$PWD/.cohort/mlx-swift-lm" "$RUNNER_TEMP/lmd-proof" Release
+          Products/Build/Release/lmd --help
+          Products/Build/Release/swiftlm/SwiftLM --help
+
+      - name: Run real Gemma video regressions without pretrained models
+        env:
+          LMD_TEST_FILTER: GemmaVideoFrameTests
+        run: |
+          set -o pipefail
+          make test LINT_CONCURRENCY=4 SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED=NO \
+            SWIFT_MK_SWIFTPM_CACHE_ARGS='--build-system native --jobs 4 -Xswiftc -explicit-module-build' \
+            2>&1 | tee "$RUNNER_TEMP/lmd-proof/tests.log"
+
+      - name: Verify completed tests and Debug shader artifacts
+        run: |
+          status=0
+          swift test --build-system native --jobs 4 -Xswiftc -explicit-module-build --disable-swift-testing list --skip-build \
+            > "$RUNNER_TEMP/lmd-proof/discovery.txt" 2> "$RUNNER_TEMP/lmd-proof/discovery-errors.txt" || status=$?
+          cat "$RUNNER_TEMP/lmd-proof/discovery-errors.txt"
+          cat "$RUNNER_TEMP/lmd-proof/discovery.txt"
+          if [[ "$status" -ne 0 ]]; then
+            echo "::error::LMD test discovery failed with exit status $status."
+            exit "$status"
+          fi
+          node .cohort-controls/.github/scripts/verify-integration-results.mjs swiftpm \
+            "$RUNNER_TEMP/lmd-proof/tests.log" "$RUNNER_TEMP/lmd-proof/discovery.txt" GemmaVideoFrameTests
+          node .cohort-controls/.github/scripts/lmd-cohort.mjs artifacts \
+            "$PWD" "$PWD/.cohort/mlx-swift" "$PWD/.cohort/mlx-swift-lm" "$RUNNER_TEMP/lmd-proof" Debug
+
+      - name: Upload exact cohort, overlay, tests, and source-built shaders
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lmd-cohort-${{ inputs.lmd_ref }}-${{ inputs.core_ref }}-${{ inputs.library_ref }}-${{ inputs.swiftlm_ref }}
+          path: ${{ runner.temp }}/lmd-proof
+          if-no-files-found: error
+          retention-days: 7
