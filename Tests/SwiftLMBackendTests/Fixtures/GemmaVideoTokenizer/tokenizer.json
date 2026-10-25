@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "added_tokens": [
+    {"id": 0, "content": "<unk>", "special": true},
+    {"id": 1, "content": "<|video|>", "special": true},
+    {"id": 2, "content": "<start_of_image>", "special": true},
+    {"id": 3, "content": "<end_of_image>", "special": true}
+  ],
+  "model": {
+    "type": "BPE",
+    "unk_token": "<unk>",
+    "vocab": {
+      "<unk>": 0, "<|video|>": 1, "<start_of_image>": 2, "<end_of_image>": 3,
+      " ": 4, ".": 5, ":": 6,
+      "0": 7, "1": 8, "2": 9, "3": 10, "4": 11,
+      "5": 12, "6": 13, "7": 14, "8": 15, "9": 16,
+      "D": 17, "e": 18, "s": 19, "c": 20, "r": 21, "i": 22,
+      "b": 23, "t": 24, "h": 25, "l": 26, "p": 27
+    },
+    "merges": []
+  }
+}

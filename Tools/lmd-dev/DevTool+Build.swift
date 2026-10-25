@@ -190,6 +190,11 @@ extension DevTool {
 
   func test() throws {
     Output.debug("test")
+    let testFilter = ProcessInfo.processInfo.environment["LMD_TEST_FILTER"]?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    if let testFilter, testFilter.isEmpty {
+      throw ToolError.failure("LMD_TEST_FILTER must contain a test name or pattern.")
+    }
     // Fail fast and clearly when invoked without a swift-mk gate ancestor, before the
     // metallib build below shells `swift-mk toolchain build` and fails opaquely.
     if let status = GateProof.refusal(entry: "lmd build") {
@@ -215,7 +220,8 @@ extension DevTool {
         configuration: configuration,
         environment: ["LMD_BINARY_DIR": releaseBuildDirectory().path]),
       buildTests: true,
-      skipBuild: true
+      skipBuild: true,
+      filter: testFilter
     ) { [self] in
       stageMetallibBetweenBuildAndTest(configuration: configuration)
     }

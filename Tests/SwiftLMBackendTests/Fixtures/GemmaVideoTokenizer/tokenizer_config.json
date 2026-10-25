@@ -1,0 +1,7 @@
+{
+  "tokenizer_class": "GPT2Tokenizer",
+  "unk_token": "<unk>",
+  "additional_special_tokens": ["<|video|>", "<start_of_image>", "<end_of_image>"],
+  "clean_up_tokenization_spaces": false,
+  "chat_template": "{% for message in messages %}{% if message['content'] is string %}{{ message['content'] }}{% else %}{% for part in message['content'] %}{% if part['type'] == 'text' %}{{ part['text'] }}{% endif %}{% endfor %}{% endif %}{% endfor %}"
+}

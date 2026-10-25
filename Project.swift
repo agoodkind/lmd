@@ -73,7 +73,8 @@ func commandLineTarget(
 
 func testTarget(
   _ name: String,
-  dependencies: [TargetDependency]
+  dependencies: [TargetDependency],
+  resources: ResourceFileElements? = nil
 ) -> Target {
   .target(
     name: name,
@@ -82,6 +83,7 @@ func testTarget(
     bundleId: "io.goodkind.lmd.\(name)",
     deploymentTargets: deploymentTargets,
     sources: ["Tests/\(name)/**/*.swift"],
+    resources: resources,
     dependencies: dependencies,
     settings: swiftSixSettings
   )
@@ -323,10 +325,16 @@ let project = Project(
     testTarget(
       "SwiftLMBackendTests",
       dependencies: [
+        .target(name: "AppLogger"),
         .target(name: "SwiftLMBackend"),
         .target(name: "SwiftLMCore"),
+        .external(name: "MLX"),
         .external(name: "MLXLMCommon"),
-      ]
+        .external(name: "MLXVLM"),
+        .external(name: "MLXHuggingFace"),
+        .external(name: "Tokenizers"),
+      ],
+      resources: [.folderReference(path: "Tests/SwiftLMBackendTests/Fixtures/GemmaVideoTokenizer")]
     ),
     testTarget(
       "SwiftLMEmbedTests",
