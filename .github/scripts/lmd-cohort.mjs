@@ -126,6 +126,11 @@ function prepare() {
 
 function verify() {
   const state = readJSON(statePath);
+  for (const packagePath of packagePaths) {
+    const name = packagePath ? packagePath.toLowerCase() + '-Package.resolved' : 'Package.resolved';
+    copyFileSync(join(root, packagePath, 'Package.resolved'), join(proof, name));
+  }
+  copyFileSync(join(root, 'SwiftLM/Package.resolved'), join(proof, 'swiftlm-Package.resolved'));
   const commitBytes = readFileSync(join(proof, 'library-commit-object.txt'));
   requireCondition(commitHash(commitBytes) === state.effective_library && hash(commitBytes) === state.library_commit_sha256,
     'Archived library commit object changed');
@@ -153,8 +158,6 @@ function verify() {
       requireCondition(git(checkout, 'rev-parse', 'HEAD') === expected[identity], 'Resolved checkout mismatch: ' + checkout);
       requireCondition(git(checkout, 'status', '--porcelain', '--untracked-files=no') === '', 'Resolved source package changed: ' + checkout);
     }
-    const artifact = packagePath ? packagePath.toLowerCase() + '-Package.resolved' : 'Package.resolved';
-    copyFileSync(path, join(proof, artifact));
     resolved.push({ package: packagePath || '.', sha256: hash(readFileSync(path)), revisions: expected });
   }
   const swiftLMDirectory = join(root, 'SwiftLM');
@@ -165,7 +168,6 @@ function verify() {
   const swiftLMLock = join(swiftLMDirectory, 'Package.resolved');
   requireCondition(isDeepStrictEqual(otherPins(readJSON(swiftLMLock)), otherPins(readJSON(join(proof, 'baseline-swiftlm-Package.resolved')))),
     'SwiftLM resolver changed dependencies outside the requested MLX cohort');
-  copyFileSync(swiftLMLock, join(proof, 'swiftlm-Package.resolved'));
   state.swiftlm_lock_sha256 = hash(readFileSync(swiftLMLock));
   writeFileSync(join(proof, 'swiftlm-cohort.patch'), diff(swiftLMDirectory, '--binary', '--full-index', 'HEAD'));
   for (const identity of identities) {
