@@ -101,7 +101,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: agoodkind/lmd
-          ref: 763487338b00335c1dc9fb65d974d8d547519f85
+          ref: 2812aa0d79c00cda8185e11182e98ddea59eb6be
           path: lmd/validation-tools
           persist-credentials: false
 
