@@ -56,7 +56,7 @@ index e107b969f73d83d2cf5bf79e65ae16141fb01e77..a80ecb288056798a8e5a9f0cbeb65869
 +              console.log("Dispatch failed. Ensure SWIFTLM_PR_TOKEN is set in repository secrets with repo scoping.", error);
              }
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index e1c6606b435dcd0233e6b77d82d21def06fda48e..50d7b6da334203ee24676ca8ed36d3eee24e67c2 100644
+index bca996b4c7c48168de7448dbcfdf78a7bf763853..50d7b6da334203ee24676ca8ed36d3eee24e67c2 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -2,36 +2,9 @@ name: CI
@@ -98,7 +98,7 @@ index e1c6606b435dcd0233e6b77d82d21def06fda48e..50d7b6da334203ee24676ca8ed36d3ee
  
  concurrency:
    group: ci-${{ github.ref }}
-@@ -40,367 +13,131 @@ concurrency:
+@@ -40,409 +13,131 @@ concurrency:
  permissions:
    contents: read
  
@@ -109,9 +109,26 @@ index e1c6606b435dcd0233e6b77d82d21def06fda48e..50d7b6da334203ee24676ca8ed36d3ee
 -  SWIFTLM_REF: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}
 -
  jobs:
+-  select_macos_runner:
+-    name: Select macOS runner
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 40
+-    outputs:
+-      label: ${{ steps.runner.outputs.label }}
+-    steps:
+-      - name: Use the shared macOS runner selector
+-        id: runner
+-        uses: agoodkind/swift-makefile/.github/actions/plan-runner@main
+-        with:
+-          runner: macos-26
+-          capacity-token: ${{ secrets.LOCAL_POOL_CAPACITY_TOKEN }}
+-
    build-and-test:
      name: Build and Test (macOS 26)
-     runs-on: macos-26
+-    needs: select_macos_runner
+-    if: ${{ always() }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    runs-on: macos-26
      timeout-minutes: 40
 -    env:
 -      LIBRARY_TEST_SUITES: |-
@@ -128,6 +145,18 @@ index e1c6606b435dcd0233e6b77d82d21def06fda48e..50d7b6da334203ee24676ca8ed36d3ee
 -        MLXLMTests/RotatingKVCacheRewindTests
 -        MLXLMTests/SpeculativeRoundRewindTests
      steps:
+-      - name: Require successful macOS prerequisites
+-        shell: bash
+-        working-directory: ${{ github.workspace }}
+-        env:
+-          SELECTOR_RESULT: ${{ needs.select_macos_runner.result }}
+-          SELECTED_RUNNER: ${{ needs.select_macos_runner.outputs.label }}
+-        run: |
+-          if [[ "$SELECTOR_RESULT" != 'success' || -z "$SELECTED_RUNNER" ]]; then
+-            echo "::error::The macOS runner selector did not succeed or did not return a runner label."
+-            exit 1
+-          fi
+-
 -      - name: Align Xcode and the runtime CPU compiler
 -        run: |
 -          sudo xcode-select --switch "$DEVELOPER_DIR"
@@ -197,9 +226,9 @@ index e1c6606b435dcd0233e6b77d82d21def06fda48e..50d7b6da334203ee24676ca8ed36d3ee
  
 -      - name: Set up Swift result verification
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@426e79c9358c0d0d16f2b786acba7a93ffc9fc9c
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
 -        with:
--          ref: '426e79c9358c0d0d16f2b786acba7a93ffc9fc9c'
+-          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
 +      - name: Resolve dependencies
 +        run: swift package resolve
  
@@ -336,11 +365,26 @@ index e1c6606b435dcd0233e6b77d82d21def06fda48e..50d7b6da334203ee24676ca8ed36d3ee
  
    integration-test:
      name: Build & Test SwiftLM Integration
-     runs-on: macos-26
+-    needs: select_macos_runner
+-    if: ${{ always() }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 -    timeout-minutes: 45
 -    env:
 -      SWIFTLM_TEST_FILTER: 'SwiftLMTests\.(PromptCacheTests|MultimodalTokenExtractionTests|ChatRequestParsingTests|ThinkingTagStripTests|OwnFeatureHTTPTests)'
++    runs-on: macos-26
      steps:
+-      - name: Require successful macOS prerequisites
+-        shell: bash
+-        working-directory: ${{ github.workspace }}
+-        env:
+-          SELECTOR_RESULT: ${{ needs.select_macos_runner.result }}
+-          SELECTED_RUNNER: ${{ needs.select_macos_runner.outputs.label }}
+-        run: |
+-          if [[ "$SELECTOR_RESULT" != 'success' || -z "$SELECTED_RUNNER" ]]; then
+-            echo "::error::The macOS runner selector did not succeed or did not return a runner label."
+-            exit 1
+-          fi
+-
 -      - name: Align Xcode and the runtime CPU compiler
 -        run: |
 -          sudo xcode-select --switch "$DEVELOPER_DIR"
@@ -434,9 +478,9 @@ index e1c6606b435dcd0233e6b77d82d21def06fda48e..50d7b6da334203ee24676ca8ed36d3ee
  
 -      - name: Set up Swift result verification
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@426e79c9358c0d0d16f2b786acba7a93ffc9fc9c
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
 -        with:
--          ref: '426e79c9358c0d0d16f2b786acba7a93ffc9fc9c'
+-          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
 -
 -      - name: Build SwiftLM and tests in Release
 -        working-directory: SwiftLM
@@ -542,10 +586,10 @@ index e1c6606b435dcd0233e6b77d82d21def06fda48e..50d7b6da334203ee24676ca8ed36d3ee
 +          cd SwiftLM
 +          bash tests/test-speculative-eval.sh
 diff --git a/.github/workflows/downstream_integration.yml b/.github/workflows/downstream_integration.yml
-index 05d89765a3da7cf86fb790ce3dfdae81e102e666..ea247cfda7014710c89b8f243e2fc462ecbbc900 100644
+index fb4e7ae4960287b00c5f30107b6a5343ffcdb60d..ea247cfda7014710c89b8f243e2fc462ecbbc900 100644
 --- a/.github/workflows/downstream_integration.yml
 +++ b/.github/workflows/downstream_integration.yml
-@@ -2,241 +2,72 @@ name: Downstream Integration Test
+@@ -2,269 +2,72 @@ name: Downstream Integration Test
  
  on:
    pull_request:
@@ -581,13 +625,42 @@ index 05d89765a3da7cf86fb790ce3dfdae81e102e666..ea247cfda7014710c89b8f243e2fc462
 +    branches: [ main ]
  
  jobs:
+-  select_macos_runner:
+-    name: Select macOS runner
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 40
+-    outputs:
+-      label: ${{ steps.runner.outputs.label }}
+-    steps:
+-      - name: Use the shared macOS runner selector
+-        id: runner
+-        uses: agoodkind/swift-makefile/.github/actions/plan-runner@main
+-        with:
+-          runner: macos-26
+-          capacity-token: ${{ secrets.LOCAL_POOL_CAPACITY_TOKEN }}
+-
    test-swiftlm-umbrella:
      name: Test with SwiftLM (Umbrella Repo)
-     runs-on: macos-26
+-    needs: select_macos_runner
+-    if: ${{ always() }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    runs-on: macos-26
      timeout-minutes: 40
 -    env:
 -      SWIFTLM_TEST_FILTER: 'SwiftLMTests\.(PromptCacheTests|MultimodalTokenExtractionTests|ChatRequestParsingTests|ThinkingTagStripTests|OwnFeatureHTTPTests)'
      steps:
+-      - name: Require successful macOS prerequisites
+-        shell: bash
+-        working-directory: ${{ github.workspace }}
+-        env:
+-          SELECTOR_RESULT: ${{ needs.select_macos_runner.result }}
+-          SELECTED_RUNNER: ${{ needs.select_macos_runner.outputs.label }}
+-        run: |
+-          if [[ "$SELECTOR_RESULT" != 'success' || -z "$SELECTED_RUNNER" ]]; then
+-            echo "::error::The macOS runner selector did not succeed or did not return a runner label."
+-            exit 1
+-          fi
+-
 -      - name: Align Xcode and the runtime CPU compiler
 -        run: |
 -          sudo xcode-select --switch "$DEVELOPER_DIR"
@@ -684,11 +757,11 @@ index 05d89765a3da7cf86fb790ce3dfdae81e102e666..ea247cfda7014710c89b8f243e2fc462
  
 -      - name: Set up Swift result verification
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@426e79c9358c0d0d16f2b786acba7a93ffc9fc9c
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
 +      - name: Cache Swift packages
 +        uses: actions/cache@v4
          with:
--          ref: '426e79c9358c0d0d16f2b786acba7a93ffc9fc9c'
+-          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
 +          path: SwiftLM/.build
 +          key: ${{ runner.os }}-swiftlm-spm-${{ hashFiles('SwiftLM/Package.resolved') }}
 +          restore-keys: ${{ runner.os }}-swiftlm-spm-
@@ -799,9 +872,9 @@ index 05d89765a3da7cf86fb790ce3dfdae81e102e666..ea247cfda7014710c89b8f243e2fc462
 -
 -  lmd-consumer:
 -    name: LMD consumer
--    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@1e784bfecdc54d99403c2e1e5eae739ce7d13407
+-    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@a3c7b2ac4096fd36b483e54b8eda0115dfc09c94
 -    with:
--      lmd_ref: 1e784bfecdc54d99403c2e1e5eae739ce7d13407
+-      lmd_ref: a3c7b2ac4096fd36b483e54b8eda0115dfc09c94
 -      core_ref: ${{ inputs.core_ref || '786724757aa480f049d3a913c59da7e0e61ad5dc' }}
 -      library_ref: ${{ inputs.library_ref || github.event.pull_request.head.sha || github.sha }}
 -      swiftlm_ref: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}
@@ -829,7 +902,7 @@ index 05d89765a3da7cf86fb790ce3dfdae81e102e666..ea247cfda7014710c89b8f243e2fc462
 +        run: swift test --parallel --skip-build
 +        working-directory: SwiftLM
 diff --git a/.github/workflows/upstream-sync.yml b/.github/workflows/upstream-sync.yml
-index 60280710a475730c4f356a1be54a54ababeb4a80..89813df88b6218e16777eb24aaa082ea89829f6f 100644
+index ecd488105b93909b7770f1c586639f805a3b4db3..89813df88b6218e16777eb24aaa082ea89829f6f 100644
 --- a/.github/workflows/upstream-sync.yml
 +++ b/.github/workflows/upstream-sync.yml
 @@ -1,92 +1,98 @@
@@ -868,9 +941,9 @@ index 60280710a475730c4f356a1be54a54ababeb4a80..89813df88b6218e16777eb24aaa082ea
 -        run: apt-get install --yes --no-install-recommends make curl
 -
 -      - name: Verify the fixed Swift upstream sync commands
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@426e79c9358c0d0d16f2b786acba7a93ffc9fc9c
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
 -        with:
--          ref: '426e79c9358c0d0d16f2b786acba7a93ffc9fc9c'
+-          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
 -          test-filter: UpstreamSyncTests
 -
    sync:
@@ -903,9 +976,9 @@ index 60280710a475730c4f356a1be54a54ababeb4a80..89813df88b6218e16777eb24aaa082ea
  
 -      - name: Set up the fixed Swift upstream sync commands
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@426e79c9358c0d0d16f2b786acba7a93ffc9fc9c
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
 -        with:
--          ref: '426e79c9358c0d0d16f2b786acba7a93ffc9fc9c'
+-          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
 -          test-filter: UpstreamSyncTests
 -
        - name: Configure Git

@@ -1,8 +1,8 @@
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8a2731466 100644
+index 53e6f38eb4f895de7af34de225af1c3fa7bf69b8..219b5f6e895ea8542487a2f21b6ccbd8a2731466 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
-@@ -5,393 +5,86 @@ on:
+@@ -5,439 +5,86 @@ on:
      branches: [main]
    pull_request:
      branches: [main]
@@ -49,6 +49,20 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
 -    shell: bash
 -
  jobs:
+-  select_macos_runner:
+-    name: Select macOS runner
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 40
+-    outputs:
+-      label: ${{ steps.runner.outputs.label }}
+-    steps:
+-      - name: Use the shared macOS runner selector
+-        id: runner
+-        uses: agoodkind/swift-makefile/.github/actions/plan-runner@main
+-        with:
+-          runner: macos-26
+-          capacity-token: ${{ secrets.LOCAL_POOL_CAPACITY_TOKEN }}
+-
 -  lmd_sources:
 -    name: Select LMD consumer sources
 -    runs-on: ubuntu-latest
@@ -90,9 +104,9 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
 -  lmd_consumer:
 -    name: LMD consumer
 -    needs: lmd_sources
--    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@1e784bfecdc54d99403c2e1e5eae739ce7d13407
+-    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@a3c7b2ac4096fd36b483e54b8eda0115dfc09c94
 -    with:
--      lmd_ref: 1e784bfecdc54d99403c2e1e5eae739ce7d13407
+-      lmd_ref: a3c7b2ac4096fd36b483e54b8eda0115dfc09c94
 -      core_ref: ${{ needs.lmd_sources.outputs.core_ref }}
 -      library_ref: ${{ needs.lmd_sources.outputs.library_ref }}
 -      swiftlm_ref: ${{ needs.lmd_sources.outputs.swiftlm_ref }}
@@ -124,7 +138,9 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
 -
    build_and_unit_test:
 -    name: Native ${{ matrix.configuration }} build and tests
--    runs-on: macos-26
+-    needs: select_macos_runner
+-    if: ${{ always() }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 -    timeout-minutes: 60
 -    strategy:
 -      fail-fast: false
@@ -141,6 +157,18 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
 +    runs-on: macos-15
 +    timeout-minutes: 40
      steps:
+-      - name: Require successful macOS prerequisites
+-        shell: bash
+-        working-directory: ${{ github.workspace }}
+-        env:
+-          SELECTOR_RESULT: ${{ needs.select_macos_runner.result }}
+-          SELECTED_RUNNER: ${{ needs.select_macos_runner.outputs.label }}
+-        run: |
+-          if [[ "$SELECTOR_RESULT" != 'success' || -z "$SELECTED_RUNNER" ]]; then
+-            echo "::error::The macOS runner selector did not succeed or did not return a runner label."
+-            exit 1
+-          fi
+-
 -      - name: Align Xcode and the runtime CPU compiler
 -        run: |
 -          sudo xcode-select --switch "$DEVELOPER_DIR"
@@ -180,9 +208,9 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
  
 -      - name: Set up Swift result verification
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@426e79c9358c0d0d16f2b786acba7a93ffc9fc9c
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
 -        with:
--          ref: '426e79c9358c0d0d16f2b786acba7a93ffc9fc9c'
+-          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
 +      - name: Install Metal Toolchain
 +        run: xcodebuild -downloadComponent MetalToolchain || true
  
@@ -371,13 +399,31 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
 -
 -  local_fixtures:
 -    name: Local checkpoint E2E tests
--    needs: build_and_unit_test
--    runs-on: macos-26
+-    needs: [build_and_unit_test, select_macos_runner]
+-    if: ${{ always() }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 -    timeout-minutes: 15
 -    env:
 -      HF_HUB_OFFLINE: '1'
 -      TRANSFORMERS_OFFLINE: '1'
 -    steps:
+-      - name: Require successful macOS prerequisites
+-        shell: bash
+-        working-directory: ${{ github.workspace }}
+-        env:
+-          SELECTOR_RESULT: ${{ needs.select_macos_runner.result }}
+-          SELECTED_RUNNER: ${{ needs.select_macos_runner.outputs.label }}
+-          NATIVE_BUILD_RESULT: ${{ needs.build_and_unit_test.result }}
+-        run: |
+-          if [[ "$SELECTOR_RESULT" != 'success' || -z "$SELECTED_RUNNER" ]]; then
+-            echo "::error::The macOS runner selector did not succeed or did not return a runner label."
+-            exit 1
+-          fi
+-          if [[ "$NATIVE_BUILD_RESULT" != 'success' ]]; then
+-            echo "::error::The required native build and tests did not succeed."
+-            exit 1
+-          fi
+-
 -      - name: Align Xcode and the runtime CPU compiler
 -        run: |
 -          sudo xcode-select --switch "$DEVELOPER_DIR"
@@ -439,13 +485,14 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
  
    integration_matrix:
 -    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_pretrained_smoke }}
-     needs: build_and_unit_test
--    runs-on: macos-26
+-    needs: [build_and_unit_test, select_macos_runner]
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    needs: build_and_unit_test
 +    runs-on: macos-15
      timeout-minutes: 30
      strategy:
        fail-fast: false
-@@ -419,6 +112,16 @@ jobs:
+@@ -465,6 +112,16 @@ jobs:
              models: mlx-community/Qwen2-VL-2B-Instruct-4bit LiquidAI/LFM2.5-VL-450M-MLX-4bit@10ce3604e42cd595497c47aaf67b7890e1e2a3b4
            - modality: audio
              models: mlx-community/gemma-4-e4b-it-4bit
@@ -462,7 +509,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
            # OpenAI-compatibility contract: what the client receives over the wire, once
            # real tokenisation decides chunk boundaries. Runs on the smallest model —
            # these assert server behaviour, not model quality (issue #128).
-@@ -442,43 +145,18 @@ jobs:
+@@ -488,43 +145,18 @@ jobs:
            - modality: opencode
              models: mlx-community/gemma-4-e4b-it-4bit
      steps:
@@ -511,7 +558,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
  
        # The key is per-modality and derived from the test script, so changing the model a
        # test loads rotates the key automatically. The previous static
-@@ -512,24 +190,11 @@ jobs:
+@@ -558,24 +190,11 @@ jobs:
          env:
            HF_HUB_DOWNLOAD_TIMEOUT: "600"
            SWIFTLM_TEST_MODEL: ${{ matrix.test_model }}
@@ -536,7 +583,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
              if [ "$attempt" -eq 3 ]; then echo "All attempts failed"; exit 1; fi
              sleep 10
            done
-@@ -542,52 +207,64 @@ jobs:
+@@ -588,52 +207,64 @@ jobs:
            path: /tmp/SwiftLM-test-*.log
            retention-days: 7
  
@@ -545,10 +592,11 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
 +  # We test the 4B main model which safely fits within memory.
    speculative-decoding:
 -    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_speculative_smoke }}
--    runs-on: macos-26
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 +    runs-on: macos-15
      timeout-minutes: 45
-     needs: build_and_unit_test  # Run in parallel with integration_matrix
+-    needs: [build_and_unit_test, select_macos_runner]  # Run in parallel with integration_matrix
++    needs: build_and_unit_test  # Run in parallel with integration_matrix
      steps:
 -      - name: Align Xcode and the runtime CPU compiler
 -        run: |
@@ -635,7 +683,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
            python3 -m venv /tmp/mlx_venv
            /tmp/mlx_venv/bin/pip install --quiet huggingface_hub hf
  
-@@ -634,52 +311,61 @@ jobs:
+@@ -680,52 +311,61 @@ jobs:
            path: /tmp/SwiftLM-test-speculative.log
            retention-days: 7
  
@@ -643,10 +691,11 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
 +  # Uses the standard macos-15 runner (7 GB RAM). 
    dflash-speculative-decoding:
 -    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_speculative_smoke }}
--    runs-on: macos-26
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 +    runs-on: macos-15
      timeout-minutes: 45
-     needs: build_and_unit_test
+-    needs: [build_and_unit_test, select_macos_runner]
++    needs: build_and_unit_test
      steps:
 -      - name: Align Xcode and the runtime CPU compiler
 -        run: |
@@ -731,7 +780,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
            python3 -m venv /tmp/mlx_venv
            /tmp/mlx_venv/bin/pip install --quiet huggingface_hub hf
  
-@@ -725,55 +411,65 @@ jobs:
+@@ -771,55 +411,65 @@ jobs:
            path: /tmp/SwiftLM-test-dflash.log
            retention-days: 7
  
@@ -740,10 +789,11 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
    # memory compression/efficiency. Emits vm_stat readings as step summary.
    speculative-decoding-eval:
 -    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_speculative_eval }}
--    runs-on: macos-26
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 +    runs-on: macos-15
      timeout-minutes: 45
-     needs: build_and_unit_test
+-    needs: [build_and_unit_test, select_macos_runner]
++    needs: build_and_unit_test
      continue-on-error: true
      steps:
 -      - name: Align Xcode and the runtime CPU compiler
@@ -831,7 +881,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
            python3 -m venv /tmp/mlx_venv
            /tmp/mlx_venv/bin/pip install --quiet huggingface_hub hf
  
-@@ -803,7 +499,7 @@ jobs:
+@@ -849,7 +499,7 @@ jobs:
              /Pages occupied by compressor:/ { v=$5; gsub(/\./, "", v); comp=v+0 }
              END { printf "%.2f", (act+wire+comp)*page_size/1073741824 }
            ')
@@ -840,7 +890,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
            echo "RAM before eval: ${RAM} GB"
        
        - name: Run speculative evaluation E2E
-@@ -838,7 +534,7 @@ jobs:
+@@ -884,7 +534,7 @@ jobs:
              /Pages occupied by compressor:/ { v=$5; gsub(/\./, "", v); comp=v+0 }
              END { printf "%.2f", (act+wire+comp)*page_size/1073741824 }
            ')
@@ -849,7 +899,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
            echo "RAM after eval: ${RAM} GB"
  
        - name: Emit memory summary
-@@ -855,7 +551,7 @@ jobs:
+@@ -901,7 +551,7 @@ jobs:
              echo "| RAM before test | ${BEFORE} GB |"
              echo "| RAM after test  | ${AFTER} GB |"
              echo "| Delta | $(echo "$AFTER $BEFORE" | awk '{printf "%.2f", $1-$2}') GB |"
@@ -858,7 +908,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
  
        - name: Upload speculative eval logs on failure
          if: failure()
-@@ -864,54 +560,47 @@ jobs:
+@@ -910,54 +560,47 @@ jobs:
            name: speculative-eval-logs
            path: /tmp/SwiftLM-test-speculative-eval.log
  
@@ -873,10 +923,11 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
 +  #   [3] /v1/chat/completions returns valid content
    ssd-draft-memory-guard:
 -    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_ssd_draft_guard }}
--    runs-on: macos-26
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
 +    runs-on: macos-15
      timeout-minutes: 45
-     needs: build_and_unit_test
+-    needs: [build_and_unit_test, select_macos_runner]
++    needs: build_and_unit_test
      steps:
 -      - name: Align Xcode and the runtime CPU compiler
 -        run: |
@@ -939,7 +990,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
  
        - name: Cache MLX models (2B main + 0.8B draft)
          uses: actions/cache@v4
-@@ -941,11 +630,9 @@ jobs:
+@@ -987,11 +630,9 @@ jobs:
            ')
            TOTAL=$(sysctl -n hw.memsize | awk '{printf "%.0f", $1/1073741824}')
            LIMIT=$(echo "$TOTAL * 0.85" | bc | cut -d. -f1)
@@ -954,7 +1005,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
            echo "Baseline RAM: ${RAM} GB  |  Runner: ${TOTAL} GB  |  Limit: ${LIMIT} GB"
  
        - name: Start SSD + draft server (Issue #72 scenario)
-@@ -962,11 +649,11 @@ jobs:
+@@ -1008,11 +649,11 @@ jobs:
              --max-tokens 64 \
              > /tmp/ssd_draft_guard.log 2>&1 &
            PID=$!
@@ -968,7 +1019,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
                echo "Server died early:"
                cat /tmp/ssd_draft_guard.log
                exit 1
-@@ -989,7 +676,7 @@ jobs:
+@@ -1035,7 +676,7 @@ jobs:
              /Pages occupied by compressor:/ { v=$5; gsub(/\./, "", v); comp=v+0 }
              END { printf "%.2f", (act+wire+comp)*page_size/1073741824 }
            ')
@@ -977,7 +1028,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
            echo "RAM after load: ${RAM} GB"
  
        - name: "[1/3] Verify draft model loaded in server log"
-@@ -1023,7 +710,7 @@ jobs:
+@@ -1069,7 +710,7 @@ jobs:
              /Pages occupied by compressor:/ { v=$5; gsub(/\./, "", v); comp=v+0 }
              END { printf "%.2f", (act+wire+comp)*page_size/1073741824 }
            ')
@@ -986,7 +1037,7 @@ index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8
            echo "RAM after inference: ${RAM} GB"
  
            LIMIT="${{ steps.ram_base.outputs.ram_limit }}"
-@@ -1072,7 +759,7 @@ jobs:
+@@ -1118,7 +759,7 @@ jobs:
              echo "| RAM after inference (peak) | ${PEAK} GB | ≤ ${LIMIT} GB (85%) |"
              echo "| Load delta | $(echo "$LOADED $BASE" | awk '{printf "%.2f", $1-$2}') GB | — |"
              echo "| Inference delta | $(echo "$PEAK $LOADED" | awk '{printf "%.2f", $1-$2}') GB | — |"
@@ -1296,7 +1347,7 @@ index b8012b9bba965bafa746174cf04dc427bbfc31c0..2cd7bde6af9c59cbe80ce7a8d556fefb
            body_path: /tmp/release_notes.md
            files: |
 diff --git a/.github/workflows/update_dependencies.yml b/.github/workflows/update_dependencies.yml
-index 931e88941f4e9c9949fa6d95b3810cb221962683..85a599c2efb7ad4333b1b92af694a555b90724ff 100644
+index 16bdb89641a1badeb4267b2caf9052ef983d85cd..85a599c2efb7ad4333b1b92af694a555b90724ff 100644
 --- a/.github/workflows/update_dependencies.yml
 +++ b/.github/workflows/update_dependencies.yml
 @@ -1,6 +1,19 @@
@@ -1351,9 +1402,9 @@ index 931e88941f4e9c9949fa6d95b3810cb221962683..85a599c2efb7ad4333b1b92af694a555
  
 -      - name: Verify the fixed Swift dependency bump command
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@426e79c9358c0d0d16f2b786acba7a93ffc9fc9c
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
 -        with:
--          ref: '426e79c9358c0d0d16f2b786acba7a93ffc9fc9c'
+-          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
 -          test-filter: DependencyBumpTests
 -
 -      - name: Prepare a dependency branch for manual review

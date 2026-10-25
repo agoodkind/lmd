@@ -1,43 +1,187 @@
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 24af60849fd9aefe223cd00f67fb2a000e93e419..529946d53e99271adc078f82994589ae77465a0b 100644
+index 53e6f38eb4f895de7af34de225af1c3fa7bf69b8..529946d53e99271adc078f82994589ae77465a0b 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
-@@ -82,9 +82,9 @@ jobs:
+@@ -41,20 +41,6 @@ defaults:
+     shell: bash
+ 
+ jobs:
+-  select_macos_runner:
+-    name: Select macOS runner
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 40
+-    outputs:
+-      label: ${{ steps.runner.outputs.label }}
+-    steps:
+-      - name: Use the shared macOS runner selector
+-        id: runner
+-        uses: agoodkind/swift-makefile/.github/actions/plan-runner@main
+-        with:
+-          runner: macos-26
+-          capacity-token: ${{ secrets.LOCAL_POOL_CAPACITY_TOKEN }}
+-
+   lmd_sources:
+     name: Select LMD consumer sources
+     runs-on: ubuntu-latest
+@@ -96,9 +82,9 @@ jobs:
    lmd_consumer:
      name: LMD consumer
      needs: lmd_sources
--    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@1e784bfecdc54d99403c2e1e5eae739ce7d13407
+-    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@a3c7b2ac4096fd36b483e54b8eda0115dfc09c94
 +    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@6a1892b4a386f3c323a560abf1b464e75ab3f317
      with:
--      lmd_ref: 1e784bfecdc54d99403c2e1e5eae739ce7d13407
+-      lmd_ref: a3c7b2ac4096fd36b483e54b8eda0115dfc09c94
 +      lmd_ref: 6a1892b4a386f3c323a560abf1b464e75ab3f317
        core_ref: ${{ needs.lmd_sources.outputs.core_ref }}
        library_ref: ${{ needs.lmd_sources.outputs.library_ref }}
        swiftlm_ref: ${{ needs.lmd_sources.outputs.swiftlm_ref }}
-@@ -168,9 +168,9 @@ jobs:
+@@ -130,9 +116,7 @@ jobs:
+ 
+   build_and_unit_test:
+     name: Native ${{ matrix.configuration }} build and tests
+-    needs: select_macos_runner
+-    if: ${{ always() }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    runs-on: macos-26
+     timeout-minutes: 60
+     strategy:
+       fail-fast: false
+@@ -147,18 +131,6 @@ jobs:
+         ModelLifecycleTests ModelStorageCacheTests ModelStorageLayoutTests
+         ProjectMinerTests Tier6AdvancedTests VLMExtractionTests VLMProcessorTests VLMRegistryTests
+     steps:
+-      - name: Require successful macOS prerequisites
+-        shell: bash
+-        working-directory: ${{ github.workspace }}
+-        env:
+-          SELECTOR_RESULT: ${{ needs.select_macos_runner.result }}
+-          SELECTED_RUNNER: ${{ needs.select_macos_runner.outputs.label }}
+-        run: |
+-          if [[ "$SELECTOR_RESULT" != 'success' || -z "$SELECTED_RUNNER" ]]; then
+-            echo "::error::The macOS runner selector did not succeed or did not return a runner label."
+-            exit 1
+-          fi
+-
+       - name: Align Xcode and the runtime CPU compiler
+         run: |
+           sudo xcode-select --switch "$DEVELOPER_DIR"
+@@ -196,9 +168,9 @@ jobs:
  
        - name: Set up Swift result verification
          id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@426e79c9358c0d0d16f2b786acba7a93ffc9fc9c
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
 +        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
          with:
--          ref: '426e79c9358c0d0d16f2b786acba7a93ffc9fc9c'
+-          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
 +          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
  
        - name: Cache dependency source
          uses: actions/cache@v4
+@@ -352,31 +324,13 @@ jobs:
+ 
+   local_fixtures:
+     name: Local checkpoint E2E tests
+-    needs: [build_and_unit_test, select_macos_runner]
+-    if: ${{ always() }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    needs: build_and_unit_test
++    runs-on: macos-26
+     timeout-minutes: 15
+     env:
+       HF_HUB_OFFLINE: '1'
+       TRANSFORMERS_OFFLINE: '1'
+     steps:
+-      - name: Require successful macOS prerequisites
+-        shell: bash
+-        working-directory: ${{ github.workspace }}
+-        env:
+-          SELECTOR_RESULT: ${{ needs.select_macos_runner.result }}
+-          SELECTED_RUNNER: ${{ needs.select_macos_runner.outputs.label }}
+-          NATIVE_BUILD_RESULT: ${{ needs.build_and_unit_test.result }}
+-        run: |
+-          if [[ "$SELECTOR_RESULT" != 'success' || -z "$SELECTED_RUNNER" ]]; then
+-            echo "::error::The macOS runner selector did not succeed or did not return a runner label."
+-            exit 1
+-          fi
+-          if [[ "$NATIVE_BUILD_RESULT" != 'success' ]]; then
+-            echo "::error::The required native build and tests did not succeed."
+-            exit 1
+-          fi
+-
+       - name: Align Xcode and the runtime CPU compiler
+         run: |
+           sudo xcode-select --switch "$DEVELOPER_DIR"
+@@ -436,8 +390,8 @@ jobs:
+ 
+   integration_matrix:
+     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_pretrained_smoke }}
+-    needs: [build_and_unit_test, select_macos_runner]
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    needs: build_and_unit_test
++    runs-on: macos-26
+     timeout-minutes: 30
+     strategy:
+       fail-fast: false
+@@ -590,9 +544,9 @@ jobs:
+ 
+   speculative-decoding:
+     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_speculative_smoke }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    runs-on: macos-26
+     timeout-minutes: 45
+-    needs: [build_and_unit_test, select_macos_runner]  # Run in parallel with integration_matrix
++    needs: build_and_unit_test  # Run in parallel with integration_matrix
+     steps:
+       - name: Align Xcode and the runtime CPU compiler
+         run: |
+@@ -682,9 +636,9 @@ jobs:
+ 
+   dflash-speculative-decoding:
+     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_speculative_smoke }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    runs-on: macos-26
+     timeout-minutes: 45
+-    needs: [build_and_unit_test, select_macos_runner]
++    needs: build_and_unit_test
+     steps:
+       - name: Align Xcode and the runtime CPU compiler
+         run: |
+@@ -775,9 +729,9 @@ jobs:
+   # memory compression/efficiency. Emits vm_stat readings as step summary.
+   speculative-decoding-eval:
+     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_speculative_eval }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    runs-on: macos-26
+     timeout-minutes: 45
+-    needs: [build_and_unit_test, select_macos_runner]
++    needs: build_and_unit_test
+     continue-on-error: true
+     steps:
+       - name: Align Xcode and the runtime CPU compiler
+@@ -912,9 +866,9 @@ jobs:
+ 
+   ssd-draft-memory-guard:
+     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_ssd_draft_guard }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    runs-on: macos-26
+     timeout-minutes: 45
+-    needs: [build_and_unit_test, select_macos_runner]
++    needs: build_and_unit_test
+     steps:
+       - name: Align Xcode and the runtime CPU compiler
+         run: |
 diff --git a/.github/workflows/update_dependencies.yml b/.github/workflows/update_dependencies.yml
-index 931e88941f4e9c9949fa6d95b3810cb221962683..b1af1c74c2df86765e31170f7ccc4f142e24dc3e 100644
+index 16bdb89641a1badeb4267b2caf9052ef983d85cd..b1af1c74c2df86765e31170f7ccc4f142e24dc3e 100644
 --- a/.github/workflows/update_dependencies.yml
 +++ b/.github/workflows/update_dependencies.yml
 @@ -33,9 +33,9 @@ jobs:
  
        - name: Verify the fixed Swift dependency bump command
          id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@426e79c9358c0d0d16f2b786acba7a93ffc9fc9c
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@763487338b00335c1dc9fb65d974d8d547519f85
 +        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
          with:
--          ref: '426e79c9358c0d0d16f2b786acba7a93ffc9fc9c'
+-          ref: '763487338b00335c1dc9fb65d974d8d547519f85'
 +          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
            test-filter: DependencyBumpTests
  
