@@ -10,6 +10,10 @@
 TARGET ?=
 CONFIG ?= Debug
 LMD_DEV = SWIFT_MK_BIN="$(SWIFT_MK_BIN)" swift Tools/lmd-dev.swift
+LMD_MAINTENANCE_ROOT ?= $(CURDIR)
+LMD_MAINTENANCE_JOBS ?= 4
+LMD_MAINTENANCE_TEST_FILTER ?= LMDMaintenanceTests
+LMD_MAINTENANCE_SWIFTPM_ARGS := --build-system native --jobs $(LMD_MAINTENANCE_JOBS) -Xswiftc -explicit-module-build
 
 # swift-mk owns build/test/clean/lint/fmt/check; the dev tool runs the compile.
 SWIFT_MK_MODULES := swift-build.mk swift-release.mk
@@ -33,7 +37,7 @@ SWIFT_DEPLOY_CMD = $(LMD_DEV) install $(CONFIG)
 # vendored swift-makefile checkout (thousands of files). Lint owned sources by an
 # explicit file list that prunes any .build, never the bare Tools directory, so
 # swiftlint does not recurse the vendored tree and overflow git check-ignore.
-SWIFT_SOURCE_ROOTS := Sources Tests Tools/lmd-dev Tools/Tests
+SWIFT_SOURCE_ROOTS := Sources Tests Tools/lmd-dev Tools/Tests Tools/lmd-maintenance Tools/MaintenanceTests
 SWIFT_OWNED_SWIFT_FILES := $(shell find $(SWIFT_SOURCE_ROOTS) -path '*/.build/*' -prune -o -name '*.swift' -print)
 SWIFT_PACKAGE_MANIFESTS := Package.swift Tools/Package.swift Tools/lmd-dev.swift
 SWIFT_MK_EXCLUDE_PATHS := ^Tools/.build/
@@ -67,7 +71,7 @@ include bootstrap.mk
 # Quality scans require fresh Swift index records instead of compiler result replays.
 lint check lint-deadcode build-check verify-quality: SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED := NO
 
-.PHONY: toolchain preflight debug test-integration test-tools install-debug \
+.PHONY: toolchain preflight debug test-integration test-tools list-tests maintenance-build maintenance-test install-debug \
         uninstall run-serve run-tui run-bench stop-serve start-serve restart-serve \
         test-daemon-up test-daemon-down test-daemon-status \
         snapshot-update log-smoke tui-qa smoke video-smoke \
@@ -99,10 +103,19 @@ debug:
 test-integration:
 	@$(LMD_DEV) test-integration
 
-test: test-tools
+test verify-test: test-tools
 
 test-tools: swift-mk-bin
-	@SWIFT_TEST_CMD='"$(SWIFT_MK_BIN)" toolchain swiftpm test --package-path Tools --filter ServiceProbeTests' "$(SWIFT_MK_BIN)" test
+	@SWIFT_TEST_CMD='swift test $(LMD_MAINTENANCE_SWIFTPM_ARGS) --package-path Tools --filter "ServiceProbeTests|LMDMaintenanceTests"' "$(SWIFT_MK_BIN)" test
+
+list-tests: swift-mk-bin
+	@SWIFT_TEST_CMD='swift test $(LMD_MAINTENANCE_SWIFTPM_ARGS) list --skip-build --disable-swift-testing' "$(SWIFT_MK_BIN)" test
+
+maintenance-build: swift-mk-bin
+	@$(MAKE) build SWIFT_BUILD_CMD='swift build $(LMD_MAINTENANCE_SWIFTPM_ARGS) --package-path "$(LMD_MAINTENANCE_ROOT)/Tools" --product lmd-maintenance'
+
+maintenance-test: swift-mk-bin
+	@SWIFT_TEST_CMD='swift test $(LMD_MAINTENANCE_SWIFTPM_ARGS) --package-path Tools --filter "$(LMD_MAINTENANCE_TEST_FILTER)"' "$(SWIFT_MK_BIN)" test
 
 install-debug:
 	@CONFIG=Debug $(LMD_DEV) install Debug
