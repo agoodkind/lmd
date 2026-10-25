@@ -132,6 +132,7 @@ enum CoreToolVerification {
     do {
       result = .success(try body(directory))
     } catch {
+      Output.error("maintenance.core_tool_failed path=\(directory.path) error=\(error)")
       result = .failure(error)
     }
     do {
