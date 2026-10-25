@@ -45,8 +45,10 @@ let package = Package(
     .package(url: "https://github.com/Quick/Nimble.git", from: "14.0.0"),
     .package(
       url: "https://github.com/agoodkind/mlx-swift-lm.git",
-      revision: "a8ce36ba06c3295575f7a91a2da5e60c4cadbb86"),
-    .package(url: "https://github.com/agoodkind/mlx-swift.git", branch: "main"),
+      revision: "74ebe55d0d68de121f730334412da01a539eba50"),
+    .package(
+      url: "https://github.com/agoodkind/mlx-swift.git",
+      revision: "756e599cc4ee7b900a77b6186d2947b9686e98a2"),
     .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
     .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.3.2"),
     .package(url: "https://github.com/agoodkind/macos-smc-fan.git", branch: "main"),
@@ -271,12 +273,18 @@ let package = Package(
     .testTarget(
       name: "SwiftLMBackendTests",
       dependencies: [
+        "AppLogger",
         "SwiftLMBackend",
         "SwiftLMCore",
+        .product(name: "MLX", package: "mlx-swift"),
         .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+        .product(name: "MLXVLM", package: "mlx-swift-lm"),
+        .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
+        .product(name: "Tokenizers", package: "swift-transformers"),
         .product(name: "Nimble", package: "Nimble"),
       ],
       path: "Tests/SwiftLMBackendTests",
+      resources: [.copy("Fixtures/GemmaVideoTokenizer")],
       swiftSettings: strictConcurrency
     ),
     .testTarget(

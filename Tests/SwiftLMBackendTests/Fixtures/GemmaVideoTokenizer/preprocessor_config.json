@@ -1,0 +1,12 @@
+{
+  "processor_class": "Gemma4Processor",
+  "do_normalize": false,
+  "image_token_id": 1,
+  "boi_token_id": 2,
+  "eoi_token_id": 3,
+  "video_token_id": 1,
+  "video_seq_length": 4,
+  "video_frame_size": {"width": 4, "height": 4},
+  "video_max_frames": 2,
+  "video_fps": 1
+}
