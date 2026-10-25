@@ -56,7 +56,7 @@ index e107b969f73d83d2cf5bf79e65ae16141fb01e77..a80ecb288056798a8e5a9f0cbeb65869
 +              console.log("Dispatch failed. Ensure SWIFTLM_PR_TOKEN is set in repository secrets with repo scoping.", error);
              }
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index b567a63ee5987847b40dd7c4e6b6924e8d8879a9..50d7b6da334203ee24676ca8ed36d3eee24e67c2 100644
+index 2ba2137806d86fdd6d70c81ec39584692875ce06..50d7b6da334203ee24676ca8ed36d3eee24e67c2 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -2,36 +2,9 @@ name: CI
@@ -226,7 +226,7 @@ index b567a63ee5987847b40dd7c4e6b6924e8d8879a9..50d7b6da334203ee24676ca8ed36d3ee
  
 -      - name: Set up Swift result verification
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
 -        with:
 -          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
 +      - name: Resolve dependencies
@@ -478,7 +478,7 @@ index b567a63ee5987847b40dd7c4e6b6924e8d8879a9..50d7b6da334203ee24676ca8ed36d3ee
  
 -      - name: Set up Swift result verification
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
 -        with:
 -          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
 -
@@ -586,7 +586,7 @@ index b567a63ee5987847b40dd7c4e6b6924e8d8879a9..50d7b6da334203ee24676ca8ed36d3ee
 +          cd SwiftLM
 +          bash tests/test-speculative-eval.sh
 diff --git a/.github/workflows/downstream_integration.yml b/.github/workflows/downstream_integration.yml
-index 26f793dde323b600c44f2585f7a106806a4c60f9..ea247cfda7014710c89b8f243e2fc462ecbbc900 100644
+index 57a572c4a95e47e00d5132f91c649475fe9686a5..ea247cfda7014710c89b8f243e2fc462ecbbc900 100644
 --- a/.github/workflows/downstream_integration.yml
 +++ b/.github/workflows/downstream_integration.yml
 @@ -2,269 +2,72 @@ name: Downstream Integration Test
@@ -757,7 +757,7 @@ index 26f793dde323b600c44f2585f7a106806a4c60f9..ea247cfda7014710c89b8f243e2fc462
  
 -      - name: Set up Swift result verification
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
 +      - name: Cache Swift packages
 +        uses: actions/cache@v4
          with:
@@ -872,9 +872,9 @@ index 26f793dde323b600c44f2585f7a106806a4c60f9..ea247cfda7014710c89b8f243e2fc462
 -
 -  lmd-consumer:
 -    name: LMD consumer
--    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@98e2d161b4bb35aac1a1e02ef4f1b7c38fa2e623
+-    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@c94f02841b230a17b612e4c6bf6e7e8b35360d96
 -    with:
--      lmd_ref: 98e2d161b4bb35aac1a1e02ef4f1b7c38fa2e623
+-      lmd_ref: c94f02841b230a17b612e4c6bf6e7e8b35360d96
 -      core_ref: ${{ inputs.core_ref || '786724757aa480f049d3a913c59da7e0e61ad5dc' }}
 -      library_ref: ${{ inputs.library_ref || github.event.pull_request.head.sha || github.sha }}
 -      swiftlm_ref: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}
@@ -902,7 +902,7 @@ index 26f793dde323b600c44f2585f7a106806a4c60f9..ea247cfda7014710c89b8f243e2fc462
 +        run: swift test --parallel --skip-build
 +        working-directory: SwiftLM
 diff --git a/.github/workflows/upstream-sync.yml b/.github/workflows/upstream-sync.yml
-index 897c2a84c2e90eda5b758c6d8ea5f344cd93993c..89813df88b6218e16777eb24aaa082ea89829f6f 100644
+index 512dccecd26ceaa5f22b44693452dd59f6da00d3..89813df88b6218e16777eb24aaa082ea89829f6f 100644
 --- a/.github/workflows/upstream-sync.yml
 +++ b/.github/workflows/upstream-sync.yml
 @@ -1,92 +1,98 @@
@@ -941,7 +941,7 @@ index 897c2a84c2e90eda5b758c6d8ea5f344cd93993c..89813df88b6218e16777eb24aaa082ea
 -        run: apt-get install --yes --no-install-recommends make curl
 -
 -      - name: Verify the fixed Swift upstream sync commands
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
 -        with:
 -          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
 -          test-filter: UpstreamSyncTests
@@ -976,7 +976,7 @@ index 897c2a84c2e90eda5b758c6d8ea5f344cd93993c..89813df88b6218e16777eb24aaa082ea
  
 -      - name: Set up the fixed Swift upstream sync commands
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
 -        with:
 -          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
 -          test-filter: UpstreamSyncTests

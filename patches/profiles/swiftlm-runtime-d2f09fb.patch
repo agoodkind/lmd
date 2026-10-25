@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 132ec4d213127cd7de192dce9a9a72868c653034..219b5f6e895ea8542487a2f21b6ccbd8a2731466 100644
+index bda756661f54c839eb9d5d582e50208c95c13a60..219b5f6e895ea8542487a2f21b6ccbd8a2731466 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -5,439 +5,86 @@ on:
@@ -104,9 +104,9 @@ index 132ec4d213127cd7de192dce9a9a72868c653034..219b5f6e895ea8542487a2f21b6ccbd8
 -  lmd_consumer:
 -    name: LMD consumer
 -    needs: lmd_sources
--    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@98e2d161b4bb35aac1a1e02ef4f1b7c38fa2e623
+-    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@c94f02841b230a17b612e4c6bf6e7e8b35360d96
 -    with:
--      lmd_ref: 98e2d161b4bb35aac1a1e02ef4f1b7c38fa2e623
+-      lmd_ref: c94f02841b230a17b612e4c6bf6e7e8b35360d96
 -      core_ref: ${{ needs.lmd_sources.outputs.core_ref }}
 -      library_ref: ${{ needs.lmd_sources.outputs.library_ref }}
 -      swiftlm_ref: ${{ needs.lmd_sources.outputs.swiftlm_ref }}
@@ -208,7 +208,7 @@ index 132ec4d213127cd7de192dce9a9a72868c653034..219b5f6e895ea8542487a2f21b6ccbd8
  
 -      - name: Set up Swift result verification
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
 -        with:
 -          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
 +      - name: Install Metal Toolchain
@@ -1347,7 +1347,7 @@ index b8012b9bba965bafa746174cf04dc427bbfc31c0..2cd7bde6af9c59cbe80ce7a8d556fefb
            body_path: /tmp/release_notes.md
            files: |
 diff --git a/.github/workflows/update_dependencies.yml b/.github/workflows/update_dependencies.yml
-index e4129c695ab7c03e610a633b9dcb8f8ce64fb08b..85a599c2efb7ad4333b1b92af694a555b90724ff 100644
+index 600cf65b4a39644e139cc6c7e1d0696ff718369c..85a599c2efb7ad4333b1b92af694a555b90724ff 100644
 --- a/.github/workflows/update_dependencies.yml
 +++ b/.github/workflows/update_dependencies.yml
 @@ -1,6 +1,19 @@
@@ -1402,7 +1402,7 @@ index e4129c695ab7c03e610a633b9dcb8f8ce64fb08b..85a599c2efb7ad4333b1b92af694a555
  
 -      - name: Verify the fixed Swift dependency bump command
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@2812aa0d79c00cda8185e11182e98ddea59eb6be
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
 -        with:
 -          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
 -          test-filter: DependencyBumpTests
