@@ -44,6 +44,9 @@ SWIFTLINT_EXCLUDE_PATHS := $(SWIFT_MK_EXCLUDE_PATHS)
 SWIFTCHECK_EXTRA_TARGETS := $(SWIFT_FORMAT_TARGETS)
 SWIFTCHECK_EXTRA_EXCLUDE_PATHS := $(SWIFT_MK_EXCLUDE_PATHS)
 
+PERIPHERY_ARGS ?= scan --config $(SWIFT_MK_PERIPHERY_CONFIG) --strict -- \
+	--build-system native --jobs 4 -Xswiftc -explicit-module-build
+
 # swift-mk owns post-build signing of the bare CLI binaries the xcconfig override
 # cannot reach. lmd declares the built products, the resource-bundle directory, and
 # the bundle-id prefix; after `build`, the engine signs each artifact with
@@ -60,6 +63,9 @@ SWIFT_MK_SIGN_IDENTIFIER_PREFIX := io.goodkind.lmd
 SWIFT_MK_RELEASE_BUILD_CMD := $(MAKE) SWIFT_MK_SKIP_FETCH=1 build CONFIG=Release && $(MAKE) SWIFT_MK_SKIP_FETCH=1 ci-sign && $(MAKE) SWIFT_MK_SKIP_FETCH=1 ci-notarize && cp Products/lmd-*.zip dist/
 
 include bootstrap.mk
+
+# Quality scans require fresh Swift index records instead of compiler result replays.
+lint check lint-deadcode build-check verify-quality: SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED := NO
 
 .PHONY: toolchain preflight debug test-integration install-debug \
         uninstall run-serve run-tui run-bench stop-serve start-serve restart-serve \
