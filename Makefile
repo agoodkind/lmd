@@ -99,8 +99,10 @@ debug:
 test-integration:
 	@$(LMD_DEV) test-integration
 
-test-tools:
-	@$(MAKE) test SWIFT_TEST_CMD='"$(SWIFT_MK_BIN)" toolchain swiftpm test --package-path Tools --filter ServiceProbeTests'
+test: test-tools
+
+test-tools: swift-mk-bin
+	@SWIFT_TEST_CMD='"$(SWIFT_MK_BIN)" toolchain swiftpm test --package-path Tools --filter ServiceProbeTests' "$(SWIFT_MK_BIN)" test
 
 install-debug:
 	@CONFIG=Debug $(LMD_DEV) install Debug

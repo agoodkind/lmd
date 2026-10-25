@@ -46,7 +46,7 @@ do {
   binPathProcess.currentDirectoryURL = currentDirectoryURL
   binPathProcess.environment = ProcessInfo.processInfo.environment
   binPathProcess.standardOutput = outputPipe
-  binPathProcess.standardError = outputPipe
+  binPathProcess.standardError = FileHandle.standardError
   try binPathProcess.run()
   binPathProcess.waitUntilExit()
 

@@ -59,7 +59,7 @@ final class GemmaVideoFrameTests: XCTestCase {
     )
     let userInput = request.makeUserInput()
     let video = try XCTUnwrap(userInput.videos.first)
-    guard case .frames(let preservedFrames) = video else {
+    guard case .frames(let preservedFrames) = video.source else {
       XCTFail("The request must preserve decoded video frames.")
       return
     }
@@ -86,7 +86,7 @@ final class GemmaVideoFrameTests: XCTestCase {
       )
     }
     let decoded = tokenizer.decode(tokenIds: tokenIDs, skipSpecialTokens: false)
-    expect(decoded) == expectedBlocks.joined(separator: " ") + "Describe the clip."
+    expect(decoded) == expectedBlocks.joined(separator: " ") + " Describe the clip."
     expect(decoded.contains("00:00.062500 <start_of_image>")) == true
     expect(decoded.contains("00:02.437500 <start_of_image>")) == true
   }
@@ -167,7 +167,7 @@ final class GemmaVideoFrameTests: XCTestCase {
     let frameTokens = "<|image>" + String(repeating: "<|video|>", count: 4) + "<image|>"
     let expectedPrompt =
       "00:00.000000 " + frameTokens + " 00:00.062500 " + frameTokens
-      + "Describe the clip."
+      + " Describe the clip."
     expect(tokenizer.decode(tokenIds: tokenIDs, skipSpecialTokens: false)) == expectedPrompt
   }
 

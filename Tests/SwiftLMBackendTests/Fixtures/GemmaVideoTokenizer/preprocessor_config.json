@@ -1,6 +1,8 @@
 {
   "processor_class": "Gemma4Processor",
   "do_normalize": false,
+  "patch_size": 2,
+  "pooling_kernel_size": 1,
   "image_token_id": 1,
   "boi_token_id": 2,
   "eoi_token_id": 3,

@@ -45,10 +45,10 @@ let package = Package(
     .package(url: "https://github.com/Quick/Nimble.git", from: "14.0.0"),
     .package(
       url: "https://github.com/agoodkind/mlx-swift-lm.git",
-      revision: "74ebe55d0d68de121f730334412da01a539eba50"),
+      revision: "60054f77f91bc3e77c44950054dd6a9b53359352"),
     .package(
       url: "https://github.com/agoodkind/mlx-swift.git",
-      revision: "756e599cc4ee7b900a77b6186d2947b9686e98a2"),
+      revision: "786724757aa480f049d3a913c59da7e0e61ad5dc"),
     .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
     .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.3.2"),
     .package(url: "https://github.com/agoodkind/macos-smc-fan.git", branch: "main"),

@@ -151,7 +151,7 @@ public final class NVEmbeddingBackend: EmbeddingBackendProtocol, @unchecked Send
     // `scales` entry, so the checkpoint decides which layers are quantized and
     // the loader cannot disagree with it. An unquantized model passes nil here
     // and loads unchanged.
-    try loadWeights(
+    try await loadWeights(
       modelDirectory: modelDirectory,
       model: model,
       quantization: configuration.quantization
