@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 529946d53e99271adc078f82994589ae77465a0b..219b5f6e895ea8542487a2f21b6ccbd8a2731466 100644
+index 24af60849fd9aefe223cd00f67fb2a000e93e419..219b5f6e895ea8542487a2f21b6ccbd8a2731466 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -5,393 +5,86 @@ on:
@@ -90,9 +90,9 @@ index 529946d53e99271adc078f82994589ae77465a0b..219b5f6e895ea8542487a2f21b6ccbd8
 -  lmd_consumer:
 -    name: LMD consumer
 -    needs: lmd_sources
--    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@6a1892b4a386f3c323a560abf1b464e75ab3f317
+-    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@1e784bfecdc54d99403c2e1e5eae739ce7d13407
 -    with:
--      lmd_ref: 6a1892b4a386f3c323a560abf1b464e75ab3f317
+-      lmd_ref: 1e784bfecdc54d99403c2e1e5eae739ce7d13407
 -      core_ref: ${{ needs.lmd_sources.outputs.core_ref }}
 -      library_ref: ${{ needs.lmd_sources.outputs.library_ref }}
 -      swiftlm_ref: ${{ needs.lmd_sources.outputs.swiftlm_ref }}
@@ -180,9 +180,9 @@ index 529946d53e99271adc078f82994589ae77465a0b..219b5f6e895ea8542487a2f21b6ccbd8
  
 -      - name: Set up Swift result verification
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@426e79c9358c0d0d16f2b786acba7a93ffc9fc9c
 -        with:
--          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
+-          ref: '426e79c9358c0d0d16f2b786acba7a93ffc9fc9c'
 +      - name: Install Metal Toolchain
 +        run: xcodebuild -downloadComponent MetalToolchain || true
  
@@ -1296,7 +1296,7 @@ index b8012b9bba965bafa746174cf04dc427bbfc31c0..2cd7bde6af9c59cbe80ce7a8d556fefb
            body_path: /tmp/release_notes.md
            files: |
 diff --git a/.github/workflows/update_dependencies.yml b/.github/workflows/update_dependencies.yml
-index b1af1c74c2df86765e31170f7ccc4f142e24dc3e..85a599c2efb7ad4333b1b92af694a555b90724ff 100644
+index 931e88941f4e9c9949fa6d95b3810cb221962683..85a599c2efb7ad4333b1b92af694a555b90724ff 100644
 --- a/.github/workflows/update_dependencies.yml
 +++ b/.github/workflows/update_dependencies.yml
 @@ -1,6 +1,19 @@
@@ -1351,9 +1351,9 @@ index b1af1c74c2df86765e31170f7ccc4f142e24dc3e..85a599c2efb7ad4333b1b92af694a555
  
 -      - name: Verify the fixed Swift dependency bump command
 -        id: maintenance
--        uses: agoodkind/lmd/.github/actions/setup-maintenance@12bebcd05bf2dca0110bca6e9eab818d6f664f55
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@426e79c9358c0d0d16f2b786acba7a93ffc9fc9c
 -        with:
--          ref: '12bebcd05bf2dca0110bca6e9eab818d6f664f55'
+-          ref: '426e79c9358c0d0d16f2b786acba7a93ffc9fc9c'
 -          test-filter: DependencyBumpTests
 -
 -      - name: Prepare a dependency branch for manual review
