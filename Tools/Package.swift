@@ -58,6 +58,7 @@ let package = Package(
   dependencies: [
     swiftMakefileDependency,
     .package(path: repoRootURL.path),
+    .package(url: "https://github.com/Quick/Nimble.git", exact: "14.0.0"),
   ],
   targets: [
     .executableTarget(
@@ -68,6 +69,16 @@ let package = Package(
         .product(name: "SwiftLMEmbed", package: repoRootPackageName),
       ],
       path: "lmd-dev"
-    )
+    ),
+    .testTarget(
+      name: "LMDDevTests",
+      dependencies: [
+        "lmd-dev",
+        .product(name: "SwiftMkCore", package: swiftMakefilePackageName),
+        .product(name: "AppLogger", package: repoRootPackageName),
+        .product(name: "Nimble", package: "Nimble"),
+      ],
+      path: "Tests"
+    ),
   ]
 )

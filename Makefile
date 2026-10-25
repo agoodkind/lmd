@@ -33,7 +33,7 @@ SWIFT_DEPLOY_CMD = $(LMD_DEV) install $(CONFIG)
 # vendored swift-makefile checkout (thousands of files). Lint owned sources by an
 # explicit file list that prunes any .build, never the bare Tools directory, so
 # swiftlint does not recurse the vendored tree and overflow git check-ignore.
-SWIFT_SOURCE_ROOTS := Sources Tests Tools/lmd-dev
+SWIFT_SOURCE_ROOTS := Sources Tests Tools/lmd-dev Tools/Tests
 SWIFT_OWNED_SWIFT_FILES := $(shell find $(SWIFT_SOURCE_ROOTS) -path '*/.build/*' -prune -o -name '*.swift' -print)
 SWIFT_PACKAGE_MANIFESTS := Package.swift Tools/Package.swift Tools/lmd-dev.swift
 SWIFT_MK_EXCLUDE_PATHS := ^Tools/.build/
@@ -67,7 +67,7 @@ include bootstrap.mk
 # Quality scans require fresh Swift index records instead of compiler result replays.
 lint check lint-deadcode build-check verify-quality: SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED := NO
 
-.PHONY: toolchain preflight debug test-integration install-debug \
+.PHONY: toolchain preflight debug test-integration test-tools install-debug \
         uninstall run-serve run-tui run-bench stop-serve start-serve restart-serve \
         test-daemon-up test-daemon-down test-daemon-status \
         snapshot-update log-smoke tui-qa smoke video-smoke \
@@ -98,6 +98,9 @@ debug:
 
 test-integration:
 	@$(LMD_DEV) test-integration
+
+test-tools:
+	@$(MAKE) test SWIFT_TEST_CMD='"$(SWIFT_MK_BIN)" toolchain swiftpm test --package-path Tools --filter ServiceProbeTests'
 
 install-debug:
 	@CONFIG=Debug $(LMD_DEV) install Debug

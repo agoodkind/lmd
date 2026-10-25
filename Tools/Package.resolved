@@ -1,5 +1,5 @@
 {
-  "originHash" : "43b6b86c743383153df25ca0039e7ddfa09492ecde2fa0171eed92e9758167e7",
+  "originHash" : "18869494ab88b6a8a1e5054e3009b84c5800415884094a712c5bae4ee66f3814",
   "pins" : [
     {
       "identity" : "aexml",
@@ -17,6 +17,24 @@
       "state" : {
         "revision" : "4603a8036d921ea999fadb742931546c341f4bd7",
         "version" : "1.35.0"
+      }
+    },
+    {
+      "identity" : "cwlcatchexception",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mattgallagher/CwlCatchException.git",
+      "state" : {
+        "revision" : "07b2ba21d361c223e25e3c1e924288742923f08c",
+        "version" : "2.2.1"
+      }
+    },
+    {
+      "identity" : "cwlpreconditiontesting",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mattgallagher/CwlPreconditionTesting.git",
+      "state" : {
+        "revision" : "0139c665ebb45e6a9fbdb68aabfd7c39f3fe0071",
+        "version" : "2.2.2"
       }
     },
     {
@@ -96,6 +114,15 @@
       "location" : "https://github.com/agoodkind/mlx-swift-lm.git",
       "state" : {
         "revision" : "74ebe55d0d68de121f730334412da01a539eba50"
+      }
+    },
+    {
+      "identity" : "nimble",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Quick/Nimble.git",
+      "state" : {
+        "revision" : "035b88ad6ae8035f5ce2b50b0a6d69c3b16d2120",
+        "version" : "14.0.0"
       }
     },
     {
