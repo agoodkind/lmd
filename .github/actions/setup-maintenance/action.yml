@@ -15,7 +15,7 @@ inputs:
 outputs:
   binary:
     description: Absolute path to the maintenance executable.
-    value: ${{ github.workspace }}/${{ inputs.path }}/Tools/.build/debug/lmd-maintenance
+    value: ${{ steps.binary.outputs.path }}
 
 runs:
   using: composite
@@ -48,3 +48,16 @@ runs:
       env:
         TOOL_ROOT: ${{ github.workspace }}/${{ inputs.path }}
       run: make -C "$TOOL_ROOT" maintenance-build LINT_CONCURRENCY=4 SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED=NO
+
+    - name: Resolve the maintenance executable
+      id: binary
+      shell: bash
+      env:
+        CHECKOUT_PATH: ${{ inputs.path }}
+      run: |
+        BINARY_PATH="$GITHUB_WORKSPACE/$CHECKOUT_PATH/Tools/.build/debug/lmd-maintenance"
+        if [[ ! -x "$BINARY_PATH" ]]; then
+          printf '::error::LMD maintenance executable is missing or not executable: %s\n' "$BINARY_PATH"
+          exit 1
+        fi
+        printf 'path=%s\n' "$BINARY_PATH" >> "$GITHUB_OUTPUT"
