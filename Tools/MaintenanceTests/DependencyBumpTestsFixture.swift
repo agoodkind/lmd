@@ -39,8 +39,7 @@ final class DependencyBumpTestsFixture {
     umbrella = directory.appendingPathComponent("umbrella")
     worker = directory.appendingPathComponent("worker")
     summary = directory.appendingPathComponent("summary.md")
-    binary = Bundle(for: DependencyBumpTests.self).bundleURL.deletingLastPathComponent()
-      .appendingPathComponent("lmd-maintenance")
+    binary = try MaintenanceTestExecutable.locate(for: DependencyBumpTests.self)
     environment["GIT_CONFIG_NOSYSTEM"] = "1"
     environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
     environment["GIT_CONFIG_COUNT"] = "1"

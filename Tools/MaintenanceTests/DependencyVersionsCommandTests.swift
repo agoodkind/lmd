@@ -96,8 +96,7 @@ private final class DependencyVersionsFixture {
     core = directory.appendingPathComponent("sources/mlx-swift")
     library = directory.appendingPathComponent("sources/mlx-swift-lm")
     proof = directory.appendingPathComponent("proof")
-    binary = Bundle(for: DependencyVersionsCommandTests.self).bundleURL.deletingLastPathComponent()
-      .appendingPathComponent("lmd-maintenance")
+    binary = try MaintenanceTestExecutable.locate(for: DependencyVersionsCommandTests.self)
     try repository(core, manifest: leafManifest("CoreFixture"))
     let originalCore = try commit(core)
     try repository(

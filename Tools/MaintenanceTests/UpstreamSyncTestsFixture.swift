@@ -33,8 +33,7 @@ final class UpstreamSyncTestsFixture {
     main = directory.appendingPathComponent("main")
     worker = directory.appendingPathComponent("worker")
     output = directory.appendingPathComponent("outputs.txt")
-    binary = Bundle(for: UpstreamSyncTests.self).bundleURL.deletingLastPathComponent()
-      .appendingPathComponent("lmd-maintenance")
+    binary = try MaintenanceTestExecutable.locate(for: UpstreamSyncTests.self)
     environment["GIT_CONFIG_NOSYSTEM"] = "1"
     environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
     environment["GIT_CONFIG_COUNT"] = "0"

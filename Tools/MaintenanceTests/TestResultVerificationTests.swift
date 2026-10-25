@@ -279,17 +279,7 @@ extension TestResultVerificationTests {
   }
 
   private func maintenanceBinary() throws -> URL {
-    var directory = Bundle(for: Self.self).bundleURL
-    while directory.path != "/" {
-      let candidate = directory.appendingPathComponent("lmd-maintenance")
-      if FileManager.default.isExecutableFile(atPath: candidate.path) {
-        return candidate
-      }
-      directory.deleteLastPathComponent()
-    }
-    throw CocoaError(
-      .fileNoSuchFile,
-      userInfo: [NSLocalizedDescriptionKey: "Build lmd-maintenance beside the test runner."])
+    try MaintenanceTestExecutable.locate(for: Self.self)
   }
 
   private func makePackage(duplicateClassNames: Bool = false) throws -> URL {

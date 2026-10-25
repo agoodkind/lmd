@@ -176,8 +176,7 @@ final class PatchVerificationTests: XCTestCase {
   func testPermitsOnlyReviewedGitHubAuthenticationOverrides() throws {
     let fixture = try Fixture()
     defer { fixture.remove() }
-    let binary = Bundle(for: Self.self).bundleURL.deletingLastPathComponent()
-      .appendingPathComponent("lmd-maintenance")
+    let binary = try MaintenanceTestExecutable.locate(for: Self.self)
     var environment = [
       "GIT_CONFIG_COUNT": "3",
       "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
