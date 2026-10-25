@@ -250,7 +250,7 @@ final class GemmaVideoFrameTests: XCTestCase {
 
 }
 
-// MARK: - GemmaVideoFrameTests
+// MARK: - Fixture Helpers
 
 extension GemmaVideoFrameTests {
   private func tokenizerFixtureDirectory() throws -> URL {
