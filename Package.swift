@@ -52,7 +52,7 @@ let package = Package(
     .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.9.0"),
     .package(
       url: "https://github.com/mattt/EventSource.git",
-      exact: "1.4.1",
+      exact: "1.5.1",
       traits: ["AsyncHTTPClient"]),
     .package(url: "https://github.com/huggingface/swift-transformers.git", from: "1.3.2"),
     .package(url: "https://github.com/agoodkind/macos-smc-fan.git", branch: "main"),
