@@ -90,7 +90,7 @@ jobs:
       SWIFT_MK_SWIFTPM_CACHE_ARGS: '--build-system native --jobs 4 -Xswiftc -explicit-module-build'
     steps:
       - name: Checkout exact LMD source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: agoodkind/lmd
           ref: ${{ inputs.lmd_ref }}
@@ -98,7 +98,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout fixed validation controls
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: agoodkind/lmd
           ref: 2812aa0d79c00cda8185e11182e98ddea59eb6be
@@ -106,7 +106,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout exact core source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: agoodkind/mlx-swift
           ref: ${{ inputs.core_ref }}
@@ -116,7 +116,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout exact library base
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: agoodkind/mlx-swift-lm
           ref: ${{ inputs.library_ref }}
@@ -126,7 +126,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout exact SwiftLM source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: agoodkind/SwiftLM
           ref: ${{ inputs.swiftlm_ref }}
