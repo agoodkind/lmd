@@ -135,7 +135,7 @@ jobs:
 
       - name: Upload the patch reconstruction report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lmd-patches-${{ inputs.lmd_ref || github.event.pull_request.head.sha || github.sha }}-${{ inputs.core_ref || steps.catalog.outputs.core_ref }}-${{ inputs.library_ref || steps.catalog.outputs.library_ref }}-${{ inputs.swiftlm_ref || steps.catalog.outputs.swiftlm_ref }}
           path: ${{ runner.temp }}/lmd-patches
