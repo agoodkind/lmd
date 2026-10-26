@@ -190,7 +190,7 @@ jobs:
 
       - name: Upload dependency versions, patches, tests, and source-built shaders
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lmd-versions-${{ inputs.lmd_ref }}-${{ inputs.core_ref }}-${{ inputs.library_ref }}-${{ inputs.swiftlm_ref }}
           path: ${{ runner.temp }}/lmd-proof
