@@ -67,7 +67,7 @@ jobs:
         run: apt-get install --yes --no-install-recommends make curl
 
       - name: Checkout the exact patch catalog
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: agoodkind/lmd
           ref: ${{ inputs.lmd_ref || github.event.pull_request.head.sha || github.sha }}
@@ -75,7 +75,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout fixed validation commands
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: agoodkind/lmd
           ref: 2812aa0d79c00cda8185e11182e98ddea59eb6be
@@ -93,7 +93,7 @@ jobs:
         run: validation-tools/Tools/.build/debug/lmd-maintenance read-patch-versions patches/manifest.json
 
       - name: Checkout exact core history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: agoodkind/mlx-swift
           ref: ${{ inputs.core_ref || steps.catalog.outputs.core_ref }}
@@ -102,7 +102,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout exact library history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: agoodkind/mlx-swift-lm
           ref: ${{ inputs.library_ref || steps.catalog.outputs.library_ref }}
@@ -111,7 +111,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout exact SwiftLM history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: agoodkind/SwiftLM
           ref: ${{ inputs.swiftlm_ref || steps.catalog.outputs.swiftlm_ref }}
