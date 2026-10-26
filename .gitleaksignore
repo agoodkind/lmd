@@ -1,0 +1,45 @@
+# Reviewed false positives in the unchanged patch catalog.
+# Generic matches are a public performance-table header and a checkpoint module mapping.
+# Sourcegraph matches are Git commit IDs, binary index headers, and numeric constants.
+patches/SwiftLM/0001-preserve-fork-integration.patch:generic-api-key:69
+patches/mlx-swift-lm/0001-preserve-fork-integration.patch:generic-api-key:11558
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:408
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:413
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:429
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:430
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:687
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:692
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:720
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:721
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:65233
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:65240
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:65914
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:67152
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:101903
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:101946
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:102339
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:102382
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:102779
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:103073
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:103457
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:127714
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:142070
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:143308
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:144095
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:146679
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:151969
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:156954
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:335846
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:360394
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:403873
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:404167
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:404551
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:428808
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:443164
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:444402
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:445189
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:447773
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:453063
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:458048
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:480147
+patches/mlx-swift/0001-preserve-fork-integration.patch:sourcegraph-access-token:500770

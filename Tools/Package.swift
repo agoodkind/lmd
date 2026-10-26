@@ -47,19 +47,38 @@ let repoRootURL = URL(fileURLWithPath: #filePath)
   .deletingLastPathComponent()
 let repoRootPackageName = repoRootURL.lastPathComponent
 
-let package = Package(
-  name: "lmd-dev",
-  platforms: [
-    .macOS(.v26)
-  ],
-  products: [
-    .executable(name: "lmd-dev", targets: ["lmd-dev"])
-  ],
-  dependencies: [
-    swiftMakefileDependency,
-    .package(path: repoRootURL.path),
-  ],
-  targets: [
+var products: [Product] = [
+  .executable(name: "lmd-maintenance", targets: ["lmd-maintenance"])
+]
+var dependencies: [Package.Dependency] = [
+  swiftMakefileDependency,
+  .package(url: "https://github.com/Quick/Nimble.git", exact: "14.0.0"),
+  .package(url: "https://github.com/apple/swift-crypto.git", exact: "4.5.0"),
+]
+var targets: [Target] = [
+  .executableTarget(
+    name: "lmd-maintenance",
+    dependencies: [
+      .product(name: "SwiftMkCore", package: swiftMakefilePackageName),
+      .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+    ],
+    path: "lmd-maintenance"
+  ),
+  .testTarget(
+    name: "LMDMaintenanceTests",
+    dependencies: [
+      "lmd-maintenance",
+      .product(name: "SwiftMkCore", package: swiftMakefilePackageName),
+      .product(name: "Nimble", package: "Nimble"),
+    ],
+    path: "MaintenanceTests"
+  ),
+]
+
+#if os(macOS)
+  products.append(.executable(name: "lmd-dev", targets: ["lmd-dev"]))
+  dependencies.append(.package(path: repoRootURL.path))
+  targets.append(contentsOf: [
     .executableTarget(
       name: "lmd-dev",
       dependencies: [
@@ -68,6 +87,24 @@ let package = Package(
         .product(name: "SwiftLMEmbed", package: repoRootPackageName),
       ],
       path: "lmd-dev"
-    )
-  ]
+    ),
+    .testTarget(
+      name: "LMDDevTests",
+      dependencies: [
+        "lmd-dev",
+        .product(name: "SwiftMkCore", package: swiftMakefilePackageName),
+        .product(name: "AppLogger", package: repoRootPackageName),
+        .product(name: "Nimble", package: "Nimble"),
+      ],
+      path: "Tests"
+    ),
+  ])
+#endif
+
+let package = Package(
+  name: "lmd-dev",
+  platforms: [.macOS(.v26)],
+  products: products,
+  dependencies: dependencies,
+  targets: targets
 )

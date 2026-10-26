@@ -1,0 +1,198 @@
+name: LMD Integration
+
+on:
+  workflow_call:
+    inputs:
+      lmd_ref:
+        description: Exact LMD source commit
+        type: string
+        required: true
+      core_ref:
+        description: Exact mlx-swift source commit
+        type: string
+        required: true
+      library_ref:
+        description: Exact mlx-swift-lm base commit
+        type: string
+        required: true
+      swiftlm_ref:
+        description: Exact SwiftLM source commit
+        type: string
+        required: true
+      core_profile:
+        description: Explicit catalog profile for a previously tested core commit
+        type: string
+        default: ''
+      library_profile:
+        description: Explicit catalog profile for a previously tested library commit
+        type: string
+        default: ''
+      swiftlm_profile:
+        description: Explicit catalog profile for a previously tested SwiftLM commit
+        type: string
+        default: ''
+    secrets:
+      LOCAL_POOL_CAPACITY_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: lmd
+
+jobs:
+  portable:
+    uses: ./.github/workflows/patches.yml
+    with:
+      lmd_ref: ${{ inputs.lmd_ref }}
+      core_ref: ${{ inputs.core_ref }}
+      library_ref: ${{ inputs.library_ref }}
+      swiftlm_ref: ${{ inputs.swiftlm_ref }}
+      core_profile: ${{ inputs.core_profile }}
+      library_profile: ${{ inputs.library_profile }}
+      swiftlm_profile: ${{ inputs.swiftlm_profile }}
+
+  select_macos_runner:
+    name: Select macOS runner
+    needs: portable
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    outputs:
+      label: ${{ steps.runner.outputs.label }}
+    steps:
+      - name: Use the shared macOS runner selector
+        id: runner
+        uses: agoodkind/swift-makefile/.github/actions/plan-runner@main
+        with:
+          runner: macos-26
+          capacity-token: ${{ secrets.LOCAL_POOL_CAPACITY_TOKEN }}
+
+  validate:
+    name: LMD Integration
+    needs: select_macos_runner
+    runs-on: ${{ needs.select_macos_runner.outputs.label }}
+    timeout-minutes: 120
+    env:
+      LMD_REF: ${{ inputs.lmd_ref }}
+      CORE_REF: ${{ inputs.core_ref }}
+      LIBRARY_REF: ${{ inputs.library_ref }}
+      SWIFTLM_REF: ${{ inputs.swiftlm_ref }}
+      CORE_PROFILE: ${{ inputs.core_profile }}
+      LIBRARY_PROFILE: ${{ inputs.library_profile }}
+      SWIFTLM_PROFILE: ${{ inputs.swiftlm_profile }}
+      GH_TOKEN: ${{ github.token }}
+      HOMEBREW_NO_REQUIRE_TAP_TRUST: '1'
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+      SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED: 'NO'
+      SWIFT_MK_SWIFTPM_CACHE_ARGS: '--build-system native --jobs 4 -Xswiftc -explicit-module-build'
+    steps:
+      - name: Checkout exact LMD source
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/lmd
+          ref: ${{ inputs.lmd_ref }}
+          path: lmd
+          persist-credentials: false
+
+      - name: Checkout fixed validation controls
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/lmd
+          ref: 2812aa0d79c00cda8185e11182e98ddea59eb6be
+          path: lmd/validation-tools
+          persist-credentials: false
+
+      - name: Checkout exact core source
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/mlx-swift
+          ref: ${{ inputs.core_ref }}
+          path: lmd/dependency-sources/mlx-swift
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Checkout exact library base
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/mlx-swift-lm
+          ref: ${{ inputs.library_ref }}
+          path: lmd/dependency-sources/mlx-swift-lm
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Checkout exact SwiftLM source
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/SwiftLM
+          ref: ${{ inputs.swiftlm_ref }}
+          path: lmd/SwiftLM
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install build prerequisites
+        run: brew install ccache cmake
+
+      - name: Set up the canonical Swift build tools
+        uses: agoodkind/swift-makefile/.github/actions/setup-build-env@main
+        with:
+          xcode-version: '26.5'
+          github-token: ${{ github.token }}
+          install-tuist: 'true'
+          install-xcodegen: 'true'
+          cache-profile: 'off'
+          gate: build
+
+      - name: Build the fixed Swift verification commands
+        run: make -C validation-tools maintenance-build LINT_CONCURRENCY=4
+
+      - name: Align Xcode and the runtime CPU compiler
+        run: validation-tools/Tools/.build/debug/lmd-maintenance prepare-runner "$DEVELOPER_DIR"
+
+      - name: Prepare and verify dependency versions
+        run: |
+          validation-tools/Tools/.build/debug/lmd-maintenance prepare-versions \
+            "$PWD" "$PWD/dependency-sources/mlx-swift" "$PWD/dependency-sources/mlx-swift-lm" "$RUNNER_TEMP/lmd-proof"
+
+      - name: Build canonical Release products
+        run: |
+          validation-tools/Tools/.build/debug/lmd-maintenance record --log "$RUNNER_TEMP/lmd-proof/build.log" \
+            make build CONFIG=Release LINT_CONCURRENCY=4 SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED=NO \
+            SWIFT_MK_SWIFTPM_CACHE_ARGS='--build-system native --jobs 4 -Xswiftc -explicit-module-build'
+
+      - name: Verify Release source and shader artifacts
+        run: |
+          validation-tools/Tools/.build/debug/lmd-maintenance verify-artifacts \
+            "$PWD" "$PWD/dependency-sources/mlx-swift" "$PWD/dependency-sources/mlx-swift-lm" "$RUNNER_TEMP/lmd-proof" Release
+          Products/Build/Release/lmd --help
+          Products/Build/Release/swiftlm/SwiftLM --help
+
+      - name: Run real Gemma video regressions without pretrained models
+        env:
+          LMD_TEST_FILTER: GemmaVideoFrameTests
+        run: |
+          validation-tools/Tools/.build/debug/lmd-maintenance record --log "$RUNNER_TEMP/lmd-proof/tests.log" \
+            make test LINT_CONCURRENCY=4 SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED=NO \
+            SWIFT_MK_SWIFTPM_CACHE_ARGS='--build-system native --jobs 4 -Xswiftc -explicit-module-build'
+
+      - name: Verify completed tests and Debug shader artifacts
+        run: |
+          validation-tools/Tools/.build/debug/lmd-maintenance record --log "$RUNNER_TEMP/lmd-proof/discovery.txt" \
+            make list-tests
+          validation-tools/Tools/.build/debug/lmd-maintenance verify-test-results swiftpm \
+            "$RUNNER_TEMP/lmd-proof/tests.log" "$RUNNER_TEMP/lmd-proof/discovery.txt" GemmaVideoFrameTests
+          validation-tools/Tools/.build/debug/lmd-maintenance verify-artifacts \
+            "$PWD" "$PWD/dependency-sources/mlx-swift" "$PWD/dependency-sources/mlx-swift-lm" "$RUNNER_TEMP/lmd-proof" Debug
+
+      - name: Upload dependency versions, patches, tests, and source-built shaders
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lmd-versions-${{ inputs.lmd_ref }}-${{ inputs.core_ref }}-${{ inputs.library_ref }}-${{ inputs.swiftlm_ref }}
+          path: ${{ runner.temp }}/lmd-proof
+          if-no-files-found: error
+          retention-days: 7

@@ -82,7 +82,7 @@ final class NVEmbeddingBF16BisectTests: XCTestCase {
       from: configData
     )
     let model = NVMistralBiDirectionalModel(configuration)
-    try loadWeights(modelDirectory: modelDirectory, model: model)
+    try await loadWeights(modelDirectory: modelDirectory, model: model)
     let tokenizer = try await #huggingFaceTokenizerLoader().load(from: modelDirectory)
 
     func encodedRepeats(_ repeats: Int) -> [Int] {
@@ -239,7 +239,7 @@ final class NVEmbeddingBF16BisectTests: XCTestCase {
       from: configData
     )
     let model = NVMistralBiDirectionalModel(configuration)
-    try loadWeights(modelDirectory: modelDirectory, model: model)
+    try await loadWeights(modelDirectory: modelDirectory, model: model)
     let tokenizer = try await #huggingFaceTokenizerLoader().load(from: modelDirectory)
 
     func encodedRepeats(_ repeats: Int) -> [Int] {

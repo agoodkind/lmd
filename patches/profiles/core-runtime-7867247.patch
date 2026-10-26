@@ -1,0 +1,1759 @@
+diff --git a/.github/scripts/upstream-sync.mjs b/.github/scripts/upstream-sync.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..72dd2ec6968b144233e6fed29e088320d6cc02bc
+--- /dev/null
++++ b/.github/scripts/upstream-sync.mjs
+@@ -0,0 +1,118 @@
++#!/usr/bin/env node
++
++import { execFileSync } from 'node:child_process';
++import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
++
++const candidateBranch = 'sync/upstream-latest';
++const stateFile = '.github/upstream-sync-state';
++
++function command(executable, arguments_) {
++  try {
++    return execFileSync(executable, arguments_, {
++      encoding: 'utf8',
++      stdio: ['ignore', 'pipe', 'inherit'],
++    }).trim();
++  } catch (error) {
++    if (error.stdout) process.stderr.write(error.stdout);
++    throw error;
++  }
++}
++
++function git(...arguments_) {
++  return command('git', arguments_);
++}
++
++function requiredEnvironment(name) {
++  const value = process.env[name];
++  if (!value) {
++    throw new Error(`Set ${name} before running upstream synchronization.`);
++  }
++  return value;
++}
++
++function readState() {
++  try {
++    return readFileSync(stateFile, 'utf8').trim();
++  } catch (error) {
++    if (error.code === 'ENOENT') {
++      return null;
++    }
++    throw error;
++  }
++}
++
++function output(name, value) {
++  console.log(`${name}=${value}`);
++  if (process.env.GITHUB_OUTPUT) {
++    appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
++  }
++}
++
++function sync() {
++  const upstreamURL = requiredEnvironment('SYNC_UPSTREAM_URL');
++  if (git('status', '--porcelain')) {
++    throw new Error('Commit or remove working tree changes before synchronizing.');
++  }
++
++  git('fetch', '--no-tags', 'origin');
++  const candidateRef = `refs/remotes/origin/${candidateBranch}`;
++  const previousCandidate = git('for-each-ref', '--format=%(objectname)', candidateRef);
++  git('fetch', '--no-tags', upstreamURL, 'main');
++  const upstreamSHA = git('rev-parse', 'FETCH_HEAD');
++  git('switch', '--detach', previousCandidate || 'origin/main');
++  git('merge', '--no-edit', '-m', 'Merge main into upstream candidate', 'origin/main');
++
++  if (readState() !== upstreamSHA) {
++    git('merge', '--no-edit', '--allow-unrelated-histories',
++      '-m', 'Merge upstream main into sync candidate', upstreamSHA);
++    mkdirSync('.github', { recursive: true });
++    writeFileSync(stateFile, `${upstreamSHA}\n`);
++    git('add', stateFile);
++    git('commit', '-m', `Record upstream main at ${upstreamSHA}`);
++  }
++
++  const headSHA = git('rev-parse', 'HEAD');
++  const hasChanges = git('rev-list', '--count', 'origin/main..HEAD') !== '0';
++  if (hasChanges && headSHA !== previousCandidate) {
++    git('push', 'origin', `HEAD:refs/heads/${candidateBranch}`);
++  }
++  output('has_changes', hasChanges);
++  output('head_sha', headSHA);
++  output('upstream_sha', upstreamSHA);
++}
++
++function updatePullRequest() {
++  requiredEnvironment('GH_TOKEN');
++  const repository = requiredEnvironment('GITHUB_REPOSITORY');
++  const pullRequests = JSON.parse(command('gh', [
++    'pr', 'list', '--repo', repository, '--base', 'main', '--head', candidateBranch,
++    '--state', 'open', '--json', 'number',
++  ]));
++  if (pullRequests.length > 1) {
++    throw new Error(`Resolve duplicate open pull requests for ${candidateBranch}.`);
++  }
++  const title = 'Sync Apple mlx-swift updates';
++  const body = `Merge Apple mlx-swift main at ${readFileSync(stateFile, 'utf8').trim()}.\n\n`
++    + 'The candidate preserves existing repair commits and merges current main before upstream. '
++    + 'Conflicts stop synchronization. Review the diff and require successful build and integration checks.';
++  if (pullRequests.length === 1) {
++    command('gh', ['pr', 'edit', String(pullRequests[0].number), '--repo', repository,
++      '--title', title, '--body', body]);
++  } else {
++    command('gh', ['pr', 'create', '--repo', repository, '--base', 'main',
++      '--head', candidateBranch, '--title', title, '--body', body]);
++  }
++}
++
++try {
++  if (process.argv[2] === 'sync') {
++    sync();
++  } else if (process.argv[2] === 'pr') {
++    updatePullRequest();
++  } else {
++    throw new Error('Run upstream-sync.mjs with sync or pr.');
++  }
++} catch (error) {
++  console.error(`Upstream synchronization failed: ${error.message}`);
++  process.exitCode = 1;
++}
+diff --git a/.github/scripts/upstream-sync.test.mjs b/.github/scripts/upstream-sync.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..2d13a800b535673832b54a5510e765fe4fa007ec
+--- /dev/null
++++ b/.github/scripts/upstream-sync.test.mjs
+@@ -0,0 +1,110 @@
++#!/usr/bin/env node
++
++import assert from 'node:assert/strict';
++import { execFileSync, spawnSync } from 'node:child_process';
++import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { fileURLToPath } from 'node:url';
++import test from 'node:test';
++
++const helper = fileURLToPath(new URL('./upstream-sync.mjs', import.meta.url));
++const branch = 'sync/upstream-latest';
++const state = '.github/upstream-sync-state';
++
++function git(directory, ...arguments_) {
++  return execFileSync('git', ['-C', directory, ...arguments_], {
++    encoding: 'utf8',
++    stdio: ['ignore', 'pipe', 'pipe'],
++    env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
++  }).trim();
++}
++
++function initialize(directory, bare = false) {
++  mkdirSync(directory);
++  const arguments_ = ['init', '--initial-branch=main'];
++  if (bare) arguments_.push('--bare');
++  git(directory, ...arguments_);
++  if (!bare) {
++    git(directory, 'config', 'user.name', 'Sync Test');
++    git(directory, 'config', 'user.email', 'sync-test@example.invalid');
++  }
++}
++
++function commit(directory, filename, contents) {
++  writeFileSync(join(directory, filename), contents);
++  git(directory, 'add', filename);
++  git(directory, 'commit', '-m', `Update ${filename}`);
++  return git(directory, 'rev-parse', 'HEAD');
++}
++
++test('synchronization preserves repairs and rejects conflicts before publishing', () => {
++  const root = mkdtempSync(join(tmpdir(), 'upstream-sync-'));
++  const origin = join(root, 'origin.git');
++  const upstream = join(root, 'upstream');
++  const main = join(root, 'main');
++  const worker = join(root, 'worker');
++  initialize(origin, true);
++  initialize(upstream);
++  initialize(main);
++  mkdirSync(join(main, '.github'));
++  commit(main, 'fork.txt', 'fork\n');
++  commit(main, 'shared.txt', 'original\n');
++  git(main, 'remote', 'add', 'origin', origin);
++  git(main, 'push', 'origin', 'main');
++  commit(upstream, 'upstream.txt', 'upstream\n');
++  const firstUpstream = commit(upstream, 'shared.txt', 'original\n');
++  git(root, 'clone', origin, worker);
++  git(worker, 'config', 'user.name', 'Sync Test');
++  git(worker, 'config', 'user.email', 'sync-test@example.invalid');
++
++  const run = () => spawnSync(process.execPath, [helper, 'sync'], {
++    cwd: worker,
++    encoding: 'utf8',
++    env: { ...process.env, SYNC_UPSTREAM_URL: upstream, GITHUB_OUTPUT: '',
++      GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
++  });
++  const succeed = () => {
++    const result = run();
++    assert.equal(result.status, 0, result.stderr);
++    return result;
++  };
++  const remoteHead = () => git(origin, 'rev-parse', `refs/heads/${branch}`);
++
++  succeed();
++  assert.equal(readFileSync(join(worker, state), 'utf8').trim(), firstUpstream);
++  assert.equal(git(worker, 'show', 'HEAD:fork.txt'), 'fork');
++  assert.equal(git(worker, 'show', 'HEAD:upstream.txt'), 'upstream');
++  assert.equal(remoteHead(), git(worker, 'rev-parse', 'HEAD'));
++  assert.doesNotMatch(git(worker, 'log', '--format=%B', 'origin/main..HEAD'), /\[skip ci\]/);
++
++  const repair = commit(worker, 'manual-repair.txt', 'preserve this repair\n');
++  git(worker, 'push', 'origin', `HEAD:refs/heads/${branch}`);
++  const mainUpdate = commit(main, 'main-update.txt', 'current main\n');
++  git(main, 'push', 'origin', 'main');
++  const nextUpstream = commit(upstream, 'upstream-update.txt', 'new upstream\n');
++  succeed();
++  git(worker, 'merge-base', '--is-ancestor', repair, 'HEAD');
++  git(worker, 'merge-base', '--is-ancestor', mainUpdate, 'HEAD');
++  git(worker, 'merge-base', '--is-ancestor', nextUpstream, 'HEAD');
++  assert.equal(git(worker, 'rev-parse', 'HEAD~1^2'), nextUpstream);
++  assert.equal(git(worker, 'rev-parse', 'HEAD~2^2'), mainUpdate);
++  assert.equal(git(worker, 'show', 'HEAD:manual-repair.txt'), 'preserve this repair');
++  assert.equal(readFileSync(join(worker, state), 'utf8').trim(), nextUpstream);
++
++  const unchangedHead = remoteHead();
++  succeed();
++  assert.equal(remoteHead(), unchangedHead);
++  assert.equal(git(worker, 'rev-parse', 'HEAD'), unchangedHead);
++
++  const conflictingRepair = commit(worker, 'shared.txt', 'fork repair\n');
++  git(worker, 'push', 'origin', `HEAD:refs/heads/${branch}`);
++  commit(upstream, 'shared.txt', 'conflicting upstream\n');
++  const failed = run();
++  assert.notEqual(failed.status, 0);
++  assert.match(failed.stderr, /CONFLICT/);
++  assert.match(failed.stderr, /Upstream synchronization failed/);
++  assert.equal(remoteHead(), conflictingRepair);
++  assert.equal(readFileSync(join(worker, state), 'utf8').trim(), nextUpstream);
++  assert.notEqual(git(worker, 'ls-files', '--unmerged'), '');
++});
+diff --git a/.github/workflows/auto_release.yml b/.github/workflows/auto_release.yml
+index 502559195165b3557d0aee13de76caa6dcf2fb7b..a80ecb288056798a8e5a9f0cbeb658691282e9b9 100644
+--- a/.github/workflows/auto_release.yml
++++ b/.github/workflows/auto_release.yml
+@@ -11,7 +11,6 @@ permissions:
+ jobs:
+   tag-and-release:
+     name: Create SemVer Tag and Release
+-    if: github.repository == 'agoodkind/mlx-swift'
+     runs-on: ubuntu-latest
+     steps:
+       - name: Checkout Code
+@@ -25,11 +24,11 @@ jobs:
+           COMMIT_COUNT=$(git rev-list --count HEAD)
+           TAG_NAME="b${COMMIT_COUNT}"
+           echo "Calculated tag: $TAG_NAME"
+-          echo "new_tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
++          echo "new_tag=$TAG_NAME" >> $GITHUB_OUTPUT
+           
+           # Create and push the tag manually
+-          git tag "$TAG_NAME"
+-          git push origin "$TAG_NAME"
++          git tag $TAG_NAME
++          git push origin $TAG_NAME
+ 
+       - name: Create GitHub Release
+         uses: softprops/action-gh-release@v2
+@@ -40,15 +39,15 @@ jobs:
+           generate_release_notes: true
+ 
+       - name: Trigger SwiftLM Dependency Bump
+-        uses: actions/github-script@v9
++        uses: actions/github-script@v6
+         env:
+-          PR_TOKEN: ${{ secrets.SWIFTLM_PR_TOKEN }}
++          PR_TOKEN: ${{ secrets.SWIFTLM_PR_TOKEN || secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+         with:
+           github-token: ${{ env.PR_TOKEN }}
+           script: |
+             try {
+               await github.rest.repos.createDispatchEvent({
+-                owner: 'agoodkind',
++                owner: 'SharpAI',
+                 repo: 'SwiftLM',
+                 event_type: 'dependency_bump',
+                 client_payload: {
+@@ -56,8 +55,7 @@ jobs:
+                   new_tag: '${{ steps.tag_version.outputs.new_tag }}'
+                 }
+               });
+-              console.log("Dispatched dependency_bump to agoodkind/SwiftLM.");
++              console.log("Successfully dispatched dependency_bump event to SharpAI/SwiftLM");
+             } catch (error) {
+-              console.error("Cannot dispatch dependency_bump. Check SWIFTLM_PR_TOKEN access to agoodkind/SwiftLM.", error);
+-              throw error;
++              console.log("Dispatch failed. Ensure SWIFTLM_PR_TOKEN is set in repository secrets with repo scoping.", error);
+             }
+diff --git a/.github/workflows/downstream_integration.yml b/.github/workflows/downstream_integration.yml
+index 5ffc53a5aa577aac7ac3d8fe57390212846acb06..6089e827829be93b323eea6066fd024b3f513608 100644
+--- a/.github/workflows/downstream_integration.yml
++++ b/.github/workflows/downstream_integration.yml
+@@ -9,12 +9,12 @@ on:
+         description: Exact SwiftLM commit to validate
+         type: string
+         required: true
+-        default: 4cc594d1cc6f88116f1509cee5ba5b6a1471f0be
++        default: 53ae5b0da17f1b4484de4c01370e0ceb5a4fe079
+       mlx_swift_lm_ref:
+         description: Exact mlx-swift-lm commit to validate
+         type: string
+         required: true
+-        default: 60054f77f91bc3e77c44950054dd6a9b53359352
++        default: 74ebe55d0d68de121f730334412da01a539eba50
+ 
+ permissions:
+   contents: read
+@@ -24,89 +24,19 @@ concurrency:
+   cancel-in-progress: true
+ 
+ jobs:
+-  select_macos_runner:
+-    name: Select macOS runner
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 40
+-    outputs:
+-      label: ${{ steps.runner.outputs.label }}
+-    steps:
+-      - name: Use the shared macOS runner selector
+-        id: runner
+-        uses: agoodkind/swift-makefile/.github/actions/plan-runner@main
+-        with:
+-          runner: macos-26
+-          capacity-token: ${{ secrets.LOCAL_POOL_CAPACITY_TOKEN }}
+-
+-  lmd_consumer:
+-    name: LMD consumer
+-    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@3552b79fe58d9dab2a1ff307af55a0de78be2145
+-    with:
+-      lmd_ref: 3552b79fe58d9dab2a1ff307af55a0de78be2145
+-      core_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+-      library_ref: ${{ inputs.mlx_swift_lm_ref || '60054f77f91bc3e77c44950054dd6a9b53359352' }}
+-      swiftlm_ref: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}
+-      library_profile: ${{ (inputs.mlx_swift_lm_ref || '60054f77f91bc3e77c44950054dd6a9b53359352') == '60054f77f91bc3e77c44950054dd6a9b53359352' && 'library-runtime-60054f7' || '' }}
+-      swiftlm_profile: ${{ (inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be') == '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' && 'swiftlm-runtime-4cc594d' || (inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be') == 'dbf4eee36701d844996038b182a272f40a41f414' && 'swiftlm-http-diagnostics-dbf4eee' || '' }}
+-    secrets:
+-      LOCAL_POOL_CAPACITY_TOKEN: ${{ secrets.LOCAL_POOL_CAPACITY_TOKEN }}
+-
+-  lmd_integration:
+-    name: LMD Integration
+-    needs: lmd_consumer
+-    if: always()
+-    runs-on: ubuntu-latest
+-    steps:
+-      - name: Require successful LMD validation
+-        env:
+-          LMD_RESULT: ${{ needs.lmd_consumer.result }}
+-        run: |
+-          if [[ "$LMD_RESULT" != 'success' ]]; then
+-            echo "::error::LMD validation did not succeed. Result: $LMD_RESULT."
+-            exit 1
+-          fi
+-
+   test-swiftlm-umbrella:
+     name: Test with SwiftLM (Umbrella Repo)
+-    needs: select_macos_runner
+-    if: ${{ !cancelled() }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    runs-on: macos-26
+     timeout-minutes: 40
+     env:
+       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+-      CORE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+-      SWIFTLM_REF: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}
+-      MLX_SWIFT_LM_REF: ${{ inputs.mlx_swift_lm_ref || '60054f77f91bc3e77c44950054dd6a9b53359352' }}
+-      SWIFTLM_TEST_FILTER: 'SwiftLMTests\.(PromptCacheTests|MultimodalTokenExtractionTests|ChatRequestParsingTests|ThinkingTagStripTests|OwnFeatureHTTPTests)'
++      SWIFTLM_REF: ${{ inputs.swiftlm_ref || '53ae5b0da17f1b4484de4c01370e0ceb5a4fe079' }}
++      MLX_SWIFT_LM_REF: ${{ inputs.mlx_swift_lm_ref || '74ebe55d0d68de121f730334412da01a539eba50' }}
++      SWIFTLM_TEST_FILTER: 'SwiftLMTests\.(PromptCacheTests|MultimodalTokenExtractionTests|ChatRequestParsingTests|ThinkingTagStripTests)'
+     steps:
+-      - name: Require successful macOS prerequisites
+-        shell: bash
+-        working-directory: ${{ github.workspace }}
+-        env:
+-          SELECTOR_RESULT: ${{ needs.select_macos_runner.result }}
+-          SELECTED_RUNNER: ${{ needs.select_macos_runner.outputs.label }}
+-        run: |
+-          if [[ "$SELECTOR_RESULT" != 'success' || -z "$SELECTED_RUNNER" ]]; then
+-            echo "::error::The macOS runner selector did not succeed or did not return a runner label."
+-            exit 1
+-          fi
+-
+-      - name: Align Xcode and the runtime CPU compiler
+-        run: |
+-          sudo xcode-select --switch "$DEVELOPER_DIR"
+-          test "$(env -u DEVELOPER_DIR xcode-select --print-path)" = "$DEVELOPER_DIR"
+-          xcrun --kill-cache
+-          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+-          echo "SDKROOT=$SDKROOT" >> "$GITHUB_ENV"
+-          xcodebuild -version
+-          xcrun --sdk macosx --show-sdk-path
+-          xcrun --sdk macosx --find clang++
+-          g++ --version
+-
+       - name: Checkout mlx-swift (this repository)
+         uses: actions/checkout@v4
+         with:
+-          ref: ${{ env.CORE_REF }}
+           path: mlx-swift-pr
+           submodules: recursive
+           persist-credentials: false
+@@ -140,14 +70,6 @@ jobs:
+           git -C SwiftLM rev-parse HEAD
+           git -C SwiftLM/mlx-swift rev-parse HEAD
+           git -C SwiftLM/mlx-swift-lm rev-parse HEAD
+-          printf 'swiftlm=%s\nlibrary=%s\ncore=%s\n' "$SWIFTLM_REF" "$MLX_SWIFT_LM_REF" \
+-            "$(git -C mlx-swift-pr rev-parse HEAD)" > "$RUNNER_TEMP/swiftlm-sources.txt"
+-
+-      - name: Set up Swift result verification
+-        id: maintenance
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
+-        with:
+-          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
+ 
+       - name: Build SwiftLM and tests in Debug
+         working-directory: SwiftLM
+@@ -188,46 +110,15 @@ jobs:
+           if [[ -d "$RUNNER_TEMP/mlx-metallib/nax" ]]; then
+             cp -R "$RUNNER_TEMP/mlx-metallib/nax" "$BIN_DIR/nax"
+           fi
+-          echo "SWIFTLM_BIN_DIR=$BIN_DIR" >> "$GITHUB_ENV"
+ 
+       - name: Run tests without pretrained models
+         working-directory: SwiftLM
+         run: |
+-          set -o pipefail
+-          status=0
+-          swift test --build-system native --jobs 4 --disable-swift-testing list --skip-build \
+-            > "$RUNNER_TEMP/swiftlm-tests.txt" 2> "$RUNNER_TEMP/swiftlm-discovery-errors.txt" || status=$?
+-          cat "$RUNNER_TEMP/swiftlm-discovery-errors.txt"
+-          cat "$RUNNER_TEMP/swiftlm-tests.txt"
+-          if [[ "$status" -ne 0 ]]; then
+-            echo "::error::SwiftLM test discovery failed with exit status $status."
+-            exit "$status"
+-          fi
+-          for test_class in PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests OwnFeatureHTTPTests; do
++          swift test --build-system native --jobs 4 list --skip-build > "$RUNNER_TEMP/swiftlm-tests.txt"
++          for test_class in PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests; do
+             if ! grep -F "SwiftLMTests.$test_class/" "$RUNNER_TEMP/swiftlm-tests.txt"; then
+               echo "::error::The selected SwiftLM commit does not provide $test_class."
+               exit 1
+             fi
+           done
+-          status=0
+-          swift test --build-system native --jobs 4 --disable-swift-testing --skip-build \
+-            --filter "$SWIFTLM_TEST_FILTER" 2>&1 | tee "$RUNNER_TEMP/swiftlm-runtime.log" || status=$?
+-          if [[ "$status" -ne 0 ]]; then
+-            echo "::error::SwiftLM tests failed with exit status $status."
+-            exit "$status"
+-          fi
+-          "${{ steps.maintenance.outputs.binary }}" verify-test-results swiftpm \
+-            "$RUNNER_TEMP/swiftlm-runtime.log" "$RUNNER_TEMP/swiftlm-tests.txt" \
+-            PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests OwnFeatureHTTPTests
+-
+-      - name: Upload SwiftLM source proof and test diagnostics
+-        if: always()
+-        uses: actions/upload-artifact@v4
+-        with:
+-          name: swiftlm-debug-results
+-          path: |
+-            ${{ runner.temp }}/swiftlm-sources.txt
+-            ${{ runner.temp }}/swiftlm-tests.txt
+-            ${{ runner.temp }}/swiftlm-discovery-errors.txt
+-            ${{ runner.temp }}/swiftlm-runtime.log
+-          if-no-files-found: error
++          swift test --build-system native --jobs 4 --skip-build --filter "$SWIFTLM_TEST_FILTER"
+diff --git a/.github/workflows/pull_request.yml b/.github/workflows/pull_request.yml
+index 11935cffa4b6803d43712454f2e38243d331415d..ee014b11f69e0da870cfb463979dc41eaaef0175 100644
+--- a/.github/workflows/pull_request.yml
++++ b/.github/workflows/pull_request.yml
+@@ -7,95 +7,18 @@ on:
+ permissions:
+   contents: read
+ 
+-concurrency:
+-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+-  cancel-in-progress: true
+-
+ jobs:
+-  select_macos_runner:
+-    name: Select macOS runner
+-    if: github.repository == 'agoodkind/mlx-swift'
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 40
+-    outputs:
+-      label: ${{ steps.runner.outputs.label }}
+-    steps:
+-      - name: Use the shared macOS runner selector
+-        id: runner
+-        uses: agoodkind/swift-makefile/.github/actions/plan-runner@main
+-        with:
+-          runner: macos-26
+-          capacity-token: ${{ secrets.LOCAL_POOL_CAPACITY_TOKEN }}
+-
+-  encuda_process_tests:
+-    name: Encuda Process Tests (Linux)
+-    if: github.repository == 'agoodkind/mlx-swift'
+-    runs-on: ubuntu-24.04
+-    timeout-minutes: 60
+-    container:
+-      image: swift:6.3.2-noble@sha256:c4336909a71b2e69b884f4078cdf98c0cd081911632cb349ef72abc4cbed69fc
+-    defaults:
+-      run:
+-        working-directory: mlx-swift
+-    steps:
+-      - name: Install portable build dependencies
+-        working-directory: ${{ github.workspace }}
+-        run: |
+-          apt-get update
+-          apt-get install --yes --no-install-recommends make curl python3
+-
+-      - name: Checkout core candidate
+-        uses: actions/checkout@v6
+-        with:
+-          path: mlx-swift
+-          persist-credentials: false
+-
+-      - name: Set up Swift maintenance verification
+-        id: maintenance
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
+-        with:
+-          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
+-          test-filter: LMDMaintenanceTests
+-
+-      - name: Build portable subprocess tests
+-        run: |
+-          swiftc -swift-version 6 Source/Encuda/encuda-utils.swift \
+-            Tests/EncudaProcessTests/ProcessTests.swift -o "$RUNNER_TEMP/encuda-process-tests"
+-
+-      - name: Verify subprocess exit and ownership behavior
+-        run: '"$RUNNER_TEMP/encuda-process-tests"'
+-
+-      - name: Verify Linux CUDA plugin identity fixtures
+-        run: '"${{ steps.maintenance.outputs.binary }}" verify-manifest-fixtures "$GITHUB_WORKSPACE/mlx-swift"'
+-
+   fork_regression_tests:
+     name: Fork Regression Tests
+-    if: ${{ !cancelled() && (github.repository == 'agoodkind/mlx-swift') }}
+-    needs: select_macos_runner
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    if: github.repository == 'agoodkind/mlx-swift'
++    runs-on: macos-26
+     timeout-minutes: 40
+-    defaults:
+-      run:
+-        working-directory: mlx-swift
+     env:
+       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+     steps:
+-      - name: Require successful macOS prerequisites
+-        shell: bash
+-        working-directory: ${{ github.workspace }}
+-        env:
+-          SELECTOR_RESULT: ${{ needs.select_macos_runner.result }}
+-          SELECTED_RUNNER: ${{ needs.select_macos_runner.outputs.label }}
+-        run: |
+-          if [[ "$SELECTOR_RESULT" != 'success' || -z "$SELECTED_RUNNER" ]]; then
+-            echo "::error::The macOS runner selector did not succeed or did not return a runner label."
+-            exit 1
+-          fi
+-
+       - name: Checkout core candidate
+         uses: actions/checkout@v6
+         with:
+-          path: mlx-swift
+           submodules: recursive
+           persist-credentials: false
+ 
+@@ -105,23 +28,6 @@ jobs:
+           swift --version
+           xcodebuild -downloadComponent MetalToolchain
+ 
+-      - name: Set up Swift result verification
+-        id: maintenance
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
+-        with:
+-          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
+-
+-      - name: Verify subprocess exit and ownership behavior
+-        run: |
+-          swiftc -swift-version 6 Source/Encuda/encuda-utils.swift \
+-            Tests/EncudaProcessTests/ProcessTests.swift -o "$RUNNER_TEMP/encuda-process-tests"
+-          "$RUNNER_TEMP/encuda-process-tests"
+-
+-      - name: Verify CUDA manifest containment
+-        run: |
+-          python3 scripts/verify-spm-manifest.py
+-          "${{ steps.maintenance.outputs.binary }}" verify-manifest-fixtures "$GITHUB_WORKSPACE/mlx-swift"
+-
+       - name: Run focused core regressions
+         run: |
+           xcodebuild test \
+@@ -140,34 +46,12 @@ jobs:
+             -only-testing:MLXTests/LoggingTests \
+             -only-testing:MLXTests/CompileLockOrderingTests
+ 
+-      - name: Verify selected core suites completed
+-        if: always()
+-        run: |
+-          xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/core-fork-regressions.xcresult" \
+-            --compact > "$RUNNER_TEMP/core-fork-regressions.json"
+-          "${{ steps.maintenance.outputs.binary }}" verify-test-results xcode \
+-            "$RUNNER_TEMP/core-fork-regressions.json" \
+-            MLXTests/MLXArrayIndexingTests MLXTests/ForkProtectionTests MLXTests/StreamTests \
+-            MLXTests/LoggingTests MLXTests/CompileLockOrderingTests
+-
+-      - name: Build compile-lock stress diagnostic
+-        run: |
+-          xcodebuild build -scheme CompileLockRepro -configuration Debug \
+-            -destination 'platform=macOS,arch=arm64' \
+-            -derivedDataPath "$RUNNER_TEMP/mlx-core-derived" \
+-            -skipPackagePluginValidation -jobs 4
+-
+-      - name: Verify compile-lock diagnostic exit behavior
+-        run: '"${{ steps.maintenance.outputs.binary }}" verify-compile-lock-repro "$RUNNER_TEMP/mlx-core-derived/Build/Products/Debug/CompileLockRepro"'
+-
+       - name: Upload core regression results
+         if: always()
+         uses: actions/upload-artifact@v4
+         with:
+           name: core-fork-regressions
+-          path: |
+-            ${{ runner.temp }}/core-fork-regressions.xcresult
+-            ${{ runner.temp }}/core-fork-regressions.json
++          path: ${{ runner.temp }}/core-fork-regressions.xcresult
+           if-no-files-found: error
+ 
+   lint:
+diff --git a/.github/workflows/swiftlm_integration.yml b/.github/workflows/swiftlm_integration.yml
+index 5ecf92df72da99421dac87702c453c020e8c53b2..3e2c771a38e0d38c5a275755c0520dbc79df654c 100644
+--- a/.github/workflows/swiftlm_integration.yml
++++ b/.github/workflows/swiftlm_integration.yml
+@@ -10,12 +10,12 @@ on:
+         description: Exact SwiftLM commit to validate
+         type: string
+         required: true
+-        default: 4cc594d1cc6f88116f1509cee5ba5b6a1471f0be
++        default: 53ae5b0da17f1b4484de4c01370e0ceb5a4fe079
+       mlx_swift_lm_ref:
+         description: Exact mlx-swift-lm commit to validate
+         type: string
+         required: true
+-        default: 60054f77f91bc3e77c44950054dd6a9b53359352
++        default: 74ebe55d0d68de121f730334412da01a539eba50
+       run_speculative_eval:
+         description: Download both models for speculative decoding evaluation (15-minute limit)
+         type: boolean
+@@ -37,61 +37,19 @@ concurrency:
+   cancel-in-progress: true
+ 
+ jobs:
+-  select_macos_runner:
+-    name: Select macOS runner
+-    runs-on: ubuntu-latest
+-    timeout-minutes: 40
+-    outputs:
+-      label: ${{ steps.runner.outputs.label }}
+-    steps:
+-      - name: Use the shared macOS runner selector
+-        id: runner
+-        uses: agoodkind/swift-makefile/.github/actions/plan-runner@main
+-        with:
+-          runner: macos-26
+-          capacity-token: ${{ secrets.LOCAL_POOL_CAPACITY_TOKEN }}
+-
+   integration-test:
+     name: Build & Test SwiftLM
+-    needs: select_macos_runner
+-    if: ${{ !cancelled() }}
+-    runs-on: ${{ needs.select_macos_runner.outputs.label || 'ubuntu-latest' }}
++    runs-on: macos-26
+     timeout-minutes: 45
+     env:
+       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+-      CORE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+-      SWIFTLM_REF: ${{ inputs.swiftlm_ref || '4cc594d1cc6f88116f1509cee5ba5b6a1471f0be' }}
+-      MLX_SWIFT_LM_REF: ${{ inputs.mlx_swift_lm_ref || '60054f77f91bc3e77c44950054dd6a9b53359352' }}
+-      SWIFTLM_TEST_FILTER: 'SwiftLMTests\.(PromptCacheTests|MultimodalTokenExtractionTests|ChatRequestParsingTests|ThinkingTagStripTests|OwnFeatureHTTPTests)'
++      SWIFTLM_REF: ${{ inputs.swiftlm_ref || '53ae5b0da17f1b4484de4c01370e0ceb5a4fe079' }}
++      MLX_SWIFT_LM_REF: ${{ inputs.mlx_swift_lm_ref || '74ebe55d0d68de121f730334412da01a539eba50' }}
++      SWIFTLM_TEST_FILTER: 'SwiftLMTests\.(PromptCacheTests|MultimodalTokenExtractionTests|ChatRequestParsingTests|ThinkingTagStripTests)'
+     steps:
+-      - name: Require successful macOS prerequisites
+-        shell: bash
+-        working-directory: ${{ github.workspace }}
+-        env:
+-          SELECTOR_RESULT: ${{ needs.select_macos_runner.result }}
+-          SELECTED_RUNNER: ${{ needs.select_macos_runner.outputs.label }}
+-        run: |
+-          if [[ "$SELECTOR_RESULT" != 'success' || -z "$SELECTED_RUNNER" ]]; then
+-            echo "::error::The macOS runner selector did not succeed or did not return a runner label."
+-            exit 1
+-          fi
+-
+-      - name: Align Xcode and the runtime CPU compiler
+-        run: |
+-          sudo xcode-select --switch "$DEVELOPER_DIR"
+-          test "$(env -u DEVELOPER_DIR xcode-select --print-path)" = "$DEVELOPER_DIR"
+-          xcrun --kill-cache
+-          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+-          echo "SDKROOT=$SDKROOT" >> "$GITHUB_ENV"
+-          xcodebuild -version
+-          xcrun --sdk macosx --show-sdk-path
+-          xcrun --sdk macosx --find clang++
+-          g++ --version
+-
+       - name: Checkout mlx-swift (this repository)
+         uses: actions/checkout@v4
+         with:
+-          ref: ${{ env.CORE_REF }}
+           path: mlx-swift
+           submodules: recursive
+           persist-credentials: false
+@@ -125,18 +83,10 @@ jobs:
+           git -C SwiftLM rev-parse HEAD
+           git -C SwiftLM/mlx-swift rev-parse HEAD
+           git -C SwiftLM/mlx-swift-lm rev-parse HEAD
+-          printf 'swiftlm=%s\nlibrary=%s\ncore=%s\n' "$SWIFTLM_REF" "$MLX_SWIFT_LM_REF" \
+-            "$(git -C mlx-swift rev-parse HEAD)" > "$RUNNER_TEMP/swiftlm-sources.txt"
+-
+-      - name: Set up Swift result verification
+-        id: maintenance
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
+-        with:
+-          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
+ 
+       - name: Build SwiftLM and tests in Release
+         working-directory: SwiftLM
+-        run: swift build --build-system native --jobs 4 -c release --build-tests -Xswiftc -enable-testing
++        run: swift build --build-system native --jobs 4 -c release --build-tests
+ 
+       - name: Build Metal library from the selected core checkout
+         run: |
+@@ -176,47 +126,16 @@ jobs:
+           echo "SWIFTLM_BIN_DIR=$BIN_DIR" >> "$GITHUB_ENV"
+ 
+       - name: Run tests without pretrained models
+-        id: model_free_tests
+         working-directory: SwiftLM
+         run: |
+-          set -o pipefail
+-          status=0
+-          swift test --build-system native --jobs 4 -c release -Xswiftc -enable-testing --disable-swift-testing list --skip-build \
+-            > "$RUNNER_TEMP/swiftlm-tests.txt" 2> "$RUNNER_TEMP/swiftlm-discovery-errors.txt" || status=$?
+-          cat "$RUNNER_TEMP/swiftlm-discovery-errors.txt"
+-          cat "$RUNNER_TEMP/swiftlm-tests.txt"
+-          if [[ "$status" -ne 0 ]]; then
+-            echo "::error::SwiftLM test discovery failed with exit status $status."
+-            exit "$status"
+-          fi
+-          for test_class in PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests OwnFeatureHTTPTests; do
++          swift test --build-system native --jobs 4 -c release list --skip-build > "$RUNNER_TEMP/swiftlm-tests.txt"
++          for test_class in PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests; do
+             if ! grep -F "SwiftLMTests.$test_class/" "$RUNNER_TEMP/swiftlm-tests.txt"; then
+               echo "::error::The selected SwiftLM commit does not provide $test_class."
+               exit 1
+             fi
+           done
+-          status=0
+-          swift test --build-system native --jobs 4 -c release -Xswiftc -enable-testing --disable-swift-testing --skip-build \
+-            --filter "$SWIFTLM_TEST_FILTER" 2>&1 | tee "$RUNNER_TEMP/swiftlm-runtime.log" || status=$?
+-          if [[ "$status" -ne 0 ]]; then
+-            echo "::error::SwiftLM tests failed with exit status $status."
+-            exit "$status"
+-          fi
+-          "${{ steps.maintenance.outputs.binary }}" verify-test-results swiftpm \
+-            "$RUNNER_TEMP/swiftlm-runtime.log" "$RUNNER_TEMP/swiftlm-tests.txt" \
+-            PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests OwnFeatureHTTPTests
+-
+-      - name: Upload SwiftLM source proof and test diagnostics
+-        if: always()
+-        uses: actions/upload-artifact@v4
+-        with:
+-          name: swiftlm-release-results
+-          path: |
+-            ${{ runner.temp }}/swiftlm-sources.txt
+-            ${{ runner.temp }}/swiftlm-tests.txt
+-            ${{ runner.temp }}/swiftlm-discovery-errors.txt
+-            ${{ runner.temp }}/swiftlm-runtime.log
+-          if-no-files-found: error
++          swift test --build-system native --jobs 4 -c release --skip-build --filter "$SWIFTLM_TEST_FILTER"
+ 
+       - name: Run optional pretrained speculative decoding evaluation
+         if: github.event_name == 'workflow_dispatch' && inputs.run_speculative_eval
+diff --git a/.github/workflows/upstream-sync.yml b/.github/workflows/upstream-sync.yml
+index 0a01b2218c0a83fcd39f2cae583d04739279a57c..8549157f42c7c0f3d1f217106e4106b67297f8e4 100644
+--- a/.github/workflows/upstream-sync.yml
++++ b/.github/workflows/upstream-sync.yml
+@@ -7,71 +7,47 @@ on:
+     branches: [main]
+   schedule:
+     - cron: '0 4 * * *' # Every day at 4:00 AM UTC
+-  workflow_dispatch:
++  workflow_dispatch: # Enable manual triggers
+ 
+ permissions: {}
+ 
+-defaults:
+-  run:
+-    shell: bash
+-
+ jobs:
+   regression:
+-    runs-on: ubuntu-24.04
+-    container: swift:6.3.2-noble@sha256:c4336909a71b2e69b884f4078cdf98c0cd081911632cb349ef72abc4cbed69fc
+-    timeout-minutes: 60
++    runs-on: ubuntu-latest
+     permissions:
+       contents: read
+     steps:
+-      - name: Refresh Ubuntu package metadata
+-        run: apt-get update
+-
+-      - name: Install portable build prerequisites
+-        run: apt-get install --yes --no-install-recommends make curl
+-
+-      - name: Verify the fixed Swift upstream sync commands
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
++      - name: Checkout Code
++        uses: actions/checkout@v4
+         with:
+-          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
+-          test-filter: UpstreamSyncTests
++          persist-credentials: false
++
++      - name: Test upstream synchronization
++        run: node --test .github/scripts/upstream-sync.test.mjs
+ 
+   sync:
+     needs: regression
+     if: github.event_name != 'pull_request'
+-    runs-on: ubuntu-24.04
+-    container: swift:6.3.2-noble@sha256:c4336909a71b2e69b884f4078cdf98c0cd081911632cb349ef72abc4cbed69fc
+-    timeout-minutes: 60
++    runs-on: ubuntu-latest
+     concurrency:
+       group: upstream-sync
+       cancel-in-progress: false
+     permissions:
++      actions: write
+       contents: write
+       pull-requests: write
++      statuses: write
+     steps:
+-      - name: Refresh Ubuntu package metadata
+-        run: apt-get update
+-
+-      - name: Install portable build and GitHub prerequisites
+-        run: apt-get install --yes --no-install-recommends make curl gh
+-
+-      - name: Checkout the candidate repository
++      - name: Checkout Code
+         uses: actions/checkout@v4
+         with:
+-          path: candidate
+           fetch-depth: 0
+           persist-credentials: false
+ 
+-      - name: Set up the fixed Swift upstream sync commands
+-        id: maintenance
+-        uses: agoodkind/lmd/.github/actions/setup-maintenance@ec18740170edb9c5c2216a9c6fe2789c3d9926b4
+-        with:
+-          ref: '2812aa0d79c00cda8185e11182e98ddea59eb6be'
+-          test-filter: UpstreamSyncTests
+-
+       - name: Configure Git
+         run: |
+-          git -C candidate config user.name "github-actions[bot]"
+-          git -C candidate config user.email "41898282+github-actions[bot]@users.noreply.github.com"
++          git config user.name "github-actions[bot]"
++          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+ 
+       - name: Configure Git credentials
+         env:
+@@ -81,14 +57,129 @@ jobs:
+       - name: Update upstream candidate
+         id: sync_branch
+         env:
+-          MAINTENANCE_BIN: ${{ steps.maintenance.outputs.binary }}
+           GH_TOKEN: ${{ secrets.SWIFTLM_PR_TOKEN }}
+           SYNC_UPSTREAM_URL: https://github.com/ml-explore/mlx-swift.git
+-        run: '"$MAINTENANCE_BIN" sync-upstream "$GITHUB_WORKSPACE/candidate"'
++        run: node .github/scripts/upstream-sync.mjs sync
+ 
+       - name: Create or update pull request
+         if: steps.sync_branch.outputs.has_changes == 'true'
+         env:
+-          MAINTENANCE_BIN: ${{ steps.maintenance.outputs.binary }}
+           GH_TOKEN: ${{ secrets.SWIFTLM_PR_TOKEN }}
+-        run: '"$MAINTENANCE_BIN" create-sync-pull-request "$GITHUB_WORKSPACE/candidate"'
++        run: node .github/scripts/upstream-sync.mjs pr
++
++      - name: Dispatch Sync Branch Validation
++        if: steps.sync_branch.outputs.has_changes == 'true'
++        env:
++          GH_TOKEN: ${{ github.token }}
++          SYNC_HEAD_SHA: ${{ steps.sync_branch.outputs.head_sha }}
++        run: |
++          post_status() {
++            local workflow_name="$1"
++            local state="$2"
++            local description="$3"
++            local target_url="$4"
++
++            gh api \
++              --method POST \
++              "/repos/${GITHUB_REPOSITORY}/statuses/${SYNC_HEAD_SHA}" \
++              -f state="$state" \
++              -f context="sync-dispatch/${workflow_name}" \
++              -f target_url="$target_url" \
++              -f description="$description" >/dev/null
++          }
++
++          dispatch_workflow() {
++            local workflow_file="$1"
++            local workflow_name="$2"
++
++            post_status "$workflow_name" "pending" "${workflow_name} is queued" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}"
++            gh workflow run "$workflow_file" --repo "$GITHUB_REPOSITORY" --ref sync/upstream-latest
++          }
++
++          find_run_id() {
++            local workflow_file="$1"
++
++            gh api \
++              --method GET \
++              "/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs" \
++              -f branch=sync/upstream-latest \
++              -f event=workflow_dispatch \
++              -f per_page=20 \
++              --jq 'first(.workflow_runs[] | select(.head_sha == env.SYNC_HEAD_SHA) | .id) // ""'
++          }
++
++          wait_for_run_id() {
++            local workflow_file="$1"
++            local workflow_name="$2"
++            local attempt_count
++            local run_id
++
++            for attempt_count in {1..30}; do
++              run_id=$(find_run_id "$workflow_file")
++              if [[ -n "$run_id" ]]; then
++                echo "$run_id"
++                return 0
++              fi
++
++              echo "Waiting for ${workflow_name} run to be created (${attempt_count}/30)." >&2
++              sleep 5
++            done
++
++            echo "Timed out waiting for ${workflow_name} run to be created." >&2
++            return 1
++          }
++
++          wait_for_run_completion() {
++            local run_id="$1"
++            local workflow_name="$2"
++            local attempt_count
++            local -a run_fields
++            local run_status
++            local run_conclusion
++            local run_url
++
++            for attempt_count in {1..180}; do
++              mapfile -t run_fields < <(gh run view "$run_id" \
++                --repo "$GITHUB_REPOSITORY" \
++                --json status,conclusion,url \
++                --jq '.status, (.conclusion // ""), .url')
++              run_status="${run_fields[0]}"
++              run_conclusion="${run_fields[1]}"
++              run_url="${run_fields[2]}"
++
++              if [[ "$run_status" == "completed" ]]; then
++                if [[ "$run_conclusion" == "success" ]]; then
++                  post_status "$workflow_name" "success" "${workflow_name} passed" "$run_url"
++                  return 0
++                fi
++
++                post_status "$workflow_name" "failure" "${workflow_name} completed with ${run_conclusion:-unknown}" "$run_url"
++                return 1
++              fi
++
++              post_status "$workflow_name" "pending" "${workflow_name} is ${run_status}" "$run_url"
++              echo "Waiting for ${workflow_name} run ${run_id} to complete: ${run_status} (${attempt_count}/180)."
++              sleep 30
++            done
++
++            run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${run_id}"
++            post_status "$workflow_name" "failure" "${workflow_name} timed out" "$run_url"
++            echo "Timed out waiting for ${workflow_name} run ${run_id}." >&2
++            return 1
++          }
++
++          dispatch_workflow swiftlm_integration.yml "SwiftLM Integration Tests"
++          dispatch_workflow downstream_integration.yml "Downstream Integration Test"
++
++          SWIFTLM_RUN_ID=$(wait_for_run_id swiftlm_integration.yml "SwiftLM Integration Tests")
++          DOWNSTREAM_RUN_ID=$(wait_for_run_id downstream_integration.yml "Downstream Integration Test")
++
++          SWIFTLM_RESULT=0
++          DOWNSTREAM_RESULT=0
++
++          wait_for_run_completion "$SWIFTLM_RUN_ID" "SwiftLM Integration Tests" || SWIFTLM_RESULT=$?
++          wait_for_run_completion "$DOWNSTREAM_RUN_ID" "Downstream Integration Test" || DOWNSTREAM_RESULT=$?
++
++          if [[ "$SWIFTLM_RESULT" -ne 0 || "$DOWNSTREAM_RESULT" -ne 0 ]]; then
++            exit 1
++          fi
+diff --git a/Package.swift b/Package.swift
+index ebce2ed79ee6522648b8f80033c46d2c43c859b3..87b9f5b4c7ca022c229da7d54f02aeae1cac15b7 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -468,8 +468,10 @@ let package = Package(
+             exclude: standaloneExampleDirectories,
+             sources: ["CustomFunctionExampleSimple.swift"]
+         ),
+-        // CompileLockRepro runs concurrent compiled calls in a separate process.
+-        // It reports completion as inconclusive about instance-lock contention.
++        // Deterministic reproduction of the CompiledFunction/evalLock
++        // lock-order inversion.  A wedged run deadlocks its threads
++        // permanently, so it is deliberately kept out of the test bundle and
++        // built as its own executable.
+         .executableTarget(
+             name: "CompileLockRepro",
+             dependencies: ["MLX"],
+diff --git a/Source/CompileLockRepro/CompileLockRepro.swift b/Source/CompileLockRepro/CompileLockRepro.swift
+index 44becc4ff6ddca20c7c1296cb3c8bee64a90a195..aa8032db41ac511b8c04a029ea3239b6fe60cb36 100644
+--- a/Source/CompileLockRepro/CompileLockRepro.swift
++++ b/Source/CompileLockRepro/CompileLockRepro.swift
+@@ -3,33 +3,84 @@
+ import Foundation
+ import MLX
+ 
+-/// Stress concurrent nested compiled-function calls.
++/// Deterministic reproduction of a cross-thread lock-order inversion between
++/// the per-instance `CompiledFunction.lock` and the process-global `evalLock`.
+ ///
+-/// A callback can execute during tracing or eager evaluation. Its execution
+-/// does not prove that a compile trace ran. A scheduling delay also does not
+-/// prove that another thread acquired a compiled function's instance lock.
+-/// CompileLockOrderingTests checks the production lock order with instrumentation.
++/// ## The cycle
+ ///
+-/// Run with --device cpu|gpu. Metal resources must match the linked MLX build,
+-/// including when selecting the CPU device.
+-/// Exit 1 reports a completion timeout. Exit 2 reports an inconclusive run.
++/// `CompiledFunction.call` takes the per-instance `lock` (added by #226 to guard
++/// compiled-function state) and then, inside `innerCall`, takes the global
++/// `evalLock` (added by #339 to guard tracing) and holds it across
++/// `mlx_closure_apply`.  On a *cold* cache entry `mlx_closure_apply` runs
++/// `mlx::core::detail::compile_trace`, which calls back into the Swift body of
++/// the function being compiled.  If that body calls a *different* compiled
++/// function — which every `MLXNN` activation does, e.g. `silu` uses the
++/// file-scope `compiledSilu` — the nested `CompiledFunction.call` takes a second
++/// per-instance lock *while already holding `evalLock`*.
++///
++///     Thread H:  L_cf(outer)  -> evalLock     -> wants L_cf(shared)
++///     Thread W:  L_cf(shared) -> wants evalLock
++///
++/// The two acquisition orders are inverted, so H and W deadlock permanently.
++/// `evalLock` being an `NSRecursiveLock` does not help: this is not same-thread
++/// re-entry.
++///
++/// ## Why this is deterministic and not a race we hope to lose
++///
++/// * Fresh `compile()` results per round guarantee a **cold** compiler cache.
++///   The re-entry into Swift only happens while tracing, i.e. on first use, so a
++///   warm instance would simply never open the window.
++/// * A semaphore signalled **from inside the traced Swift body** releases W only
++///   once H is provably inside `compile_trace` holding `evalLock`.
++/// * A `usleep` in that same traced body holds the window open for 200 ms —
++///   roughly a million times longer than the few instructions W needs — so W
++///   always reaches `L_cf(shared)` first.
++/// * Threads are owned here rather than borrowed from a test runner, so nothing
++///   depends on runner parallelism.
++///
++/// ## Why it is its own executable
++///
++/// A wedged round deadlocks the threads permanently and they cannot be
++/// unwedged, so this cannot live in a shared test process without taking the
++/// whole lane down.  The deadline turns the hang into a hard, fast failure.
++///
++/// ## Running it
++///
++///     swift build --product CompileLockRepro
++///     .build/debug/CompileLockRepro           # --device cpu|gpu
++///
++/// SwiftPM (command line) cannot build the Metal shaders, and the MLX scheduler
++/// opens a GPU stream when it is constructed, so a `swift build` product needs a
++/// `mlx.metallib` colocated with the binary even for `--device cpu`.  Copy one
++/// built by `xcodebuild -project xcode/MLX.xcodeproj -scheme MLX` (it lands at
++/// `Build/Products/Debug/Cmlx.framework/Versions/A/Resources/default.metallib`)
++/// into `$(swift build --show-bin-path)/mlx.metallib`.
++///
++/// Exit codes: `0` no deadlock, `1` deadlock (the bug is present), `2`
++/// inconclusive (compilation was disabled, so no trace ever ran).
+ @main
+ struct CompileLockRepro {
++
++    /// Per-round completion deadline.  A round that has not finished by now is
++    /// wedged: every thread is parked in `__psynch_mutexwait` and no amount of
++    /// further waiting will help.
+     static let deadline: TimeInterval = 10
++
++    /// How long the traced body holds the race window open.
+     static let widenMicroseconds: UInt32 = 200_000
++
+     static let rounds = 20
+ 
+-    // This lock protects the flag without depending on MLX locks.
++    /// Minimal thread-safe boolean; the repro must not itself depend on any
++    /// MLX locking.
+     final class Flag: @unchecked Sendable {
+         private let lock = NSLock()
+         private var value = false
+-
+         func set() {
+             lock.lock()
+             value = true
+             lock.unlock()
+         }
+-
+         var isSet: Bool {
+             lock.lock()
+             defer { lock.unlock() }
+@@ -40,69 +91,83 @@ struct CompileLockRepro {
+     static func die(_ code: Int32, _ message: String) -> Never {
+         print(message)
+         fflush(stdout)
+-        // Avoid waiting for worker cleanup after a completion timeout.
++        // The wedged threads hold `evalLock` and a `CompiledFunction.lock`.
++        // A normal `exit()` would run atexit handlers that can block on exactly
++        // those locks, turning a reported failure back into a hang.
+         _exit(code)
+     }
+ 
+     static func main() {
++        // The deadlock is entirely in the Swift locking + the backend-independent
++        // `mlx::core::detail::compile` machinery, so the repro runs on either
++        // device.  It defaults to `.cpu` because SwiftPM (command line) cannot
++        // build the Metal shaders, so a plain `swift run` has no metallib.
+         var device = Device.cpu
+-        if let index = CommandLine.arguments.firstIndex(of: "--device") {
+-            guard index + 1 < CommandLine.arguments.count else {
+-                die(2, "--device requires cpu or gpu.")
+-            }
++        if let index = CommandLine.arguments.firstIndex(of: "--device"),
++            index + 1 < CommandLine.arguments.count
++        {
+             switch CommandLine.arguments[index + 1].lowercased() {
+             case "cpu": device = .cpu
+             case "gpu": device = .gpu
+-            default: die(2, "Unknown --device \(CommandLine.arguments[index + 1]).")
++            default: die(2, "unknown --device \(CommandLine.arguments[index + 1])")
+             }
+         }
+         print(
+-            "compile-lock stress: device=\(device), \(rounds) rounds, \(Int(deadline))s deadline per round"
++            "compile-lock repro: device=\(device), \(rounds) rounds, \(Int(deadline))s deadline per round"
+         )
+ 
+-        // Retain compiled functions until every round finishes.
++        // Keep every compiled function alive for the whole run: `id` is the
++        // object address and `deinit` erases the cache entry, so recycling an
++        // address could alias two rounds.
+         var keepAlive: [Any] = []
+-        var executedRounds = 0
++        var tracedAtLeastOnce = false
++
+         for round in 1 ... rounds {
+-            if runRound(round, device: device, keepAlive: &keepAlive) {
+-                executedRounds += 1
+-            }
++            tracedAtLeastOnce =
++                runRound(round, device: device, keepAlive: &keepAlive) || tracedAtLeastOnce
+         }
+-        die(
+-            2,
+-            """
+-            INCONCLUSIVE: \(rounds) stress rounds completed; the callback executed in \(executedRounds) rounds.
+-            Callback execution does not distinguish tracing from eager evaluation.
+-            The schedule does not prove instance-lock contention.
+-            Run CompileLockOrderingTests to verify the instrumented production lock order.
+-            """)
++
++        if !tracedAtLeastOnce {
++            die(
++                2,
++                """
++                INCONCLUSIVE: the traced body never ran, so no compile trace happened \
++                and the deadlock window was never opened. Is MLX_DISABLE_COMPILE set?
++                """)
++        }
++
++        print("PASS: \(rounds) rounds completed, no deadlock")
+     }
+ 
++    /// Runs one round.  Returns whether the traced body actually executed.
+     static func runRound(_ round: Int, device: Device, keepAlive: inout [Any]) -> Bool {
+-        let gate = DispatchSemaphore(value: 0)
++        let gate = DispatchSemaphore(value: 0)  // H (inside the trace) -> W
+         let hDone = DispatchSemaphore(value: 0)
+         let wDone = DispatchSemaphore(value: 0)
+-        let bodyExecuted = Flag()
+-        let stop = Flag()
++        let traced = Flag()  // the traced Swift body really ran
++        let stop = Flag()  // main -> W: H is finished, you may stop
+ 
++        // Fresh instances: a cold compiler cache is what makes `compile_trace`
++        // — and therefore the re-entry into Swift under `evalLock` — happen.
+         let shared: @Sendable (MLXArray) -> MLXArray = compile(shapeless: true) { x in
+             x * 2 + 1
+         }
+         let outer: @Sendable (MLXArray) -> MLXArray = compile(shapeless: true) { x in
+-            bodyExecuted.set()
+-            gate.signal()
+-            // This pause changes scheduling opportunities without proving contention.
+-            usleep(widenMicroseconds)
+-            return shared(x) + 3
++            // This body runs on thread H, on the C++ side of
++            // `mlx_closure_apply`, inside `compile_trace`, with `evalLock` held.
++            traced.set()
++            gate.signal()  // W may now take L_cf(shared)
++            usleep(widenMicroseconds)  // hold the window open
++            return shared(x) + 3  // H blocks here on L_cf(shared)
+         }
+         keepAlive.append(shared)
+         keepAlive.append(outer)
+ 
+         let h = Thread {
+             Device.withDefaultDevice(device) {
+-                let input = MLXArray([1.0, 2.0, 3.0] as [Float])
+-                let result = outer(input)
+-                eval(result)
++                let a = MLXArray([1.0, 2.0, 3.0] as [Float])
++                let r = outer(a)
++                eval(r)
+                 hDone.signal()
+             }
+         }
+@@ -111,11 +176,11 @@ struct CompileLockRepro {
+         let w = Thread {
+             Device.withDefaultDevice(device) {
+                 gate.wait()
+-                let input = MLXArray([4.0, 5.0, 6.0] as [Float])
++                let b = MLXArray([4.0, 5.0, 6.0] as [Float])
+                 var iterations = 0
+                 repeat {
+-                    let result = shared(input)
+-                    eval(result)
++                    let r = shared(b)  // W takes L_cf(shared), then wants evalLock
++                    eval(r)
+                     iterations += 1
+                 } while !stop.isSet && iterations < 1000
+                 wDone.signal()
+@@ -130,19 +195,25 @@ struct CompileLockRepro {
+             die(
+                 1,
+                 """
+-                TIMEOUT: round \(round): thread H did not finish within \(Int(deadline))s.
+-                callbackExecuted=\(bodyExecuted.isSet). The blocking lock is unknown.
++                FAIL: round \(round): thread H did not complete within \(Int(deadline))s.
++                  H holds evalLock (taken in CompiledFunction.innerCall) and is blocked
++                  acquiring the per-instance lock of the nested compiled function;
++                  W holds that per-instance lock and is blocked acquiring evalLock.
++                  enteredTrace=\(traced.isSet)
++                  This is the lock-order inversion; the process is deadlocked.
+                 """)
+         }
+         stop.set()
+         if wDone.wait(timeout: .now() + deadline) == .timedOut {
+             die(
+                 1,
+-                "TIMEOUT: round \(round): thread W did not finish within \(Int(deadline))s after H."
+-            )
++                """
++                FAIL: round \(round): thread W did not complete within \(Int(deadline))s \
++                after H finished. Blocked acquiring evalLock.
++                """)
+         }
+ 
+-        print("  round \(round): completed (callbackExecuted=\(bodyExecuted.isSet))")
+-        return bodyExecuted.isSet
++        print("  round \(round): ok (enteredTrace=\(traced.isSet))")
++        return traced.isSet
+     }
+ }
+diff --git a/Source/Encuda/encuda-compile.swift b/Source/Encuda/encuda-compile.swift
+index e13386e1f4b93068849926e5620c3347d45594dc..0462600491e0572cf410ddb95d953cda04175051 100644
+--- a/Source/Encuda/encuda-compile.swift
++++ b/Source/Encuda/encuda-compile.swift
+@@ -74,8 +74,11 @@ extension Encuda {
+                 arguments += inputFiles
+                 arguments += ["-o", output]
+ 
+-                let status = try runTool(
+-                    executable: URL(fileURLWithPath: resolvedNvcc), arguments: arguments)
++                let process = Process()
++                process.executableURL = URL(fileURLWithPath: resolvedNvcc)
++                process.arguments = arguments
++                try process.run()
++                let status = process.waitForExitStatus()
+                 guard status == 0 else {
+                     throw EncudaError.nvccFailed(status)
+                 }
+diff --git a/Source/Encuda/encuda-link.swift b/Source/Encuda/encuda-link.swift
+index f3c48f1a4de83e2a1d8b186ef6fa64cd92e8c185..3879e4ee76e175feb94b37a6bd98c54d40b74366 100644
+--- a/Source/Encuda/encuda-link.swift
++++ b/Source/Encuda/encuda-link.swift
+@@ -81,9 +81,11 @@ extension Encuda {
+ 
+         func nvcc(args: [String]) throws {
+             #if os(macOS) || os(Linux)
+-                let status = try runTool(
+-                    executable: URL(fileURLWithPath: resolvedNvcc),
+-                    arguments: ["-ccbin=\(resolvedClangpp)"] + (verbose ? ["-v"] : []) + args)
++                let process = Process()
++                process.executableURL = URL(fileURLWithPath: resolvedNvcc)
++                process.arguments = ["-ccbin=\(resolvedClangpp)"] + (verbose ? ["-v"] : []) + args
++                try process.run()
++                let status = process.waitForExitStatus()
+                 guard status == 0 else {
+                     throw EncudaError.nvccFailed(status)
+                 }
+@@ -92,9 +94,11 @@ extension Encuda {
+ 
+         func clang(args: [String]) throws {
+             #if os(macOS) || os(Linux)
+-                let status = try runTool(
+-                    executable: URL(fileURLWithPath: resolvedClangpp),
+-                    arguments: (verbose ? ["-v"] : []) + args)
++                let process = Process()
++                process.executableURL = URL(fileURLWithPath: resolvedClangpp)
++                process.arguments = (verbose ? ["-v"] : []) + args
++                try process.run()
++                let status = process.waitForExitStatus()
+                 guard status == 0 else {
+                     throw EncudaError.clangFailed(status)
+                 }
+diff --git a/Source/Encuda/encuda-utils.swift b/Source/Encuda/encuda-utils.swift
+index e71d11d2fb3ff23a53a09e65272140a354f63b76..eae4bf00ac1592e36d4d0b3b2fb513e07fc39e15 100644
+--- a/Source/Encuda/encuda-utils.swift
++++ b/Source/Encuda/encuda-utils.swift
+@@ -20,74 +20,105 @@ func searchForCommand(_ name: String) -> URL? {
+ }
+ 
+ #if os(macOS) || os(Linux)
+-    /// Spawn and reap the same child without Foundation process bookkeeping.
+-    ///
+-    /// During parallel arm64 Linux CUDA builds, nvcc completed its output but
+-    /// remained a zombie while Foundation's waitUntilExit() and isRunning stalled.
+-    /// POSIX spawning gives this function exclusive ownership of the child.
+-    /// The tool inherits the current environment and standard file descriptors.
+-    func runTool(executable: URL, arguments: [String]) throws -> Int32 {
+-        let path = executable.path
+-        let environment = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
+-        var processIdentifier: pid_t = 0
+-        let spawnStatus = try withCStringArray([path] + arguments) { argumentPointers in
+-            try withCStringArray(environment) { environmentPointers in
+-                posix_spawn(
+-                    &processIdentifier, path, nil, nil, argumentPointers, environmentPointers)
+-            }
+-        }
+-        guard spawnStatus == 0 else {
+-            throw processError("start \(path)", code: spawnStatus)
+-        }
+-
+-        var status: Int32 = 0
+-        while true {
+-            let reaped = waitpid(processIdentifier, &status, 0)
+-            if reaped == processIdentifier {
+-                // POSIX wait status stores the signal in the low seven bits and
+-                // the normal exit code in the next eight bits.
+-                let terminatingSignal = status & 0x7F
+-                if terminatingSignal == 0 {
+-                    return (status >> 8) & 0xFF
++    extension Process {
++        /// Waits for the spawned tool to finish and returns its exit status,
++        /// reaping the child directly rather than going through Foundation.
++        ///
++        /// **Why this does not use `waitUntilExit()`.** On aarch64 Linux that
++        /// call was observed never returning, and the previous workaround here
++        /// — polling `isRunning` in a 50ms sleep loop — did not fix it. It
++        /// only changed how the hang presented, because `isRunning` reads the
++        /// same Foundation bookkeeping that stalls.
++        ///
++        /// Observed during a parallel SwiftPM build of the CUDA backend for
++        /// linux/arm64: `nvcc` finishes and writes its output in full, then
++        /// becomes a zombie that is never reaped, and `encuda-tool` spins in
++        /// `hrtimer_nanosleep` indefinitely holding a completed 15MB result on
++        /// disk. It is load-dependent — `--jobs 2` transpiled all 96 `.cu`
++        /// files without incident, while an unconstrained build (SwiftPM
++        /// defaults to every core) deadlocked — which is consistent with pipe
++        /// file descriptors leaking between concurrently spawned siblings:
++        /// `encuda-tool` was holding both the read and the write end of the
++        /// same pipes, so no reader could ever observe EOF.
++        ///
++        /// `waitpid` answers the only question this code actually has — did
++        /// the child exit, and with what status — without depending on any of
++        /// that.
++        ///
++        /// - Returns: the child's exit code, or `128 + signal` if it was
++        ///   terminated by a signal, matching the shell's convention.
++        func waitForExitStatus() -> Int32 {
++            var status: Int32 = 0
++            while true {
++                let reaped = waitpid(processIdentifier, &status, 0)
++                if reaped == processIdentifier {
++                    // Decode the wait status without the C macros, which are
++                    // not imported into Swift. This encoding is shared by
++                    // Linux and Darwin: the low 7 bits hold the terminating
++                    // signal (0 when the process exited normally), and the
++                    // next 8 bits hold the exit code.
++                    let terminatingSignal = status & 0x7F
++                    if terminatingSignal == 0 {
++                        return (status >> 8) & 0xFF
++                    }
++                    return 128 + terminatingSignal
+                 }
+-                return 128 + terminatingSignal
++                if reaped == -1 && errno == EINTR {
++                    continue
++                }
++                // `waitpid` has nothing to reap. Overwhelmingly this is ECHILD:
++                // Foundation runs its own reaper thread over every `Process` it
++                // spawns, and on a parallel build it sometimes gets there
++                // first. Whatever the reason, the child is gone and Foundation's
++                // bookkeeping is now the only available source of truth.
++                return foundationTerminationStatus()
+             }
+-            let waitError = errno
+-            if waitError == EINTR {
+-                continue
+-            }
+-            throw processError("wait for \(path) (PID \(processIdentifier))", code: waitError)
+         }
+-    }
+ 
+-    private func processError(_ operation: String, code: Int32) -> NSError {
+-        NSError(
+-            domain: NSPOSIXErrorDomain, code: Int(code),
+-            userInfo: [
+-                NSLocalizedDescriptionKey:
+-                    "Unable to \(operation): \(String(cString: strerror(code)))."
+-            ])
+-    }
++        /// Foundation's view of the exit status, waited for rather than read
++        /// straight away.
++        ///
++        /// `terminationStatus` is not safe to read the instant `waitpid`
++        /// returns ECHILD. Foundation publishes the result in two steps, and
++        /// reading the status inside the window before `isRunning` goes false
++        /// **traps the process**:
++        ///
++        /// ```
++        /// *** Program crashed: System trap at 0x0000ffff90b6fb50 ***
++        /// Thread 0 "encuda-tool" crashed:
++        ///   0  Process.terminationStatus.getter + 80 in libFoundation.so
++        ///   1  Process.waitForExitStatus() + 107 in encuda-tool
++        /// ```
++        ///
++        /// Observed on aarch64 Linux with Swift 6.3.1 during an unconstrained
++        /// SwiftPM build of mlx's CUDA backend: one transpile in ~250 dies this
++        /// way, which kills `swift build` with exit code 1 and *no diagnostic*,
++        /// because the crash report goes to the transpiler's own output rather
++        /// than surfacing as a build error.
++        ///
++        /// So wait for the flag — but on a deadline. An unbounded wait here
++        /// would reintroduce exactly the hang this whole function exists to
++        /// avoid. If the deadline expires, report a non-zero status instead:
++        /// the caller turns that into a build failure, which is diagnosable,
++        /// whereas a hang and a trap are not.
++        private func foundationTerminationStatus() -> Int32 {
++            let deadline = Date().addingTimeInterval(reaperSettleTimeout)
++            while isRunning && Date() < deadline {
++                usleep(1000)
++            }
++            guard !isRunning else {
++                return reaperTimedOutStatus
++            }
++            return terminationStatus
++        }
+ 
+-    private func withCStringArray<Result>(
+-        _ values: [String],
+-        _ body: (UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) throws -> Result
+-    ) throws -> Result {
+-        var pointers = [UnsafeMutablePointer<CChar>?]()
+-        defer {
+-            for pointer in pointers {
+-                free(pointer)
+-            }
+-        }
+-        for value in values {
+-            guard let pointer = strdup(value) else {
+-                throw processError("allocate subprocess arguments", code: ENOMEM)
+-            }
+-            pointers.append(pointer)
+-        }
+-        pointers.append(nil)
+-        return try pointers.withUnsafeMutableBufferPointer { buffer in
+-            try body(buffer.baseAddress!)
+-        }
++        /// How long to let Foundation finish publishing a child's exit status
++        /// before giving up on it. Generous, because exceeding it means a build
++        /// failure: the window being waited on is normally sub-millisecond.
++        private var reaperSettleTimeout: TimeInterval { 30 }
++
++        /// Reported when Foundation never publishes a status. Chosen from the
++        /// range no compiler returns, so it is recognisable in a build log.
++        private var reaperTimedOutStatus: Int32 { 254 }
+     }
+ #endif
+diff --git a/Source/MLX/Transforms+Compile.swift b/Source/MLX/Transforms+Compile.swift
+index 6ed15d0e8c38923436df7b5c3d99191eac32b9ee..e528556756d361865b1a2105572ccd6d3698f26e 100644
+--- a/Source/MLX/Transforms+Compile.swift
++++ b/Source/MLX/Transforms+Compile.swift
+@@ -172,8 +172,8 @@ final class CompiledFunction: @unchecked (Sendable) {
+     ///     thread W:  L_cf(shared) -> wants evalLock
+     ///
+     /// Acquiring `evalLock` here gives the process a single global order, which
+-    /// makes the inversion impossible. `CompileLockOrderingTests` checks the
+-    /// acquisition order with debug instrumentation.
++    /// makes the inversion impossible.  `Source/CompileLockRepro` reproduces the
++    /// deadlock deterministically without this.
+     ///
+     /// The cost is small: ``innerCall(_:)`` used to take `evalLock` itself and
+     /// hold it through `mlx_closure_apply` -- i.e. across the actual evaluation
+diff --git a/Tests/EncudaProcessTests/ProcessTests.swift b/Tests/EncudaProcessTests/ProcessTests.swift
+deleted file mode 100644
+index 796cb71cb66d9bc9667623e26c5dc84341a45734..0000000000000000000000000000000000000000
+--- a/Tests/EncudaProcessTests/ProcessTests.swift
++++ /dev/null
+@@ -1,137 +0,0 @@
+-import Foundation
+-
+-#if canImport(Glibc)
+-    import Glibc
+-#elseif canImport(Musl)
+-    import Musl
+-#elseif canImport(Darwin)
+-    import Darwin
+-#endif
+-
+-private struct TestFailure: Error, CustomStringConvertible {
+-    let description: String
+-}
+-
+-// The lock protects the messages written by concurrent subprocess callers.
+-private final class Failures: @unchecked Sendable {
+-    private let lock = NSLock()
+-    private var messages = [String]()
+-
+-    func append(_ message: String) {
+-        lock.withLock { messages.append(message) }
+-    }
+-
+-    var all: [String] {
+-        lock.withLock { messages }
+-    }
+-}
+-
+-@main
+-struct EncudaProcessTests {
+-    static func main() {
+-        do {
+-            try runChildIfRequested()
+-            try verifyProcesses()
+-            print(
+-                "Encuda process tests passed: exits, signals, arguments, environment, output, and 128 concurrent true/false children."
+-            )
+-        } catch {
+-            print("Encuda process test failed: \(error)")
+-            exit(1)
+-        }
+-    }
+-
+-    private static func runChildIfRequested() throws {
+-        let arguments = CommandLine.arguments
+-        guard arguments.count > 1 else { return }
+-        switch arguments[1] {
+-        case "--child-exit":
+-            guard arguments.count == 3, let status = Int32(arguments[2]) else {
+-                throw TestFailure(description: "Provide one child exit status.")
+-            }
+-            _exit(status)
+-        case "--child-signal":
+-            raise(SIGTERM)
+-            _exit(99)
+-        case "--child-arguments":
+-            guard arguments.count == 6,
+-                arguments[2] == "value with spaces",
+-                arguments[3] == "quotes'\"",
+-                arguments[4] == "λ",
+-                arguments[5] == ProcessInfo.processInfo.environment["PATH"]
+-            else {
+-                _exit(98)
+-            }
+-            _exit(0)
+-        case "--child-output":
+-            guard arguments.count == 3 else {
+-                throw TestFailure(description: "Provide the child output path.")
+-            }
+-            try Data("completed subprocess output".utf8).write(
+-                to: URL(fileURLWithPath: arguments[2]))
+-            _exit(23)
+-        default:
+-            throw TestFailure(description: "Unknown subprocess test mode: \(arguments[1])")
+-        }
+-    }
+-
+-    private static func require(_ condition: Bool, _ message: String) throws {
+-        guard condition else { throw TestFailure(description: message) }
+-    }
+-
+-    private static func verifyProcesses() throws {
+-        guard let trueCommand = searchForCommand("true"),
+-            let falseCommand = searchForCommand("false"),
+-            let path = ProcessInfo.processInfo.environment["PATH"]
+-        else {
+-            throw TestFailure(description: "Provide PATH with the true and false commands.")
+-        }
+-        let executable = URL(fileURLWithPath: CommandLine.arguments[0])
+-        for expected: Int32 in [0, 1, 7, 37, 127, 255] {
+-            let status = try runTool(
+-                executable: executable, arguments: ["--child-exit", String(expected)])
+-            try require(status == expected, "Expected exit \(expected), received \(status).")
+-        }
+-        let signalStatus = try runTool(executable: executable, arguments: ["--child-signal"])
+-        try require(signalStatus == 128 + SIGTERM, "A signal exit did not preserve SIGTERM.")
+-        let argumentStatus = try runTool(
+-            executable: executable,
+-            arguments: ["--child-arguments", "value with spaces", "quotes'\"", "λ", path])
+-        try require(argumentStatus == 0, "Subprocess arguments or environment changed.")
+-
+-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+-            UUID().uuidString)
+-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+-        defer { try? FileManager.default.removeItem(at: directory) }
+-        let output = directory.appendingPathComponent("output.txt")
+-        let outputStatus = try runTool(
+-            executable: executable, arguments: ["--child-output", output.path])
+-        try require(outputStatus == 23, "The completed output child lost its exit status.")
+-        let contents = try String(contentsOf: output, encoding: .utf8)
+-        try require(
+-            contents == "completed subprocess output", "The child did not finish its output.")
+-
+-        do {
+-            _ = try runTool(
+-                executable: directory.appendingPathComponent("missing-tool"), arguments: [])
+-            throw TestFailure(description: "A missing executable unexpectedly started.")
+-        } catch let error as NSError where error.domain == NSPOSIXErrorDomain {
+-            try require(error.code == Int(ENOENT), "A missing executable lost its POSIX error.")
+-        }
+-
+-        let failures = Failures()
+-        DispatchQueue.concurrentPerform(iterations: 128) { iteration in
+-            let expected: Int32 = Int32(iteration % 2)
+-            let command = expected == 0 ? trueCommand : falseCommand
+-            do {
+-                let status = try runTool(executable: command, arguments: [])
+-                if status != expected {
+-                    failures.append("Child \(iteration): expected \(expected), received \(status).")
+-                }
+-            } catch {
+-                failures.append("Child \(iteration): \(error)")
+-            }
+-        }
+-        try require(failures.all.isEmpty, failures.all.joined(separator: "\n"))
+-    }
+-}
+diff --git a/Tests/ManifestValidationTests/Package.swift b/Tests/ManifestValidationTests/Package.swift
+deleted file mode 100644
+index 135daa4029ea9ad308e803729c7d1dfc7774a709..0000000000000000000000000000000000000000
+--- a/Tests/ManifestValidationTests/Package.swift
++++ /dev/null
+@@ -1,26 +0,0 @@
+-// swift-tools-version: 6.2
+-import PackageDescription
+-
+-#if os(Linux)
+-    let dependencies: [Package.Dependency] = [
+-        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.0.0")
+-    ]
+-    let helperTargets: [Target] = [
+-        .plugin(name: "CudaBuild", capability: .buildTool()),
+-        .plugin(name: "OtherBuild", capability: .buildTool()),
+-        .executableTarget(name: "encuda"),
+-    ]
+-#else
+-    let dependencies: [Package.Dependency] = []
+-    let helperTargets: [Target] = [
+-        .plugin(name: "__PLUGIN_NAME__", capability: .buildTool())
+-    ]
+-#endif
+-
+-let package = Package(
+-    name: "ManifestValidationFixture",
+-    dependencies: dependencies,
+-    targets: [
+-        .target(name: "Cmlx", plugins: [.plugin(name: "__PLUGIN_NAME__")])
+-    ] + helperTargets
+-)
+diff --git a/scripts/verify-spm-manifest.py b/scripts/verify-spm-manifest.py
+index b6f1dffa7e1dc456eccb06d87e97d399d5f326c5..d3d3d0f625f9c3d844ce4b7aa99aced391c8f9c9 100755
+--- a/scripts/verify-spm-manifest.py
++++ b/scripts/verify-spm-manifest.py
+@@ -1,13 +1,9 @@
+ #!/usr/bin/env python3
+ 
+-from __future__ import annotations
+-
+ import json
+ import platform
+ import subprocess
+ 
+-CUDA_PLUGIN_NAME = "CudaBuild"
+-
+ 
+ def require(condition: bool, message: str) -> None:
+     if not condition:
+@@ -30,9 +26,8 @@ dependencies = {
+     if "sourceControl" in dependency
+ }
+ 
+-cuda_targets = {CUDA_PLUGIN_NAME, "encuda"}
++cuda_targets = {"CudaBuild", "encuda"}
+ cuda_plugin_usages = targets["Cmlx"].get("pluginUsages") or []
+-cuda_plugin_names = {usage["plugin"][0] for usage in cuda_plugin_usages}
+ 
+ if platform.system() == "Linux":
+     require(
+@@ -43,7 +38,7 @@ if platform.system() == "Linux":
+         "Linux manifest is missing the CUDA helper dependency",
+     )
+     require(
+-        CUDA_PLUGIN_NAME in cuda_plugin_names,
++        cuda_plugin_usages,
+         "Linux Cmlx target is missing the CUDA build plugin",
+     )
+ else:
+@@ -56,7 +51,7 @@ else:
+         "non-Linux manifest unexpectedly contains the CUDA helper dependency",
+     )
+     require(
+-        CUDA_PLUGIN_NAME not in cuda_plugin_names,
++        not cuda_plugin_usages,
+         "non-Linux Cmlx target unexpectedly uses the CUDA build plugin",
+     )
+ 

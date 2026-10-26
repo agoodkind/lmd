@@ -1,0 +1,413 @@
+diff --git a/.github/scripts/verify-integration-results.mjs b/.github/scripts/verify-integration-results.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..60c5255df816f8dae2eeb32159e5a7bb59e941f9
+--- /dev/null
++++ b/.github/scripts/verify-integration-results.mjs
+@@ -0,0 +1,113 @@
++#!/usr/bin/env node
++import { readFileSync } from 'node:fs';
++
++function requireCondition(condition, message) {
++  if (!condition) throw new Error(message);
++}
++
++function verifySwiftPM(logPath, discoveryPath, selectors) {
++  const discovery = readFileSync(discoveryPath, 'utf8');
++  const classes = new Map();
++  for (const line of discovery.split(/\r?\n/)) {
++    const match = /^(\w+)\.(\w+)\/(\S+)$/.exec(line.trim());
++    if (!match) continue;
++    const [, module, name, method] = match;
++    if (!selectors.some(selector => selector === module || selector === name || selector === module + '.' + name)) continue;
++    const key = module + '.' + name;
++    if (!classes.has(key)) classes.set(key, new Set());
++    classes.get(key).add(method);
++  }
++  for (const selector of selectors) {
++    requireCondition([...classes.keys()].some(key => key === selector || key.startsWith(selector + '.') || key.endsWith('.' + selector)),
++      'Discovery did not include selected XCTest class or module: ' + selector);
++  }
++
++  const log = readFileSync(logPath, 'utf8');
++  const summaries = new Map();
++  const completedMethods = new Map();
++  const activeSuites = new Set();
++  const lines = log.split(/\r?\n/);
++  for (let index = 0; index < lines.length; index += 1) {
++    const line = lines[index];
++    const started = /^Test Suite '([^']+)' started at /.exec(line);
++    if (started) activeSuites.add(started[1]);
++    const suite = /^Test Suite '([^']+)' (passed|failed) at /.exec(line);
++    if (suite) {
++      const counts = /^\s*Executed (\d+) tests?, with (?:(\d+) tests? skipped and )?(\d+) failures? \(/.exec(lines[index + 1] ?? '');
++      requireCondition(counts, 'Missing XCTest summary after suite: ' + suite[1]);
++      requireCondition(suite[2] === 'passed' && Number(counts[2] ?? 0) === 0 && Number(counts[3]) === 0,
++        'XCTest suite failed or skipped tests: ' + suite[1]);
++      activeSuites.delete(suite[1]);
++      summaries.set(suite[1], Number(counts[1]));
++    }
++    const testCase = /^Test Case '-\[(\w+\.\w+) (\S+)\]' (passed|failed|skipped)\b/.exec(line)
++      ?? /^Test Case '(\w+\.\w+)\.(\w+)' (passed|failed|skipped)\b/.exec(line);
++    if (testCase && classes.has(testCase[1])) {
++      requireCondition(testCase[3] === 'passed', 'XCTest case did not pass: ' + testCase[1] + '/' + testCase[2]);
++      if (!completedMethods.has(testCase[1])) completedMethods.set(testCase[1], new Set());
++      completedMethods.get(testCase[1]).add(testCase[2]);
++    }
++  }
++  requireCondition(activeSuites.size === 0, 'XCTest did not finish suites: ' + [...activeSuites].join(', '));
++  for (const [key, methods] of classes) {
++    const name = key.slice(key.lastIndexOf('.') + 1);
++    requireCondition(summaries.get(name) === methods.size,
++      'XCTest class did not complete every discovered case: ' + key + ' (expected ' + methods.size + ', summary ' + summaries.get(name) + ')');
++    for (const method of methods) {
++      requireCondition(completedMethods.get(key)?.has(method), 'XCTest case did not finish: ' + key + '/' + method);
++    }
++    console.log(key + ': ' + methods.size + ' discovered cases completed without failures or skips');
++  }
++}
++
++function verifyXcode(reportPath, selectors) {
++  const report = JSON.parse(readFileSync(reportPath, 'utf8'));
++  requireCondition(Array.isArray(report.testNodes), 'xcresult JSON does not contain testNodes');
++  const nodes = [];
++  function visit(node) {
++    nodes.push(node);
++    for (const child of node.children ?? []) visit(child);
++  }
++  for (const node of report.testNodes) visit(node);
++  for (const selector of selectors) {
++    const suites = nodes.filter(node => node.nodeType === 'Test Suite'
++      && node.nodeIdentifierURL?.endsWith('/' + selector));
++    requireCondition(suites.length === 1, 'xcresult must contain one selected suite: ' + selector);
++    let functions = 0;
++    let cases = 0;
++    function verify(node) {
++      if (node.nodeType === 'Runtime Warning') {
++        console.warn('Xcode runtime warning: ' + node.name);
++        return;
++      }
++      requireCondition(node.result === 'Passed', 'xcresult did not pass: ' + (node.nodeIdentifierURL ?? node.name) + ' (' + node.result + ')');
++      if (node.nodeType === 'Test Case') {
++        functions += 1;
++        if (!(node.children ?? []).some(child => child.nodeType === 'Arguments')) cases += 1;
++      }
++      if (node.nodeType === 'Arguments') cases += 1;
++      for (const child of node.children ?? []) verify(child);
++    }
++    verify(suites[0]);
++    requireCondition(functions > 0 && cases > 0, 'xcresult selected suite did not execute cases: ' + selector);
++    console.log(selector + ': ' + functions + ' functions / ' + cases + ' cases passed without skips');
++  }
++}
++
++try {
++  const [mode, inputPath, ...arguments_] = process.argv.slice(2);
++  requireCondition(inputPath, 'Usage: verify-integration-results.mjs swiftpm <log> <discovery> <class-or-module>... | xcode <test-results-json> <suite-path>...');
++  if (mode === 'swiftpm') {
++    const [discoveryPath, ...selectors] = arguments_;
++    requireCondition(discoveryPath && selectors.length > 0, 'SwiftPM validation requires discovery and selected classes or modules');
++    verifySwiftPM(inputPath, discoveryPath, selectors);
++  } else if (mode === 'xcode') {
++    requireCondition(arguments_.length > 0, 'Xcode validation requires selected suite paths');
++    verifyXcode(inputPath, arguments_);
++  } else {
++    throw new Error('Select swiftpm or xcode validation');
++  }
++} catch (error) {
++  console.error('Test result validation failed: ' + error.message);
++  process.exitCode = 1;
++}
+diff --git a/.github/workflows/downstream_integration.yml b/.github/workflows/downstream_integration.yml
+index 6089e827829be93b323eea6066fd024b3f513608..422a92c59e6f0894bb7edd5fde19cd8d9c1ec4a9 100644
+--- a/.github/workflows/downstream_integration.yml
++++ b/.github/workflows/downstream_integration.yml
+@@ -9,12 +9,12 @@ on:
+         description: Exact SwiftLM commit to validate
+         type: string
+         required: true
+-        default: 53ae5b0da17f1b4484de4c01370e0ceb5a4fe079
++        default: d2f09fb66097739de05c63397e18bd259edeadd0
+       mlx_swift_lm_ref:
+         description: Exact mlx-swift-lm commit to validate
+         type: string
+         required: true
+-        default: 74ebe55d0d68de121f730334412da01a539eba50
++        default: 60054f77f91bc3e77c44950054dd6a9b53359352
+ 
+ permissions:
+   contents: read
+@@ -30,10 +30,22 @@ jobs:
+     timeout-minutes: 40
+     env:
+       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+-      SWIFTLM_REF: ${{ inputs.swiftlm_ref || '53ae5b0da17f1b4484de4c01370e0ceb5a4fe079' }}
+-      MLX_SWIFT_LM_REF: ${{ inputs.mlx_swift_lm_ref || '74ebe55d0d68de121f730334412da01a539eba50' }}
+-      SWIFTLM_TEST_FILTER: 'SwiftLMTests\.(PromptCacheTests|MultimodalTokenExtractionTests|ChatRequestParsingTests|ThinkingTagStripTests)'
++      SWIFTLM_REF: ${{ inputs.swiftlm_ref || 'd2f09fb66097739de05c63397e18bd259edeadd0' }}
++      MLX_SWIFT_LM_REF: ${{ inputs.mlx_swift_lm_ref || '60054f77f91bc3e77c44950054dd6a9b53359352' }}
++      SWIFTLM_TEST_FILTER: 'SwiftLMTests\.(PromptCacheTests|MultimodalTokenExtractionTests|ChatRequestParsingTests|ThinkingTagStripTests|OwnFeatureHTTPTests)'
+     steps:
++      - name: Align Xcode and the runtime CPU compiler
++        run: |
++          sudo xcode-select --switch "$DEVELOPER_DIR"
++          test "$(env -u DEVELOPER_DIR xcode-select --print-path)" = "$DEVELOPER_DIR"
++          xcrun --kill-cache
++          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
++          echo "SDKROOT=$SDKROOT" >> "$GITHUB_ENV"
++          xcodebuild -version
++          xcrun --sdk macosx --show-sdk-path
++          xcrun --sdk macosx --find clang++
++          g++ --version
++
+       - name: Checkout mlx-swift (this repository)
+         uses: actions/checkout@v4
+         with:
+@@ -41,6 +53,11 @@ jobs:
+           submodules: recursive
+           persist-credentials: false
+ 
++      - name: Set up Node for result validation
++        uses: actions/setup-node@v6
++        with:
++          node-version: '24'
++
+       - name: Checkout SwiftLM
+         uses: actions/checkout@v4
+         with:
+@@ -70,6 +87,8 @@ jobs:
+           git -C SwiftLM rev-parse HEAD
+           git -C SwiftLM/mlx-swift rev-parse HEAD
+           git -C SwiftLM/mlx-swift-lm rev-parse HEAD
++          printf 'swiftlm=%s\nlibrary=%s\ncore=%s\n' "$SWIFTLM_REF" "$MLX_SWIFT_LM_REF" \
++            "$(git -C mlx-swift-pr rev-parse HEAD)" > "$RUNNER_TEMP/swiftlm-sources.txt"
+ 
+       - name: Build SwiftLM and tests in Debug
+         working-directory: SwiftLM
+@@ -110,15 +129,46 @@ jobs:
+           if [[ -d "$RUNNER_TEMP/mlx-metallib/nax" ]]; then
+             cp -R "$RUNNER_TEMP/mlx-metallib/nax" "$BIN_DIR/nax"
+           fi
++          echo "SWIFTLM_BIN_DIR=$BIN_DIR" >> "$GITHUB_ENV"
+ 
+       - name: Run tests without pretrained models
+         working-directory: SwiftLM
+         run: |
+-          swift test --build-system native --jobs 4 list --skip-build > "$RUNNER_TEMP/swiftlm-tests.txt"
+-          for test_class in PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests; do
++          set -o pipefail
++          status=0
++          swift test --build-system native --jobs 4 --disable-swift-testing list --skip-build \
++            > "$RUNNER_TEMP/swiftlm-tests.txt" 2> "$RUNNER_TEMP/swiftlm-discovery-errors.txt" || status=$?
++          cat "$RUNNER_TEMP/swiftlm-discovery-errors.txt"
++          cat "$RUNNER_TEMP/swiftlm-tests.txt"
++          if [[ "$status" -ne 0 ]]; then
++            echo "::error::SwiftLM test discovery failed with exit status $status."
++            exit "$status"
++          fi
++          for test_class in PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests OwnFeatureHTTPTests; do
+             if ! grep -F "SwiftLMTests.$test_class/" "$RUNNER_TEMP/swiftlm-tests.txt"; then
+               echo "::error::The selected SwiftLM commit does not provide $test_class."
+               exit 1
+             fi
+           done
+-          swift test --build-system native --jobs 4 --skip-build --filter "$SWIFTLM_TEST_FILTER"
++          status=0
++          swift test --build-system native --jobs 4 --disable-swift-testing --skip-build \
++            --filter "$SWIFTLM_TEST_FILTER" 2>&1 | tee "$RUNNER_TEMP/swiftlm-runtime.log" || status=$?
++          if [[ "$status" -ne 0 ]]; then
++            echo "::error::SwiftLM tests failed with exit status $status."
++            exit "$status"
++          fi
++          node "$GITHUB_WORKSPACE/mlx-swift-pr/.github/scripts/verify-integration-results.mjs" swiftpm \
++            "$RUNNER_TEMP/swiftlm-runtime.log" "$RUNNER_TEMP/swiftlm-tests.txt" \
++            PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests OwnFeatureHTTPTests
++
++      - name: Upload SwiftLM source proof and test diagnostics
++        if: always()
++        uses: actions/upload-artifact@v4
++        with:
++          name: swiftlm-debug-results
++          path: |
++            ${{ runner.temp }}/swiftlm-sources.txt
++            ${{ runner.temp }}/swiftlm-tests.txt
++            ${{ runner.temp }}/swiftlm-discovery-errors.txt
++            ${{ runner.temp }}/swiftlm-runtime.log
++          if-no-files-found: error
+diff --git a/.github/workflows/pull_request.yml b/.github/workflows/pull_request.yml
+index f347961d5b1d51ec4a5d9b0e405ece2de4485cc3..6b6940c333014797d8657b9eb5386e9eaf7d18b6 100644
+--- a/.github/workflows/pull_request.yml
++++ b/.github/workflows/pull_request.yml
+@@ -7,6 +7,10 @@ on:
+ permissions:
+   contents: read
+ 
++concurrency:
++  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
++  cancel-in-progress: true
++
+ jobs:
+   encuda_process_tests:
+     name: Encuda Process Tests (Linux)
+@@ -51,6 +55,11 @@ jobs:
+           submodules: recursive
+           persist-credentials: false
+ 
++      - name: Set up Node for result validation
++        uses: actions/setup-node@v6
++        with:
++          node-version: '24'
++
+       - name: Prepare Xcode and Metal toolchain
+         run: |
+           xcodebuild -version
+@@ -86,6 +95,16 @@ jobs:
+             -only-testing:MLXTests/LoggingTests \
+             -only-testing:MLXTests/CompileLockOrderingTests
+ 
++      - name: Verify selected core suites completed
++        if: always()
++        run: |
++          xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/core-fork-regressions.xcresult" \
++            --compact > "$RUNNER_TEMP/core-fork-regressions.json"
++          node .github/scripts/verify-integration-results.mjs xcode \
++            "$RUNNER_TEMP/core-fork-regressions.json" \
++            MLXTests/MLXArrayIndexingTests MLXTests/ForkProtectionTests MLXTests/StreamTests \
++            MLXTests/LoggingTests MLXTests/CompileLockOrderingTests
++
+       - name: Build compile-lock stress diagnostic
+         run: |
+           xcodebuild build -scheme CompileLockRepro -configuration Debug \
+@@ -103,7 +122,9 @@ jobs:
+         uses: actions/upload-artifact@v4
+         with:
+           name: core-fork-regressions
+-          path: ${{ runner.temp }}/core-fork-regressions.xcresult
++          path: |
++            ${{ runner.temp }}/core-fork-regressions.xcresult
++            ${{ runner.temp }}/core-fork-regressions.json
+           if-no-files-found: error
+ 
+   lint:
+diff --git a/.github/workflows/swiftlm_integration.yml b/.github/workflows/swiftlm_integration.yml
+index d98e6556e6617b1cd80b6febbf70d71e60254d40..b8846edcab9cfd6c8630a714116845f14f2c35b3 100644
+--- a/.github/workflows/swiftlm_integration.yml
++++ b/.github/workflows/swiftlm_integration.yml
+@@ -10,12 +10,12 @@ on:
+         description: Exact SwiftLM commit to validate
+         type: string
+         required: true
+-        default: 53ae5b0da17f1b4484de4c01370e0ceb5a4fe079
++        default: d2f09fb66097739de05c63397e18bd259edeadd0
+       mlx_swift_lm_ref:
+         description: Exact mlx-swift-lm commit to validate
+         type: string
+         required: true
+-        default: 74ebe55d0d68de121f730334412da01a539eba50
++        default: 60054f77f91bc3e77c44950054dd6a9b53359352
+       run_speculative_eval:
+         description: Download both models for speculative decoding evaluation (15-minute limit)
+         type: boolean
+@@ -43,10 +43,22 @@ jobs:
+     timeout-minutes: 45
+     env:
+       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+-      SWIFTLM_REF: ${{ inputs.swiftlm_ref || '53ae5b0da17f1b4484de4c01370e0ceb5a4fe079' }}
+-      MLX_SWIFT_LM_REF: ${{ inputs.mlx_swift_lm_ref || '74ebe55d0d68de121f730334412da01a539eba50' }}
+-      SWIFTLM_TEST_FILTER: 'SwiftLMTests\.(PromptCacheTests|MultimodalTokenExtractionTests|ChatRequestParsingTests|ThinkingTagStripTests)'
++      SWIFTLM_REF: ${{ inputs.swiftlm_ref || 'd2f09fb66097739de05c63397e18bd259edeadd0' }}
++      MLX_SWIFT_LM_REF: ${{ inputs.mlx_swift_lm_ref || '60054f77f91bc3e77c44950054dd6a9b53359352' }}
++      SWIFTLM_TEST_FILTER: 'SwiftLMTests\.(PromptCacheTests|MultimodalTokenExtractionTests|ChatRequestParsingTests|ThinkingTagStripTests|OwnFeatureHTTPTests)'
+     steps:
++      - name: Align Xcode and the runtime CPU compiler
++        run: |
++          sudo xcode-select --switch "$DEVELOPER_DIR"
++          test "$(env -u DEVELOPER_DIR xcode-select --print-path)" = "$DEVELOPER_DIR"
++          xcrun --kill-cache
++          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
++          echo "SDKROOT=$SDKROOT" >> "$GITHUB_ENV"
++          xcodebuild -version
++          xcrun --sdk macosx --show-sdk-path
++          xcrun --sdk macosx --find clang++
++          g++ --version
++
+       - name: Checkout mlx-swift (this repository)
+         uses: actions/checkout@v4
+         with:
+@@ -54,6 +66,11 @@ jobs:
+           submodules: recursive
+           persist-credentials: false
+ 
++      - name: Set up Node for result validation
++        uses: actions/setup-node@v6
++        with:
++          node-version: '24'
++
+       - name: Checkout SwiftLM
+         uses: actions/checkout@v4
+         with:
+@@ -83,6 +100,8 @@ jobs:
+           git -C SwiftLM rev-parse HEAD
+           git -C SwiftLM/mlx-swift rev-parse HEAD
+           git -C SwiftLM/mlx-swift-lm rev-parse HEAD
++          printf 'swiftlm=%s\nlibrary=%s\ncore=%s\n' "$SWIFTLM_REF" "$MLX_SWIFT_LM_REF" \
++            "$(git -C mlx-swift rev-parse HEAD)" > "$RUNNER_TEMP/swiftlm-sources.txt"
+ 
+       - name: Build SwiftLM and tests in Release
+         working-directory: SwiftLM
+@@ -129,28 +148,43 @@ jobs:
+         id: model_free_tests
+         working-directory: SwiftLM
+         run: |
+-          if swift test --build-system native --jobs 4 -c release -Xswiftc -enable-testing list --skip-build > "$RUNNER_TEMP/swiftlm-tests.txt"; then
+-            echo "SwiftLM test discovery completed."
+-          else
+-            discovery_status=$?
+-            cat "$RUNNER_TEMP/swiftlm-tests.txt"
+-            echo "::error::SwiftLM test discovery failed with exit code $discovery_status."
+-            exit "$discovery_status"
++          set -o pipefail
++          status=0
++          swift test --build-system native --jobs 4 -c release -Xswiftc -enable-testing --disable-swift-testing list --skip-build \
++            > "$RUNNER_TEMP/swiftlm-tests.txt" 2> "$RUNNER_TEMP/swiftlm-discovery-errors.txt" || status=$?
++          cat "$RUNNER_TEMP/swiftlm-discovery-errors.txt"
++          cat "$RUNNER_TEMP/swiftlm-tests.txt"
++          if [[ "$status" -ne 0 ]]; then
++            echo "::error::SwiftLM test discovery failed with exit status $status."
++            exit "$status"
+           fi
+-          for test_class in PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests; do
++          for test_class in PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests OwnFeatureHTTPTests; do
+             if ! grep -F "SwiftLMTests.$test_class/" "$RUNNER_TEMP/swiftlm-tests.txt"; then
+               echo "::error::The selected SwiftLM commit does not provide $test_class."
+               exit 1
+             fi
+           done
+-          swift test --build-system native --jobs 4 -c release -Xswiftc -enable-testing --skip-build --filter "$SWIFTLM_TEST_FILTER"
++          status=0
++          swift test --build-system native --jobs 4 -c release -Xswiftc -enable-testing --disable-swift-testing --skip-build \
++            --filter "$SWIFTLM_TEST_FILTER" 2>&1 | tee "$RUNNER_TEMP/swiftlm-runtime.log" || status=$?
++          if [[ "$status" -ne 0 ]]; then
++            echo "::error::SwiftLM tests failed with exit status $status."
++            exit "$status"
++          fi
++          node "$GITHUB_WORKSPACE/mlx-swift/.github/scripts/verify-integration-results.mjs" swiftpm \
++            "$RUNNER_TEMP/swiftlm-runtime.log" "$RUNNER_TEMP/swiftlm-tests.txt" \
++            PromptCacheTests MultimodalTokenExtractionTests ChatRequestParsingTests ThinkingTagStripTests OwnFeatureHTTPTests
+ 
+-      - name: Upload SwiftLM test discovery output on failure
+-        if: failure() && steps.model_free_tests.outcome == 'failure'
++      - name: Upload SwiftLM source proof and test diagnostics
++        if: always()
+         uses: actions/upload-artifact@v4
+         with:
+-          name: swiftlm-test-discovery
+-          path: ${{ runner.temp }}/swiftlm-tests.txt
++          name: swiftlm-release-results
++          path: |
++            ${{ runner.temp }}/swiftlm-sources.txt
++            ${{ runner.temp }}/swiftlm-tests.txt
++            ${{ runner.temp }}/swiftlm-discovery-errors.txt
++            ${{ runner.temp }}/swiftlm-runtime.log
+           if-no-files-found: error
+ 
+       - name: Run optional pretrained speculative decoding evaluation

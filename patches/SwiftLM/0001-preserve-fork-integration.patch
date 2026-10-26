@@ -1,0 +1,851 @@
+diff --git a/.gitmodules b/.gitmodules
+index 3b3baf4..ac77079 100644
+--- a/.gitmodules
++++ b/.gitmodules
+@@ -1,6 +1,6 @@
+ [submodule "mlx-swift"]
+ 	path = mlx-swift
+-	url = https://github.com/SharpAI/mlx-swift.git
++	url = https://github.com/agoodkind/mlx-swift.git
+ [submodule "mlx-swift-lm"]
+ 	path = mlx-swift-lm
+-	url = https://github.com/SharpAI/mlx-swift-lm.git
++	url = https://github.com/agoodkind/mlx-swift-lm.git
+diff --git a/Makefile b/Makefile
+index 2aef4ec..8a44f98 100644
+--- a/Makefile
++++ b/Makefile
+@@ -5,7 +5,15 @@
+ # exit 0, which looks like a short green pass; scripts/run-tests.sh bootstraps the metallib
+ # and fails the run when too few tests executed.
+ 
+-.PHONY: test test-filter
++JOBS ?= 4
++
++.PHONY: build-tests test-built test test-filter
++
++build-tests:
++	swift build --build-tests --jobs $(JOBS)
++
++test-built:
++	swift test --skip-build --disable-swift-testing $(TEST_FLAGS)
+ 
+ test:
+ 	./scripts/run-tests.sh
+diff --git a/Package.resolved b/Package.resolved
+index 336ad64..f9a8843 100644
+--- a/Package.resolved
++++ b/Package.resolved
+@@ -176,8 +176,8 @@
+       "kind" : "remoteSourceControl",
+       "location" : "https://github.com/apple/swift-nio.git",
+       "state" : {
+-        "revision" : "57c0a08a331aaea9f5d7a932ad94ef43be942a95",
+-        "version" : "2.100.0"
++        "revision" : "0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b",
++        "version" : "2.101.3"
+       }
+     },
+     {
+@@ -185,8 +185,8 @@
+       "kind" : "remoteSourceControl",
+       "location" : "https://github.com/apple/swift-nio-extras.git",
+       "state" : {
+-        "revision" : "d2eeec0339074034f11a040a74aa2a341a2c4506",
+-        "version" : "1.34.1"
++        "revision" : "88a51340f59cf181ebde888bd1b749296b3ec029",
++        "version" : "1.34.3"
+       }
+     },
+     {
+diff --git a/README.md b/README.md
+index 9f69482..da39b21 100644
+--- a/README.md
++++ b/README.md
+@@ -152,7 +152,7 @@ Release b782 ([raw data](docs/profiling/m6/qwen36_35b_a3b_4bit.md)). ‡ At 40.8
+ 
+ ### What 32 GB exposed
+ 
+-| 8.5K-token prompt, Qwen3.8-27B-4bit | Before (old pin) | After (this release) |
++| Prompt with 8.5K tokens on Qwen3.8-27B-4bit | Before (old pin) | After (this release) |
+ |---|---|---|
+ | Prefill | 33.4 tok/s | **~264 tok/s** (≈8×; measured at 9.8K on b782) |
+ | Peak memory | 38 GB process footprint | **≤19 GB** process (16.1–16.7 GB process, 16.1 GB GPU peak at 9.8K on b782) |
+diff --git a/Sources/MLXInferenceCore/InferenceEngine.swift b/Sources/MLXInferenceCore/InferenceEngine.swift
+index 8157a8f..ae4652a 100644
+--- a/Sources/MLXInferenceCore/InferenceEngine.swift
++++ b/Sources/MLXInferenceCore/InferenceEngine.swift
+@@ -653,7 +653,7 @@ extension InferenceEngine {
+         messages: [ChatMessage],
+         config: GenerationConfig = .default
+     ) -> AsyncStream<GenerationToken> {
+-        AsyncStream { continuation in
++        AsyncStream<GenerationToken> { (continuation: AsyncStream<GenerationToken>.Continuation) in
+             Task { @MainActor in
+                 guard let container = self.container else {
+                     continuation.finish(); return
+@@ -786,7 +786,7 @@ extension InferenceEngine {
+                     for await generation in stream {
+                         guard !Task.isCancelled else { break }
+ 
+-                        if case .chunk(let text, tokenId: _) = generation {
++                        if let text = generation.chunk {
+                             // Record time-to-first-token on the very first chunk
+                             if firstTokenDate == nil {
+                                 firstTokenDate = Date()
+diff --git a/Sources/SwiftLM/Calibrator.swift b/Sources/SwiftLM/Calibrator.swift
+index 410b8c9..6c4a3ba 100644
+--- a/Sources/SwiftLM/Calibrator.swift
++++ b/Sources/SwiftLM/Calibrator.swift
+@@ -245,7 +245,7 @@ enum Calibrator {
+                     context: context
+                 ) {
+                     switch result {
+-                    case .chunk(_, tokenId: _):
++                    case .chunk:
+                         if firstTokenTime == nil {
+                             firstTokenTime = Date()
+                         }
+diff --git a/Sources/SwiftLM/Server.swift b/Sources/SwiftLM/Server.swift
+index 5272aa8..4c630df 100644
+--- a/Sources/SwiftLM/Server.swift
++++ b/Sources/SwiftLM/Server.swift
+@@ -393,21 +393,21 @@ final class ProgressTracker {
+         } else if fraction == 0.0 {
+              completedMB = "0.0"
+         }
+-        
++
+         let barLength = 20
+         let completedBars = min(barLength, Int(fraction * Double(barLength)))
+         let emptyBars = max(0, barLength - completedBars)
+-        
++
+         var bars = ""
+         if completedBars > 0 {
+             bars += String(repeating: "=", count: completedBars - 1) + ">"
+         }
+         bars += String(repeating: " ", count: emptyBars)
+-        
++
+         let pctStr = String(format: "%3d%%", pct)
+         let spinner = self.spinnerFrames[self.frameIndex]
+         let speedText = "| Speed: \(self.speedStr)"
+-        
++
+         return String(format: "\r[SwiftLM] Download: [%@] %@ %@ (%@ MB / %@ MB) %@", bars, pctStr, spinner, completedMB, totalMB, speedText)
+     }
+ 
+@@ -977,6 +977,10 @@ struct MLXServer: AsyncParsableCommand {
+             case .fullGPU:
+                 Memory.cacheLimit = plan.recommendedCacheLimit
+                 print("[SwiftLM] \(plan.strategy.emoji) Memory strategy: FULL GPU (\(String(format: "%.1f", plan.weightMemoryGB))GB model, \(String(format: "%.1f", system.availableRAMGB))GB available, cache limited to \(plan.recommendedCacheLimit / (1024*1024))MB)")
++                // Limit MLX allocations to 80% of physical RAM.
++                let memoryBackstopBytes = Int(Double(system.totalRAMBytes) * 0.8)
++                Memory.memoryLimit = memoryBackstopBytes
++                print("[SwiftLM]    memory ceiling capped at \(memoryBackstopBytes / (1024*1024*1024))GB (80% of physical RAM)")
+             case .swapAssisted:
+                 if self.streamExperts {
+                     // SSD Streaming: expert weights are mmap'd from SSD via the OS page cache.
+@@ -1516,6 +1520,7 @@ struct MLXServer: AsyncParsableCommand {
+             let activeMemMB = Memory.activeMemory / (1024 * 1024)
+             let peakMemMB = Memory.peakMemory / (1024 * 1024)
+             let cacheMemMB = Memory.cacheMemory / (1024 * 1024)
++            let allocationLimitMB = Memory.memoryLimit / (1024 * 1024)
+             let deviceInfo = GPU.deviceInfo()
+             let totalMemMB = deviceInfo.memorySize / (1024 * 1024)
+             let snapshot = await stats.snapshot()
+@@ -1543,7 +1548,7 @@ struct MLXServer: AsyncParsableCommand {
+                 }
+             }
+             let payload = """
+-{"status":"ok","model":"\(modelId)","vision":\(loadedAsVision),"memory":{"active_mb":\(activeMemMB),"peak_mb":\(peakMemMB),"cache_mb":\(cacheMemMB),"total_system_mb":\(totalMemMB),"gpu_architecture":"\(deviceInfo.architecture)"},"stats":{"requests_total":\(snapshot.requestsTotal),"requests_active":\(snapshot.requestsActive),"tokens_generated":\(snapshot.tokensGenerated),"avg_tokens_per_sec":\(String(format: "%.2f", snapshot.avgTokensPerSec))}\(partitionJson)}
++{"status":"ok","model":"\(modelId)","vision":\(loadedAsVision),"memory":{"active_mb":\(activeMemMB),"peak_mb":\(peakMemMB),"cache_mb":\(cacheMemMB),"limit_mb":\(allocationLimitMB),"total_system_mb":\(totalMemMB),"gpu_architecture":"\(deviceInfo.architecture)"},"stats":{"requests_total":\(snapshot.requestsTotal),"requests_active":\(snapshot.requestsActive),"tokens_generated":\(snapshot.tokensGenerated),"avg_tokens_per_sec":\(String(format: "%.2f", snapshot.avgTokensPerSec))}\(partitionJson)}
+ """
+             return Response(
+                 status: .ok,
+@@ -2434,7 +2439,7 @@ func dflashGenerationStream(
+                 switch event {
+                 case .token(let tokenID, _, _, _):
+                     if let chunk = nextText(tokenID) {
+-                        continuation.yield(.chunk(chunk, tokenId: tokenID))
++                        continuation.yield(.chunk(chunk, tokenId: tokenID, logprob: 0))
+                     }
+                 case .prefill, .prefillProgress:
+                     break
+@@ -2936,7 +2941,7 @@ func handleChatCompletion(
+             startGeneration: startGeneration, modelId: modelId, stopSequences: stopSequences,
+             includeUsage: includeUsage, promptTokenCount: promptTokenCount,
+             enableThinking: enableThinking, thinkingPreOpened: thinkingPreOpened,
+-            jsonMode: jsonMode, tokenEcho: config.tokenEcho, slot: slot,
++            jsonMode: jsonMode, logprobs: chatReq.logprobs == true, tokenEcho: config.tokenEcho, slot: slot,
+             stats: stats, genStart: genStart, prefillStart: prefillStart,
+             emitPrefillProgress: emitPrefillProgress
+         )
+@@ -2945,7 +2950,7 @@ func handleChatCompletion(
+         return try await handleChatNonStreaming(
+             stream: stream, modelId: modelId, stopSequences: stopSequences,
+             promptTokenCount: promptTokenCount, enableThinking: enableThinking,
+-            thinkingPreOpened: thinkingPreOpened, jsonMode: jsonMode, tokenEcho: config.tokenEcho,
++            thinkingPreOpened: thinkingPreOpened, jsonMode: jsonMode, logprobs: chatReq.logprobs == true, tokenEcho: config.tokenEcho,
+             slot: slot, stats: stats, genStart: genStart, prefillStart: prefillStart,
+             onPrefillDone: onPrefillDone
+         )
+@@ -3154,6 +3159,7 @@ func handleChatStreaming(
+     enableThinking: Bool = false,
+     thinkingPreOpened: Bool = false,
+     jsonMode: Bool = false,
++    logprobs: Bool = false,
+     tokenEcho: Bool = true,
+     slot: GenerationSlot,
+     stats: ServerStats,
+@@ -3282,10 +3288,20 @@ func handleChatStreaming(
+         for await generation in stream {
+             if stopped { break }
+             switch generation {
+-            case .chunk(let text, _):
++            case .chunk(let text, _, let tokenLogprob):
+                 completionTokenCount += 1
+                 fullText += text
+                 unscannedStopChars += text.count
++                // Per-token OpenAI logprobs entry (chosen-token logprob; producer-only, no alternatives).
++                // Token string reuses the streaming detokenizer output `text`; no Tokenizer is in scope here.
++                let logprobsEntry: [[String: Any]]? = logprobs
++                    ? [[
++                        "token": text,
++                        "logprob": Double(tokenLogprob),
++                        "bytes": Array(text.utf8).map { Int($0) },
++                        "top_logprobs": [],
++                      ]]
++                    : nil
+                 // GPU yield: prevent Metal from starving macOS WindowServer
+                 if completionTokenCount % 8 == 0 {
+                     try? await Task.sleep(for: .microseconds(50))
+@@ -3392,7 +3408,8 @@ func handleChatStreaming(
+                             modelId: modelId,
+                             reasoningContent: hasReasoning ? reasoningText : nil,
+                             content: hasContent ? contentText : nil,
+-                            finishReason: nil
++                            finishReason: nil,
++                            logprobsContent: logprobsEntry
+                         ))
+                     }
+                     // If tracker buffer is holding a partial tag, nothing to emit yet — that's fine.
+@@ -3529,6 +3546,7 @@ func handleChatNonStreaming(
+     enableThinking: Bool = false,
+     thinkingPreOpened: Bool = false,
+     jsonMode: Bool = false,
++    logprobs: Bool = false,
+     tokenEcho: Bool = true,
+     slot: GenerationSlot,
+     stats: ServerStats,
+@@ -3542,12 +3560,20 @@ func handleChatNonStreaming(
+     var tcIndex = 0
+     var generationStopReason: GenerateStopReason = .stop
+     var firstToken = true
++    var logprobsEntries: [LogprobEntry] = []
+     let stopWindow = stopScanWindow(stopSequences)
+     generationLoop: for await generation in stream {
+         switch generation {
+-        case .chunk(let text, _):
++        case .chunk(let text, _, let tokenLogprob):
+             fullText += text
+             completionTokenCount += 1
++            if logprobs {
++                logprobsEntries.append(LogprobEntry(
++                    token: text,
++                    logprob: Double(tokenLogprob),
++                    bytes: Array(text.utf8).map { Int($0) }
++                ))
++            }
+             // End generation at the first stop sequence, as the streaming path does. The
+             // text is trimmed below either way; continuing only spends compute and bills
+             // the client for tokens that are discarded. `.info` never arrives on this
+@@ -3651,7 +3677,8 @@ func handleChatNonStreaming(
+                     reasoningContent: reasoningContent,
+                     toolCalls: hasToolCalls ? collectedToolCalls : nil
+                 ),
+-                finishReason: hasToolCalls ? "tool_calls" : finishReason
++                finishReason: hasToolCalls ? "tool_calls" : finishReason,
++                logprobs: logprobs ? LogprobsContent(content: logprobsEntries) : nil
+             )
+         ],
+         usage: TokenUsage(promptTokens: promptTokenCount, completionTokens: completionTokenCount, totalTokens: totalTokens),
+@@ -3862,7 +3889,7 @@ func handleTextStreaming(
+         for await generation in stream {
+             if stopped { break }
+             switch generation {
+-            case .chunk(let text, _):
++            case .chunk(let text, _, _):
+                 if firstToken {
+                     heartbeatTask?.cancel()
+                     heartbeatTask = nil
+@@ -3968,7 +3995,7 @@ func handleTextNonStreaming(
+     let stopWindow = stopScanWindow(stopSequences)
+     generationLoop: for await generation in stream {
+         switch generation {
+-        case .chunk(let text, _):
++        case .chunk(let text, _, _):
+             fullText += text
+             completionTokenCount += 1
+             // See handleChatNonStreaming: stop generating at the first stop sequence.
+@@ -4416,7 +4443,7 @@ func sseErrorChunk(_ error: Error) -> String {
+ /// - reasoningContent: if non-nil, added to delta as "reasoning_content" (llama-server thinking style)
+ /// - content: if non-nil, added to delta as "content" (standard response text)
+ /// Both may be nil simultaneously (used for the final finish_reason chunk).
+-func sseChunk(modelId: String, reasoningContent: String?, content: String?, finishReason: String?) -> String {
++func sseChunk(modelId: String, reasoningContent: String?, content: String?, finishReason: String?, logprobsContent: [[String: Any]]? = nil) -> String {
+     var deltaObj: [String: Any] = [:]
+     // Always include role on the very first chunk when we have content
+     if reasoningContent != nil || content != nil {
+@@ -4432,6 +4459,9 @@ func sseChunk(modelId: String, reasoningContent: String?, content: String?, fini
+         "index": 0,
+         "delta": deltaObj,
+     ]
++    if let logprobsContent {
++        choiceObj["logprobs"] = ["content": logprobsContent]
++    }
+     if let finishReason {
+         choiceObj["finish_reason"] = finishReason
+     }
+@@ -4640,7 +4670,7 @@ struct ChatCompletionRequest: Decodable {
+             let text = textContent
+             let imgs = extractImages()
+             let aud = extractAudio()
+-            
++
+             switch role {
+             case "system", "developer":
+                 return .system(text, images: imgs, audios: aud)
+@@ -4753,6 +4783,10 @@ struct ChatCompletionRequest: Decodable {
+     let thinkingBudget: Int?
+     /// Top-level thinking override emitted by Aegis-AI gateway
+     let enableThinking: Bool?
++    /// OpenAI logprobs: when true, emit chosen-token log-probabilities in the response.
++    let logprobs: Bool?
++    /// OpenAI top_logprobs: number of alternative tokens to return per position (not implemented; parsed for compatibility).
++    let topLogprobs: Int?
+     /// Number of bits for native MLX quantized KV cache (nil = no quantization).
+     /// Only 4 and 8 are supported by the underlying MLX QuantizedKVCache.
+     /// Enables `QuantizedKVCache` instead of `KVCacheSimple`.  Separate from `--turbo-kv`.
+@@ -4772,6 +4806,8 @@ struct ChatCompletionRequest: Decodable {
+         case responseFormat = "response_format"
+         case chatTemplateKwargs = "chat_template_kwargs"
+         case enableThinking = "enable_thinking"
++        case logprobs
++        case topLogprobs = "top_logprobs"
+         case thinkingBudget = "thinking_budget"
+         case kvBits = "kv_bits"
+     }
+@@ -4841,13 +4877,48 @@ struct Choice: Encodable {
+     let index: Int
+     let message: AssistantMessage
+     let finishReason: String
++    /// OpenAI logprobs: chosen-token log-probabilities. Nil (and omitted) unless requested.
++    let logprobs: LogprobsContent?
++
++    init(index: Int, message: AssistantMessage, finishReason: String, logprobs: LogprobsContent? = nil) {
++        self.index = index
++        self.message = message
++        self.finishReason = finishReason
++        self.logprobs = logprobs
++    }
+ 
+     enum CodingKeys: String, CodingKey {
+-        case index, message
++        case index, message, logprobs
+         case finishReason = "finish_reason"
+     }
+ }
+ 
++/// OpenAI `logprobs` object attached to a chat choice: `{ "content": [ ... ] }`.
++struct LogprobsContent: Encodable {
++    let content: [LogprobEntry]
++}
++
++/// One OpenAI logprobs content entry: the chosen token, its log-probability, and UTF-8 bytes.
++/// `topLogprobs` stays empty in this producer-only implementation (no alternative tokens).
++struct LogprobEntry: Encodable {
++    let token: String
++    let logprob: Double
++    let bytes: [Int]
++    let topLogprobs: [LogprobEntry]
++
++    init(token: String, logprob: Double, bytes: [Int], topLogprobs: [LogprobEntry] = []) {
++        self.token = token
++        self.logprob = logprob
++        self.bytes = bytes
++        self.topLogprobs = topLogprobs
++    }
++
++    enum CodingKeys: String, CodingKey {
++        case token, logprob, bytes
++        case topLogprobs = "top_logprobs"
++    }
++}
++
+ struct AssistantMessage: Encodable {
+     let role: String
+     let content: String?
+diff --git a/mlx-swift b/mlx-swift
+index 3185383..7867247 160000
+--- a/mlx-swift
++++ b/mlx-swift
+@@ -1 +1 @@
+-Subproject commit 3185383eefa8b86e4e98f9048f98b0ae850c55cc
++Subproject commit 786724757aa480f049d3a913c59da7e0e61ad5dc
+diff --git a/mlx-swift-lm b/mlx-swift-lm
+index 0573f02..60054f7 160000
+--- a/mlx-swift-lm
++++ b/mlx-swift-lm
+@@ -1 +1 @@
+-Subproject commit 0573f021d0a87bd5da5913911aab185d7771bd56
++Subproject commit 60054f77f91bc3e77c44950054dd6a9b53359352
+diff --git a/tests/SwiftLMTests/DFlashStreamBridgeTests.swift b/tests/SwiftLMTests/DFlashStreamBridgeTests.swift
+index 2f6daf0..c9c134a 100644
+--- a/tests/SwiftLMTests/DFlashStreamBridgeTests.swift
++++ b/tests/SwiftLMTests/DFlashStreamBridgeTests.swift
+@@ -68,7 +68,7 @@ final class DFlashStreamBridgeTests: XCTestCase {
+             // torn down and the DFlash stream with it.
+             let generation = dflashGenerationStream(events.stream, tokenLimit: 1_000) { "t\($0) " }
+             for await item in generation {
+-                if case .chunk(let text, _) = item { received.append(text) }
++                if let text = item.chunk { received.append(text) }
+                 if received.count == 3 { break }
+             }
+         }
+@@ -93,7 +93,8 @@ final class DFlashStreamBridgeTests: XCTestCase {
+         // The detokenizer seam may hold text back (nil) and release it on a later token.
+         for await item in dflashGenerationStream(events, tokenLimit: 3, nextText: { $0 == 1 ? nil : "one two" }) {
+             switch item {
+-            case .chunk(let text, _): chunks.append(text)
++            case .chunk:
++                if let text = item.chunk { chunks.append(text) }
+             case .info(let i): info = i
+             default: break
+             }
+diff --git a/tests/SwiftLMTests/JSONModeStreamTests.swift b/tests/SwiftLMTests/JSONModeStreamTests.swift
+index 592a21a..b8aadfb 100644
+--- a/tests/SwiftLMTests/JSONModeStreamTests.swift
++++ b/tests/SwiftLMTests/JSONModeStreamTests.swift
+@@ -63,7 +63,7 @@ final class JSONModeStreamTests: XCTestCase {
+     }
+ 
+     private func chunks(_ pieces: [String]) -> [Generation] {
+-        pieces.enumerated().map { .chunk($1, tokenId: $0 + 1) }
++        pieces.enumerated().map { .chunk($1, tokenId: $0 + 1, logprob: 0) }
+     }
+ 
+     /// Streams `events` through the chat handler and returns the content deltas it put
+@@ -104,14 +104,14 @@ final class JSONModeStreamTests: XCTestCase {
+     /// never reached the client.
+     func testReplyShorterThanTheFlushThresholdIsSentWhenTheStreamEnds() async throws {
+         let deltas = try await contentDeltas(for: [
+-            .chunk("{\"ok\": true}", tokenId: 1), info(stopReason: .stop, tokens: 5),
++            .chunk("{\"ok\": true}", tokenId: 1, logprob: 0), info(stopReason: .stop, tokens: 5),
+         ])
+         XCTAssertEqual(deltas.joined(), "{\"ok\": true}")
+     }
+ 
+     /// A stream that ends without `.info` (an error, a cancelled decode) keeps what it had.
+     func testBufferIsSentWhenTheStreamEndsWithoutInfo() async throws {
+-        let deltas = try await contentDeltas(for: [.chunk("{\"ok\": true}", tokenId: 1)])
++        let deltas = try await contentDeltas(for: [.chunk("{\"ok\": true}", tokenId: 1, logprob: 0)])
+         XCTAssertEqual(deltas.joined(), "{\"ok\": true}")
+     }
+ 
+@@ -132,7 +132,7 @@ final class JSONModeStreamTests: XCTestCase {
+ 
+     func testOutsideJSONModeTheChunkIsForwardedAsIs() async throws {
+         let deltas = try await contentDeltas(
+-            for: [.chunk("{\"ok\": true}", tokenId: 1), info(stopReason: .stop, tokens: 5)],
++            for: [.chunk("{\"ok\": true}", tokenId: 1, logprob: 0), info(stopReason: .stop, tokens: 5)],
+             jsonMode: false)
+         XCTAssertEqual(deltas, ["{\"ok\": true}"])
+     }
+diff --git a/tests/SwiftLMTests/OwnFeatureHTTPTests.swift b/tests/SwiftLMTests/OwnFeatureHTTPTests.swift
+new file mode 100644
+index 0000000..77ff4bc
+--- /dev/null
++++ b/tests/SwiftLMTests/OwnFeatureHTTPTests.swift
+@@ -0,0 +1,340 @@
++import Darwin
++import Foundation
++import MLX
++import MLXLMCommon
++import Tokenizers
++import XCTest
++
++final class OwnFeatureHTTPTests: XCTestCase {
++  private var previousMemoryLimit = 0
++  private var previousCacheLimit = 0
++
++  override func setUp() {
++    super.setUp()
++    previousMemoryLimit = Memory.memoryLimit
++    previousCacheLimit = Memory.cacheLimit
++    Memory.memoryLimit = 64 * 1024 * 1024
++    Memory.cacheLimit = 0
++  }
++
++  override func tearDown() {
++    Stream.defaultStream.synchronize()
++    Memory.clearCache()
++    Memory.cacheLimit = previousCacheLimit
++    Memory.memoryLimit = previousMemoryLimit
++    super.tearDown()
++  }
++
++  func testPartitionedLayerCallSelectsDevicesAndRestoresGPUContext() {
++    XCTAssertFalse(ExpertStreamingConfig.shared.isEnabled)
++    let originalDevice = Device.defaultDevice().deviceType
++    Device.withDefaultDevice(.gpu) {
++      XCTAssertEqual(Device.defaultDevice().deviceType, .gpu)
++      let cpuResult = partitionedLayerCall(index: 1, gpuLayerCount: 1) {
++        XCTAssertEqual(Device.defaultDevice().deviceType, .cpu)
++        let result = MLXArray([Float(2), 3]) * 2
++        eval(result)
++        return result
++      }
++      XCTAssertEqual(cpuResult.asArray(Float.self), [4, 6])
++      XCTAssertEqual(Device.defaultDevice().deviceType, .gpu)
++
++      let gpuResult = partitionedLayerCall(index: 0, gpuLayerCount: 1) {
++        XCTAssertEqual(Device.defaultDevice().deviceType, .gpu)
++        let result = MLXArray([Float(4), 5]) + 1
++        eval(result)
++        return result
++      }
++      XCTAssertEqual(gpuResult.asArray(Float.self), [5, 6])
++      XCTAssertEqual(Device.defaultDevice().deviceType, .gpu)
++    }
++    XCTAssertEqual(Device.defaultDevice().deviceType, originalDevice)
++  }
++
++  func testDefaultMemoryLimitUsesEightyPercentOfPhysicalRAM() async throws {
++    let checkpoint = try await makeCheckpoint()
++    let server = try await startServer(checkpoint: checkpoint.directory, memoryLimitMB: nil)
++    defer { server.stop() }
++
++    let health = try await server.health()
++    let expected = Int(Double(ProcessInfo.processInfo.physicalMemory) * 0.8) / (1024 * 1024)
++    XCTAssertEqual(health.memory.limitMB, expected)
++    XCTAssertLessThan(health.memory.peakMB, 64)
++  }
++
++  func testExplicitMemoryLimitAndHTTPLogprobsUseActualCheckpoint() async throws {
++    let checkpoint = try await makeCheckpoint()
++    let server = try await startServer(checkpoint: checkpoint.directory, memoryLimitMB: 64)
++    defer { server.stop() }
++    let initialHealth = try await server.health()
++    XCTAssertEqual(initialHealth.memory.limitMB, 64)
++
++    let withoutLogprobs = try await server.chat(streaming: false, logprobs: false)
++    let omitted = try JSONDecoder().decode(ChatReply.self, from: withoutLogprobs)
++    XCTAssertNil(try XCTUnwrap(omitted.choices.first).logprobs)
++
++    let response = try await server.chat(streaming: false, logprobs: true)
++    let reply = try JSONDecoder().decode(ChatReply.self, from: response)
++    let choice = try XCTUnwrap(reply.choices.first)
++    let entries = try XCTUnwrap(choice.logprobs).content
++    XCTAssertEqual(choice.message?.content, "AAA")
++    try assertLogprobs(entries, expected: checkpoint.logProbability)
++
++    let streamed = try await server.chat(streaming: true, logprobs: true)
++    let body = String(decoding: streamed, as: UTF8.self)
++    var streamedEntries = [ProbabilityEntry]()
++    var text = ""
++    var completed = false
++    for raw in body.components(separatedBy: "\n") {
++      let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
++      guard line.hasPrefix("data: ") else { continue }
++      let payload = String(line.dropFirst(6))
++      if payload == "[DONE]" {
++        completed = true
++        continue
++      }
++      let event = try JSONDecoder().decode(ChatReply.self, from: Data(payload.utf8))
++      for eventChoice in event.choices {
++        text += eventChoice.delta?.content ?? ""
++        streamedEntries += eventChoice.logprobs?.content ?? []
++      }
++    }
++    XCTAssertTrue(completed, "The SSE response did not include [DONE]: \(body)")
++    XCTAssertEqual(text, "AAA")
++    try assertLogprobs(streamedEntries, expected: checkpoint.logProbability)
++    for (entry, streamedEntry) in zip(entries, streamedEntries) {
++      XCTAssertEqual(entry.logprob, streamedEntry.logprob, accuracy: 0.0001)
++    }
++    let health = try await server.health()
++    XCTAssertEqual(health.memory.limitMB, 64)
++    XCTAssertLessThan(health.memory.peakMB, 64)
++  }
++
++  private func assertLogprobs(_ entries: [ProbabilityEntry], expected: Double) throws {
++    XCTAssertEqual(entries.count, 3)
++    for entry in entries {
++      XCTAssertEqual(entry.token, "A")
++      XCTAssertEqual(entry.bytes, [65])
++      XCTAssertTrue(entry.topLogprobs.isEmpty)
++      XCTAssertTrue(entry.logprob.isFinite)
++      XCTAssertEqual(entry.logprob, expected, accuracy: 0.0001)
++    }
++  }
++
++  private var repository: URL {
++    URL(fileURLWithPath: #filePath).deletingLastPathComponent()
++      .deletingLastPathComponent().deletingLastPathComponent()
++  }
++
++  private func makeCheckpoint() async throws -> (directory: URL, logProbability: Double) {
++    let source = repository.appendingPathComponent("tests/fixtures/dense")
++    let directory = FileManager.default.temporaryDirectory
++      .appendingPathComponent("swiftlm-http-\(UUID().uuidString)")
++    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
++    addTeardownBlock { try FileManager.default.removeItem(at: directory) }
++    for file in ["config.json", "tokenizer.json", "tokenizer_config.json"] {
++      try FileManager.default.copyItem(
++        at: source.appendingPathComponent(file), to: directory.appendingPathComponent(file))
++    }
++    let tokenizer = try await AutoTokenizer.from(modelFolder: directory)
++    let tokenA = try XCTUnwrap(tokenizer.convertTokenToId("A"))
++    let tokenB = try XCTUnwrap(tokenizer.convertTokenToId("B"))
++    let original = try MLX.loadArrays(url: source.appendingPathComponent("model.safetensors"))
++    var weights = [String: MLXArray]()
++    for (name, tensor) in original {
++      if name == "model.embed_tokens.weight" || name.hasSuffix("norm.weight") {
++        weights[name] = MLXArray.ones(tensor.shape)
++      } else {
++        weights[name] = MLXArray.zeros(tensor.shape)
++      }
++    }
++    let head = try XCTUnwrap(weights["lm_head.weight"])
++    head[tokenA] = MLXArray.ones([head.dim(1)]) / Float(head.dim(1))
++    head[tokenB] = MLXArray.ones([head.dim(1)]) / Float(head.dim(1) * 2)
++    try MLX.save(arrays: weights, url: directory.appendingPathComponent("model.safetensors"))
++    let expected = 1 - log(Double(head.dim(0) - 2) + exp(1) + exp(0.5))
++    return (directory, expected)
++  }
++
++  private func startServer(checkpoint: URL, memoryLimitMB: Int?) async throws -> TinyServer {
++    let binaryDirectory: URL
++    if let configured = ProcessInfo.processInfo.environment["SWIFTLM_BIN_DIR"] {
++      binaryDirectory = URL(
++        fileURLWithPath: configured, isDirectory: true, relativeTo: repository)
++        .standardizedFileURL
++    } else {
++      binaryDirectory = Bundle(for: OwnFeatureHTTPTests.self).bundleURL
++        .deletingLastPathComponent()
++    }
++    let executable = binaryDirectory.appendingPathComponent("SwiftLM")
++    guard FileManager.default.isExecutableFile(atPath: executable.path) else {
++      throw ServerTestError.missingExecutable(
++        "Build SwiftLM beside the test bundle or set SWIFTLM_BIN_DIR. Missing: \(executable.path)")
++    }
++    let logURL = checkpoint.appendingPathComponent("server.log")
++    guard FileManager.default.createFile(atPath: logURL.path, contents: nil) else {
++      throw CocoaError(.fileWriteUnknown)
++    }
++    let output = try FileHandle(forWritingTo: logURL)
++    defer { try? output.close() }
++    let process = Process()
++    process.executableURL = executable
++    process.currentDirectoryURL = repository
++    let port = try reservePort()
++    process.arguments = [
++      "--model", checkpoint.path, "--host", "127.0.0.1", "--port", String(port),
++      "--max-tokens", "3", "--temp", "0", "--no-token-echo",
++    ]
++    if let memoryLimitMB {
++      process.arguments! += ["--mem-limit", String(memoryLimitMB)]
++    }
++    process.standardOutput = output
++    process.standardError = output
++    try process.run()
++    let server = TinyServer(
++      process: process, url: URL(string: "http://127.0.0.1:\(port)")!, logURL: logURL)
++    do {
++      let deadline = Date().addingTimeInterval(30)
++      var lastError: (any Error)?
++      while process.isRunning, Date() < deadline {
++        do {
++          _ = try await server.health()
++          return server
++        } catch {
++          lastError = error
++        }
++        try await Task.sleep(for: .milliseconds(20))
++      }
++      throw ServerTestError.startup(
++        "\(String(describing: lastError))\n\(try String(contentsOf: logURL, encoding: .utf8))")
++    } catch {
++      server.stop()
++      throw error
++    }
++  }
++
++  private func reservePort() throws -> UInt16 {
++    let descriptor = socket(AF_INET, SOCK_STREAM, 0)
++    guard descriptor >= 0 else { throw ServerTestError.socket(errno) }
++    defer { close(descriptor) }
++    var address = sockaddr_in()
++    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
++    address.sin_family = sa_family_t(AF_INET)
++    address.sin_addr.s_addr = inet_addr("127.0.0.1")
++    let bound = withUnsafePointer(to: &address) { pointer in
++      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
++        Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
++      }
++    }
++    guard bound == 0 else { throw ServerTestError.socket(errno) }
++    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
++    let named = withUnsafeMutablePointer(to: &address) { pointer in
++      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
++        getsockname(descriptor, $0, &length)
++      }
++    }
++    guard named == 0 else { throw ServerTestError.socket(errno) }
++    return UInt16(bigEndian: address.sin_port)
++  }
++}
++
++private enum ServerTestError: Error {
++  case missingExecutable(String)
++  case socket(Int32)
++  case startup(String)
++  case status(Int)
++  case request(String)
++}
++
++private struct TinyServer {
++  let process: Process
++  let url: URL
++  let logURL: URL
++
++  func stop() {
++    guard process.isRunning else { return }
++    process.terminate()
++    let deadline = Date().addingTimeInterval(2)
++    while process.isRunning, Date() < deadline {
++      Thread.sleep(forTimeInterval: 0.01)
++    }
++    if process.isRunning { kill(process.processIdentifier, SIGKILL) }
++    process.waitUntilExit()
++  }
++
++  func health() async throws -> HealthReply {
++    let data = try await request(path: "health", body: nil)
++    return try JSONDecoder().decode(HealthReply.self, from: data)
++  }
++
++  func chat(streaming: Bool, logprobs: Bool) async throws -> Data {
++    let body = Data(
++      """
++      {"messages":[{"role":"user","content":"hello"}],"max_tokens":3,
++       "temperature":0,"stream":\(streaming),"logprobs":\(logprobs)}
++      """.utf8)
++    return try await request(path: "v1/chat/completions", body: body)
++  }
++
++  private func request(path: String, body: Data?) async throws -> Data {
++    var request = URLRequest(
++      url: url.appendingPathComponent(path), timeoutInterval: body == nil ? 3 : 20)
++    if let body {
++      request.httpMethod = "POST"
++      request.httpBody = body
++      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
++    }
++    do {
++      let (data, response) = try await URLSession.shared.data(for: request)
++      let status = (response as? HTTPURLResponse)?.statusCode ?? 0
++      guard status == 200 else { throw ServerTestError.status(status) }
++      return data
++    } catch {
++      guard body != nil else { throw error }
++      throw ServerTestError.request(
++        "\(error)\n\(try String(contentsOf: logURL, encoding: .utf8))")
++    }
++  }
++}
++
++private struct HealthReply: Decodable {
++  let memory: MemoryValues
++  struct MemoryValues: Decodable {
++    let limitMB: Int
++    let peakMB: Int
++    enum CodingKeys: String, CodingKey {
++      case limitMB = "limit_mb"
++      case peakMB = "peak_mb"
++    }
++  }
++}
++
++private struct ChatReply: Decodable {
++  let choices: [Choice]
++  struct Choice: Decodable {
++    let message: Message?
++    let delta: Message?
++    let logprobs: Probabilities?
++  }
++  struct Message: Decodable {
++    let content: String?
++  }
++  struct Probabilities: Decodable {
++    let content: [ProbabilityEntry]
++  }
++}
++
++private struct ProbabilityEntry: Decodable {
++  let token: String
++  let logprob: Double
++  let bytes: [Int]
++  let topLogprobs: [Alternative]
++  enum CodingKeys: String, CodingKey {
++    case token, logprob, bytes
++    case topLogprobs = "top_logprobs"
++  }
++  struct Alternative: Decodable {
++    let token: String
++    let logprob: Double
++  }
++}
+diff --git a/tests/SwiftLMTests/TextCompletionFinishReasonTests.swift b/tests/SwiftLMTests/TextCompletionFinishReasonTests.swift
+index 1069bc3..872b264 100644
+--- a/tests/SwiftLMTests/TextCompletionFinishReasonTests.swift
++++ b/tests/SwiftLMTests/TextCompletionFinishReasonTests.swift
+@@ -57,7 +57,7 @@ final class TextCompletionFinishReasonTests: XCTestCase {
+ 
+     func testMaxTokensReportsLength() async throws {
+         let body = try await respond(to: [
+-            .chunk("one", tokenId: 1), .chunk(" two", tokenId: 2),
++            .chunk("one", tokenId: 1, logprob: 0), .chunk(" two", tokenId: 2, logprob: 0),
+             info(stopReason: .length, tokens: 2),
+         ])
+         XCTAssertEqual(try finishReason(body), "length")
+@@ -67,7 +67,7 @@ final class TextCompletionFinishReasonTests: XCTestCase {
+ 
+     func testEndOfSequenceReportsStop() async throws {
+         let body = try await respond(to: [
+-            .chunk("done", tokenId: 1), info(stopReason: .stop, tokens: 1),
++            .chunk("done", tokenId: 1, logprob: 0), info(stopReason: .stop, tokens: 1),
+         ])
+         XCTAssertEqual(try finishReason(body), "stop")
+     }
+@@ -76,7 +76,7 @@ final class TextCompletionFinishReasonTests: XCTestCase {
+     /// on the same chunk: the text was cut at the stop, so that is what happened.
+     func testClientStopSequenceReportsStop() async throws {
+         let body = try await respond(to: [
+-            .chunk("alpha", tokenId: 1), .chunk("<|end|>beta", tokenId: 2),
++            .chunk("alpha", tokenId: 1, logprob: 0), .chunk("<|end|>beta", tokenId: 2, logprob: 0),
+             info(stopReason: .length, tokens: 2),
+         ], stop: ["<|end|>"])
+         XCTAssertEqual(try finishReason(body), "stop")
+@@ -88,7 +88,7 @@ final class TextCompletionFinishReasonTests: XCTestCase {
+     /// the decoder buffers), and that must survive the finish_reason change.
+     func testUsageStillComesFromTheInfoEvent() async throws {
+         let body = try await respond(to: [
+-            .chunk("x", tokenId: 1), info(stopReason: .length, tokens: 7),
++            .chunk("x", tokenId: 1, logprob: 0), info(stopReason: .length, tokens: 7),
+         ])
+         let usage = try XCTUnwrap(body["usage"] as? [String: Any])
+         XCTAssertEqual(usage["completion_tokens"] as? Int, 7)

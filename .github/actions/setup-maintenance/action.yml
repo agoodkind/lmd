@@ -1,0 +1,63 @@
+name: Set up LMD maintenance
+description: Build LMD maintenance commands from an exact source commit.
+
+inputs:
+  ref:
+    description: Exact LMD source commit.
+    required: true
+  path:
+    description: Checkout path relative to the GitHub workspace.
+    default: lmd-validation-tools
+  test-filter:
+    description: Swift test classes that the Linux setup verifies.
+    default: LMDMaintenanceTests
+
+outputs:
+  binary:
+    description: Absolute path to the maintenance executable.
+    value: ${{ steps.binary.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout LMD maintenance source
+      uses: actions/checkout@v4
+      with:
+        repository: agoodkind/lmd
+        ref: ${{ inputs.ref }}
+        path: ${{ inputs.path }}
+        persist-credentials: false
+
+    - name: Set up the shared Linux Swift build tools
+      if: runner.os == 'Linux'
+      uses: agoodkind/swift-makefile/.github/actions/setup-linux-swift-mk@main
+
+    - name: Build and test LMD maintenance commands on Linux
+      if: runner.os == 'Linux'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        TOOL_ROOT: ${{ github.workspace }}/${{ inputs.path }}
+        TEST_FILTER: ${{ inputs.test-filter }}
+      run: make -C "$TOOL_ROOT" maintenance-test LMD_MAINTENANCE_JOBS=2 LMD_MAINTENANCE_TEST_FILTER="$TEST_FILTER" SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED=NO
+
+    - name: Build LMD maintenance commands on macOS
+      if: runner.os == 'macOS'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        TOOL_ROOT: ${{ github.workspace }}/${{ inputs.path }}
+      run: make -C "$TOOL_ROOT" maintenance-build LINT_CONCURRENCY=4 SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED=NO
+
+    - name: Resolve the maintenance executable
+      id: binary
+      shell: bash
+      env:
+        CHECKOUT_PATH: ${{ inputs.path }}
+      run: |
+        BINARY_PATH="$GITHUB_WORKSPACE/$CHECKOUT_PATH/Tools/.build/debug/lmd-maintenance"
+        if [[ ! -x "$BINARY_PATH" ]]; then
+          printf '::error::LMD maintenance executable is missing or not executable: %s\n' "$BINARY_PATH"
+          exit 1
+        fi
+        printf 'path=%s\n' "$BINARY_PATH" >> "$GITHUB_OUTPUT"

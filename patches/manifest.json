@@ -1,0 +1,291 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "repository": "agoodkind/mlx-swift",
+      "upstream_repository": "ml-explore/mlx-swift",
+      "upstream_commit": "5f8f4d11779cf403a690373cea4965a1178c96a2",
+      "fork_commit": "2a1866667cf31b4300eb78c4862091f45b3cead7",
+      "expected_tree": "9651c3c3bc6592a760502e544e95d94b00e9c2b1",
+      "patches": [
+        {
+          "path": "mlx-swift/0001-preserve-fork-integration.patch",
+          "sha256": "ffb1c5f67e8e86f0652f0439ad23e45e041e5fb0f523e756a2f97ca4614c4889",
+          "expected_tree": "a4e3d7b947871326fbdc3ffe8aa710ad8bd8ec07"
+        },
+        {
+          "path": "mlx-swift/0002-remove-duplicate-ci-dispatch.patch",
+          "sha256": "6cc1779c4caf4b10f6961a209549e1ef863bf5ff63169d58f841a86f58dc4f1e",
+          "expected_tree": "e60e2eb1fc89fc97eb21df3b1d2602f366acb5ee"
+        },
+        {
+          "path": "mlx-swift/0003-ci-validation.patch",
+          "sha256": "490c66fec0092361fc05d77ca52b01d293712313088d3f53587bdcd62cba56d4",
+          "expected_tree": "1510381eaa7e7b4b5d4f31a2090c9ec654cedab3"
+        },
+        {
+          "path": "mlx-swift/0004-ci-consumer-validation.patch",
+          "sha256": "952b1638d5dd95fbb765441a6fc529911e8b3021d0dc0f4325c5a34e70d66fc1",
+          "expected_tree": "01142724be416bfe8ded4486b419457319c305f9"
+        },
+        {
+          "path": "mlx-swift/0005-lmd-consumer-validation.patch",
+          "sha256": "cddc25d8abe601a84af2ccf95fd0f3f55e5e8a6b71c3af9cc002b90e732754cf",
+          "expected_tree": "2cf9906c3ebc84b60fa5bb9106333d2c1fbbc7a3"
+        },
+        {
+          "path": "mlx-swift/0006-swift-ci-maintenance.patch",
+          "sha256": "bf3932c7ddaab7ff2aea2062b0ca07c4587da0c1a89fe8b8744da414b304fd68",
+          "expected_tree": "386c3ae4c2636380a99306e9cff5c028a908c053"
+        },
+        {
+          "path": "mlx-swift/0007-portable-fixture-controls.patch",
+          "sha256": "b4793becc6f2edc2c607c0d1c5f211176115e407433ed19e080710c40874916c",
+          "expected_tree": "9651c3c3bc6592a760502e544e95d94b00e9c2b1"
+        }
+      ],
+      "profiles": [
+        {
+          "name": "core-runtime-7867247",
+          "commit": "786724757aa480f049d3a913c59da7e0e61ad5dc",
+          "patch": {
+            "path": "profiles/core-runtime-7867247.patch",
+            "sha256": "0adbdd4b0cabd36c4e624c6e5b8c1afa619d2ef745f2fa842369fee61b0cd618",
+            "expected_tree": "087e483d95efc7625c45b5fa6b92d90d57bc47e2"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "agoodkind/mlx-swift-lm",
+      "upstream_repository": "ml-explore/mlx-swift-lm",
+      "upstream_commit": "991266ad300f47a3b9f21e62ff5bdb679215e758",
+      "fork_commit": "90d2106275fc3331e9a82ae1b4aec101293e2c66",
+      "expected_tree": "dc3911b172670931b8ce8e302bd94374547839bc",
+      "patches": [
+        {
+          "path": "mlx-swift-lm/0001-preserve-fork-integration.patch",
+          "sha256": "66bd8b29489403837c18a740ba8e27f5b079ebbb7ed14e4076f5a52b16ab308c",
+          "expected_tree": "3974402d3ad0ef6cb7907e5f2a53844adccb105c"
+        },
+        {
+          "path": "mlx-swift-lm/0002-require-qwen-opening-frames.patch",
+          "sha256": "ae5736b316234b3244d6d41cd1440b6dae1190e204203a7cefda412d5131ea27",
+          "expected_tree": "56d2d7687857f71d2f3004be18337aacc243d867"
+        },
+        {
+          "path": "mlx-swift-lm/0003-ci-validation.patch",
+          "sha256": "bce9c5bd80ff4d8d9f9ca99a1e1ef92dc49b5b49c6e2472219f85f0b6fe5626f",
+          "expected_tree": "e082fbe93caf4e6302dbc2c9399f2fb29172cd1f"
+        },
+        {
+          "path": "mlx-swift-lm/0004-ci-consumer-validation.patch",
+          "sha256": "855b488bf9d77621fa590c918207eafd0d46580e992dade9523ca0206e2676d8",
+          "expected_tree": "0eb022cb0802aba78aa724015f805eee81fa4e63"
+        },
+        {
+          "path": "mlx-swift-lm/0005-lmd-consumer-validation.patch",
+          "sha256": "c1fd65fe0fb83494be458a72a1a976de35d0ba4b0e68431e0159cb77d99b2100",
+          "expected_tree": "130fb0dfb76eb4d98e38433914365daa2633c190"
+        },
+        {
+          "path": "mlx-swift-lm/0006-swift-ci-maintenance.patch",
+          "sha256": "b2b03a2df3505c78b03e87f446115aee98fa4216fe8c65bacf170fcf5e90abca",
+          "expected_tree": "90e2653d4319b8d0ad12bb7585cebee19fa094d0"
+        },
+        {
+          "path": "mlx-swift-lm/0007-portable-fixture-controls.patch",
+          "sha256": "087237fc2751911eaba4dd431e252bbba8ecc73a7da41e559d11c6e2ce91b5ab",
+          "expected_tree": "dc3911b172670931b8ce8e302bd94374547839bc"
+        }
+      ],
+      "profiles": [
+        {
+          "name": "library-runtime-60054f7",
+          "commit": "60054f77f91bc3e77c44950054dd6a9b53359352",
+          "patch": {
+            "path": "profiles/library-runtime-60054f7.patch",
+            "sha256": "78def55ba8679c18e539108818024cb54f49b3001ffec037329a7aadb6ee6383",
+            "expected_tree": "56d2d7687857f71d2f3004be18337aacc243d867"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "agoodkind/SwiftLM",
+      "upstream_repository": "SharpAI/SwiftLM",
+      "upstream_commit": "80e487287b8c9932c01783110da3de99544a5037",
+      "fork_commit": "a9c9902c71eb970b54a3e78df430a8a05931de78",
+      "expected_tree": "9c8aef10b38ef4d507b462791e6284abfe431299",
+      "patches": [
+        {
+          "path": "SwiftLM/0001-preserve-fork-integration.patch",
+          "sha256": "b4710020227bc3eb702634fb7b7e1c7b4a9113bf88b45274f31c2f0f3d1226d1",
+          "expected_tree": "c78714cca25aca04e5bf3a9b86ad6b078470fc48"
+        },
+        {
+          "path": "SwiftLM/0002-ci-validation.patch",
+          "sha256": "e0cc7b568ad2ea0533c12723ebc4698dd591cbd5d858381404828481e988b8c8",
+          "expected_tree": "8178a1d1642d15c44e0167cc5f628f041d408672"
+        },
+        {
+          "path": "SwiftLM/0003-http-child-diagnostics.patch",
+          "sha256": "fca9daa0e02bf4320669abac271e9fc7b12ddf397590e63b08a855efbafbe55e",
+          "expected_tree": "91463efa40ad46290e12f2c7122812f616f8a5fe"
+        },
+        {
+          "path": "SwiftLM/0004-lmd-consumer-validation.patch",
+          "sha256": "8afa8789d684c605422019d1199e9d77ca58cb3f70e342f043e145d03d360473",
+          "expected_tree": "4a8056e80562b96d39509079f2582a738d10a3db"
+        },
+        {
+          "path": "SwiftLM/0005-upstream-cache-and-swift-ci.patch",
+          "sha256": "62e7f61eebe33bfb1c6f807c64e56a14b003d6e74eb02b934426ee635ecaaf3a",
+          "expected_tree": "f29a222d8d284a1897733a8996a8aff025e1a515"
+        },
+        {
+          "path": "SwiftLM/0006-portable-fixture-controls.patch",
+          "sha256": "7995f598483f5b3d78299ef647749b5c41343108e030c23a52f681e457c11106",
+          "expected_tree": "9c8aef10b38ef4d507b462791e6284abfe431299"
+        }
+      ],
+      "profiles": [
+        {
+          "name": "swiftlm-http-diagnostics-dbf4eee",
+          "commit": "dbf4eee36701d844996038b182a272f40a41f414",
+          "patch": {
+            "path": "profiles/swiftlm-http-diagnostics-dbf4eee.patch",
+            "sha256": "403d39bc278d8dab4933b1081b6096858ea30d4a863fe4e29af7f3c37d5d0d55",
+            "expected_tree": "91463efa40ad46290e12f2c7122812f616f8a5fe"
+          }
+        },
+        {
+          "name": "swiftlm-runtime-d2f09fb",
+          "commit": "d2f09fb66097739de05c63397e18bd259edeadd0",
+          "patch": {
+            "path": "profiles/swiftlm-runtime-d2f09fb.patch",
+            "sha256": "49e3b9eac5b215c8d8dcc36a8d8c8e3079306699e1fbac12e8a2b38f626c0f97",
+            "expected_tree": "c78714cca25aca04e5bf3a9b86ad6b078470fc48"
+          }
+        },
+        {
+          "name": "swiftlm-runtime-4cc594d",
+          "commit": "4cc594d1cc6f88116f1509cee5ba5b6a1471f0be",
+          "patch": {
+            "path": "profiles/swiftlm-runtime-4cc594d.patch",
+            "sha256": "0a447fc37b94220e7f120c8c2866a2289dc87666c32aafd172a7416bc150cfbe",
+            "expected_tree": "f29a222d8d284a1897733a8996a8aff025e1a515"
+          }
+        }
+      ]
+    }
+  ],
+  "protections": [
+    {
+      "feature": "SSD expert streaming",
+      "repository": "agoodkind/mlx-swift",
+      "selectors": [
+        "MLXTests/ForkProtectionTests/testSSDExpertReadFeedsQuantizedMatmulAndMetrics"
+      ]
+    },
+    {
+      "feature": "SSD prefetch and offsets",
+      "repository": "agoodkind/mlx-swift",
+      "selectors": [
+        "MLXTests/ForkProtectionTests/testPrefetchAndDirectReadsPreserveExpertOffsets"
+      ]
+    },
+    {
+      "feature": "TurboKV encoding",
+      "repository": "agoodkind/mlx-swift",
+      "selectors": [
+        "MLXTests/ForkProtectionTests/testTurboKVReconstructsBothSupportedHeadSizes"
+      ]
+    },
+    {
+      "feature": "FP8 decoding",
+      "repository": "agoodkind/mlx-swift",
+      "selectors": [
+        "MLXTests/ForkProtectionTests/testCompatibilityFP8DecoderPreservesKnownValues"
+      ]
+    },
+    {
+      "feature": "Allocation bucket reuse",
+      "repository": "agoodkind/mlx-swift",
+      "selectors": [
+        "MLXTests/ForkProtectionTests/testNearbyLargeAllocationsReuseOneBucket"
+      ]
+    },
+    {
+      "feature": "NAX precision",
+      "repository": "agoodkind/mlx-swift",
+      "selectors": [
+        "MLXTests/ForkProtectionTests/testFloat16GPUMatmulMatchesCPU",
+        "MLXTests/ForkProtectionTests/testBfloat16GPUMatmulMatchesCPU"
+      ]
+    },
+    {
+      "feature": "Generation probabilities",
+      "repository": "agoodkind/mlx-swift-lm",
+      "selectors": [
+        "MLXLMTests/MLXTestingSuite/ForkGenerationTests"
+      ]
+    },
+    {
+      "feature": "Compressed cache history",
+      "repository": "agoodkind/mlx-swift-lm",
+      "selectors": [
+        "MLXLMTests/MLXTestingSuite/ForkCacheCompatibilityTests"
+      ]
+    },
+    {
+      "feature": "Speculative decoding",
+      "repository": "agoodkind/mlx-swift-lm",
+      "selectors": [
+        "MLXLMTests/MLXTestingSuite/ForkSpeculativeGenerationTests"
+      ]
+    },
+    {
+      "feature": "Gemma video frame retention",
+      "repository": "agoodkind/mlx-swift-lm",
+      "selectors": [
+        "MLXLMTests/MLXTestingSuite/Gemma4VideoTests"
+      ]
+    },
+    {
+      "feature": "Gemma video geometry",
+      "repository": "agoodkind/mlx-swift-lm",
+      "selectors": [
+        "MLXLMTests/MLXTestingSuite/Gemma4VideoGeometryTests"
+      ]
+    },
+    {
+      "feature": "HTTP probabilities and memory limits",
+      "repository": "agoodkind/SwiftLM",
+      "selectors": [
+        "SwiftLMTests.OwnFeatureHTTPTests"
+      ]
+    },
+    {
+      "feature": "CPU and GPU layer selection",
+      "repository": "agoodkind/SwiftLM",
+      "selectors": [
+        "SwiftLMTests.OwnFeatureHTTPTests"
+      ]
+    },
+    {
+      "feature": "Prompt cache reuse",
+      "repository": "agoodkind/SwiftLM",
+      "selectors": [
+        "SwiftLMTests.OwnFeatureHTTPTests"
+      ]
+    },
+    {
+      "feature": "Qwen native tool framing",
+      "repository": "agoodkind/mlx-swift-lm",
+      "selectors": [
+        "MLXLMTests/MLXTestingSuite/Qwen35FramingTests"
+      ]
+    }
+  ]
+}

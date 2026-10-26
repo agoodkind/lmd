@@ -56,21 +56,7 @@ extension DevTool {
   /// leak to the user's terminal.
   func isServiceLoaded(_ serviceTarget: String) -> Bool {
     Output.debug("isServiceLoaded service=\(serviceTarget)")
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-    process.arguments = ["print", serviceTarget]
-    let sink = Pipe()
-    process.standardOutput = sink
-    process.standardError = sink
-    do {
-      try process.run()
-    } catch {
-      Output.notice("isServiceLoaded launch failed service=\(serviceTarget) error=\(error)")
-      return false
-    }
-    process.waitUntilExit()
-    sink.fileHandleForReading.readDataToEndOfFile()
-    return process.terminationStatus == 0
+    return Shell.run("/bin/launchctl", ["print", serviceTarget]).status == 0
   }
 
   func waitForServiceUnload(_ serviceTarget: String, timeoutSeconds: Int) {

@@ -1,0 +1,92 @@
+diff --git a/.github/workflows/downstream_integration.yml b/.github/workflows/downstream_integration.yml
+index 422a92c59e6f0894bb7edd5fde19cd8d9c1ec4a9..fb3b066fa8cde56ac3f89b510bd21c832c0094f6 100644
+--- a/.github/workflows/downstream_integration.yml
++++ b/.github/workflows/downstream_integration.yml
+@@ -9,7 +9,7 @@ on:
+         description: Exact SwiftLM commit to validate
+         type: string
+         required: true
+-        default: d2f09fb66097739de05c63397e18bd259edeadd0
++        default: dbf4eee36701d844996038b182a272f40a41f414
+       mlx_swift_lm_ref:
+         description: Exact mlx-swift-lm commit to validate
+         type: string
+@@ -24,13 +24,38 @@ concurrency:
+   cancel-in-progress: true
+ 
+ jobs:
++  lmd_consumer:
++    name: LMD consumer
++    uses: agoodkind/lmd/.github/workflows/lmd_integration.yml@cdc7e518b471626a7e83d0681480ff2d2d504472
++    with:
++      lmd_ref: cdc7e518b471626a7e83d0681480ff2d2d504472
++      core_ref: ${{ github.event.pull_request.head.sha || github.sha }}
++      library_ref: ${{ inputs.mlx_swift_lm_ref || '60054f77f91bc3e77c44950054dd6a9b53359352' }}
++      swiftlm_ref: ${{ inputs.swiftlm_ref || 'dbf4eee36701d844996038b182a272f40a41f414' }}
++
++  lmd_integration:
++    name: LMD Integration
++    needs: lmd_consumer
++    if: always()
++    runs-on: ubuntu-latest
++    steps:
++      - name: Require successful LMD validation
++        env:
++          LMD_RESULT: ${{ needs.lmd_consumer.result }}
++        run: |
++          if [[ "$LMD_RESULT" != 'success' ]]; then
++            echo "::error::LMD validation did not succeed. Result: $LMD_RESULT."
++            exit 1
++          fi
++
+   test-swiftlm-umbrella:
+     name: Test with SwiftLM (Umbrella Repo)
+     runs-on: macos-26
+     timeout-minutes: 40
+     env:
+       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+-      SWIFTLM_REF: ${{ inputs.swiftlm_ref || 'd2f09fb66097739de05c63397e18bd259edeadd0' }}
++      CORE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
++      SWIFTLM_REF: ${{ inputs.swiftlm_ref || 'dbf4eee36701d844996038b182a272f40a41f414' }}
+       MLX_SWIFT_LM_REF: ${{ inputs.mlx_swift_lm_ref || '60054f77f91bc3e77c44950054dd6a9b53359352' }}
+       SWIFTLM_TEST_FILTER: 'SwiftLMTests\.(PromptCacheTests|MultimodalTokenExtractionTests|ChatRequestParsingTests|ThinkingTagStripTests|OwnFeatureHTTPTests)'
+     steps:
+@@ -49,6 +74,7 @@ jobs:
+       - name: Checkout mlx-swift (this repository)
+         uses: actions/checkout@v4
+         with:
++          ref: ${{ env.CORE_REF }}
+           path: mlx-swift-pr
+           submodules: recursive
+           persist-credentials: false
+diff --git a/.github/workflows/swiftlm_integration.yml b/.github/workflows/swiftlm_integration.yml
+index b8846edcab9cfd6c8630a714116845f14f2c35b3..ec01cfb824dfcf4818c39d331b69c4c191af23cd 100644
+--- a/.github/workflows/swiftlm_integration.yml
++++ b/.github/workflows/swiftlm_integration.yml
+@@ -10,7 +10,7 @@ on:
+         description: Exact SwiftLM commit to validate
+         type: string
+         required: true
+-        default: d2f09fb66097739de05c63397e18bd259edeadd0
++        default: dbf4eee36701d844996038b182a272f40a41f414
+       mlx_swift_lm_ref:
+         description: Exact mlx-swift-lm commit to validate
+         type: string
+@@ -43,7 +43,8 @@ jobs:
+     timeout-minutes: 45
+     env:
+       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+-      SWIFTLM_REF: ${{ inputs.swiftlm_ref || 'd2f09fb66097739de05c63397e18bd259edeadd0' }}
++      CORE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
++      SWIFTLM_REF: ${{ inputs.swiftlm_ref || 'dbf4eee36701d844996038b182a272f40a41f414' }}
+       MLX_SWIFT_LM_REF: ${{ inputs.mlx_swift_lm_ref || '60054f77f91bc3e77c44950054dd6a9b53359352' }}
+       SWIFTLM_TEST_FILTER: 'SwiftLMTests\.(PromptCacheTests|MultimodalTokenExtractionTests|ChatRequestParsingTests|ThinkingTagStripTests|OwnFeatureHTTPTests)'
+     steps:
+@@ -62,6 +63,7 @@ jobs:
+       - name: Checkout mlx-swift (this repository)
+         uses: actions/checkout@v4
+         with:
++          ref: ${{ env.CORE_REF }}
+           path: mlx-swift
+           submodules: recursive
+           persist-credentials: false

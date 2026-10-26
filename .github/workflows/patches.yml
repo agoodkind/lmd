@@ -1,0 +1,143 @@
+name: Verify patches
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      lmd_ref:
+        description: Exact LMD source commit
+        type: string
+        default: ''
+      core_ref:
+        description: Exact mlx-swift source commit
+        type: string
+        default: ''
+      library_ref:
+        description: Exact mlx-swift-lm base commit
+        type: string
+        default: ''
+      swiftlm_ref:
+        description: Exact SwiftLM source commit
+        type: string
+        default: ''
+      core_profile:
+        description: Explicit catalog profile for a previously tested core commit
+        type: string
+        default: ''
+      library_profile:
+        description: Explicit catalog profile for a previously tested library commit
+        type: string
+        default: ''
+      swiftlm_profile:
+        description: Explicit catalog profile for a previously tested SwiftLM commit
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: lmd
+
+jobs:
+  portable:
+    name: Verify recorded fork patches
+    runs-on: ubuntu-24.04
+    container: swift:6.3.2-noble@sha256:c4336909a71b2e69b884f4078cdf98c0cd081911632cb349ef72abc4cbed69fc
+    timeout-minutes: 60
+    env:
+      LMD_REF: ${{ inputs.lmd_ref || github.event.pull_request.head.sha || github.sha }}
+      CORE_PROFILE: ${{ inputs.core_profile }}
+      LIBRARY_PROFILE: ${{ inputs.library_profile }}
+      SWIFTLM_PROFILE: ${{ inputs.swiftlm_profile }}
+      GH_TOKEN: ${{ github.token }}
+      SWIFT_MK_SWIFTPM_COMPILE_CACHE_ENABLED: 'NO'
+      LMD_MAINTENANCE_JOBS: '2'
+    steps:
+      - name: Refresh Ubuntu package metadata
+        working-directory: .
+        run: apt-get update
+
+      - name: Install portable build prerequisites
+        working-directory: .
+        run: apt-get install --yes --no-install-recommends make curl
+
+      - name: Checkout the exact patch catalog
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/lmd
+          ref: ${{ inputs.lmd_ref || github.event.pull_request.head.sha || github.sha }}
+          path: lmd
+          persist-credentials: false
+
+      - name: Checkout fixed validation commands
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/lmd
+          ref: 2812aa0d79c00cda8185e11182e98ddea59eb6be
+          path: lmd/validation-tools
+          persist-credentials: false
+
+      - name: Set up the shared Linux Swift build tools
+        uses: agoodkind/swift-makefile/.github/actions/setup-linux-swift-mk@main
+
+      - name: Build and test the portable Swift commands
+        run: make -C validation-tools maintenance-test
+
+      - name: Read the catalog versions
+        id: catalog
+        run: validation-tools/Tools/.build/debug/lmd-maintenance read-patch-versions patches/manifest.json
+
+      - name: Checkout exact core history
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/mlx-swift
+          ref: ${{ inputs.core_ref || steps.catalog.outputs.core_ref }}
+          path: lmd/dependency-sources/mlx-swift
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact library history
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/mlx-swift-lm
+          ref: ${{ inputs.library_ref || steps.catalog.outputs.library_ref }}
+          path: lmd/dependency-sources/mlx-swift-lm
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact SwiftLM history
+        uses: actions/checkout@v4
+        with:
+          repository: agoodkind/SwiftLM
+          ref: ${{ inputs.swiftlm_ref || steps.catalog.outputs.swiftlm_ref }}
+          path: lmd/SwiftLM
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Reconstruct and compare the recorded fork patches
+        env:
+          CORE_REF: ${{ inputs.core_ref || steps.catalog.outputs.core_ref }}
+          LIBRARY_REF: ${{ inputs.library_ref || steps.catalog.outputs.library_ref }}
+          SWIFTLM_REF: ${{ inputs.swiftlm_ref || steps.catalog.outputs.swiftlm_ref }}
+        run: |
+          validation-tools/Tools/.build/debug/lmd-maintenance verify-patches \
+            --catalog "$PWD/patches/manifest.json" --catalog-ref "$LMD_REF" \
+            --core-repository "$PWD/dependency-sources/mlx-swift" --core-ref "$CORE_REF" \
+            --library-repository "$PWD/dependency-sources/mlx-swift-lm" --library-ref "$LIBRARY_REF" \
+            --swiftlm-repository "$PWD/SwiftLM" --swiftlm-ref "$SWIFTLM_REF" \
+            --core-profile "$CORE_PROFILE" --library-profile "$LIBRARY_PROFILE" \
+            --swiftlm-profile "$SWIFTLM_PROFILE" --report "$RUNNER_TEMP/lmd-patches/patches.json"
+
+      - name: Upload the patch reconstruction report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lmd-patches-${{ inputs.lmd_ref || github.event.pull_request.head.sha || github.sha }}-${{ inputs.core_ref || steps.catalog.outputs.core_ref }}-${{ inputs.library_ref || steps.catalog.outputs.library_ref }}-${{ inputs.swiftlm_ref || steps.catalog.outputs.swiftlm_ref }}
+          path: ${{ runner.temp }}/lmd-patches
+          if-no-files-found: error
+          retention-days: 7
