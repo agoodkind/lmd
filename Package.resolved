@@ -1,5 +1,5 @@
 {
-  "originHash" : "0fbc0feebcbf9c27ba033c9c9ae15f986ae6922a5166236006ec54edcec540cf",
+  "originHash" : "49575e37f4d3acda48c21b64bbb78f7cbda5642b54d9901978577126abf3690a",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -229,8 +229,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/huggingface/swift-huggingface.git",
       "state" : {
-        "revision" : "f0a0cb43cb1b402d2bbf6fb10d8981328c449c48",
-        "version" : "0.13.0"
+        "revision" : "84ced3d4fa31b1bc8c74f420d346f690cb6b0f35",
+        "version" : "1.0.1"
       }
     },
     {
